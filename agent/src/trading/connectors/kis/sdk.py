@@ -22,6 +22,7 @@ https://apiportal.koreainvestment.com before relying on this in production.
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -553,7 +554,7 @@ def cancel_order(
     clean_id = str(order_id or "").strip()
     if not clean_id:
         return {"status": "error", "error": "order_id is required"}
-    if quantity is not None and 0 < float(quantity) < 1:
+    if quantity is not None and (float(quantity) < 0 or float(quantity) != int(float(quantity))):
         return {"status": "error", "error": "quantity must be 0 (cancel all) or a whole number of shares"}
 
     branch = str(order_branch or "").strip()
@@ -681,22 +682,25 @@ def _access_token(cfg: KISConfig) -> str:
     body = response.json()
     token = str(body.get("access_token") or "")
     if not token:
-        raise KISAPIError(f"KIS token issuance returned no access_token: {body}")
+        # Never echo the body: it is the token endpoint, and a field there may be
+        # a secret rather than diagnostic text.
+        raise KISAPIError("KIS token issuance returned no access_token.")
     expires_in = float(body.get("expires_in") or 0) or _DEFAULT_TOKEN_TTL_SECONDS
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({
-            "app_key": cfg.app_key,
-            "access_token": token,
-            "expires_at": now + max(expires_in - _TOKEN_REFRESH_MARGIN_SECONDS, 0),
-        }),
-        encoding="utf-8",
-    )
-    try:
-        path.chmod(0o600)
-    except OSError:
-        pass
+    payload = json.dumps({
+        "app_key": cfg.app_key,
+        "access_token": token,
+        "expires_at": now + max(expires_in - _TOKEN_REFRESH_MARGIN_SECONDS, 0),
+    })
+    # Owner-only before the token is written: writing first and chmod-ing after
+    # leaves a window in which other local users can read it. fchmod also
+    # tightens a file an earlier version created with the default mode.
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    if hasattr(os, "fchmod"):
+        os.fchmod(descriptor, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(payload)
     return token
 
 
@@ -739,7 +743,12 @@ def _get_paginated(
     first, per the official ``inquire_balance``/``inquire_daily_ccld``
     examples. Anything else (``D``/``E``, or an absent header) is the last
     page. Capped at :data:`_MAX_CONTINUATION_PAGES` so a misbehaving response
-    cannot page forever.
+    cannot page forever; reaching the cap while KIS still reports more pages
+    raises instead of returning the rows read so far, because a short position
+    list is indistinguishable from a complete one downstream.
+
+    Raises:
+        KISAPIError: If KIS still reports more pages after the cap.
     """
     rows: list[Any] = []
     last_body: dict[str, Any] = {}
@@ -755,6 +764,11 @@ def _get_paginated(
         page_params["CTX_AREA_FK100"] = body.get("ctx_area_fk100", "")
         page_params["CTX_AREA_NK100"] = body.get("ctx_area_nk100", "")
         tr_cont = "N"
+    else:
+        raise KISAPIError(
+            f"KIS {path} still reported more pages after {_MAX_CONTINUATION_PAGES}; "
+            "refusing to return a truncated result as if it were complete"
+        )
     merged = dict(last_body)
     merged[rows_key] = rows
     return merged

@@ -8,6 +8,9 @@ nothing is configured — no live credentials or network access required.
 
 from __future__ import annotations
 
+import os
+from datetime import datetime, timezone
+
 import pytest
 
 from src.live.classification import ToolClass
@@ -63,6 +66,20 @@ def test_kis_order_tr_id_differs_by_environment_and_side() -> None:
     assert kis._TR_ORDER_BUY["paper"] != kis._TR_ORDER_SELL["paper"]
 
 
+@pytest.mark.parametrize(
+    ("table", "paper", "live"),
+    [
+        ("_TR_ORDER_BUY", "VTTC0012U", "TTTC0012U"),
+        ("_TR_ORDER_SELL", "VTTC0011U", "TTTC0011U"),
+        ("_TR_ORDER_CANCEL", "VTTC0013U", "TTTC0013U"),
+    ],
+)
+def test_kis_order_tr_ids_are_the_official_codes(table, paper, live) -> None:
+    """Pinned as literals from KIS's official open-trading-api examples: a test
+    that compares a TR_ID table with itself cannot notice a typo in it."""
+    assert getattr(kis, table) == {"paper": paper, "live": live}
+
+
 def test_kis_invalid_profile_rejected() -> None:
     with pytest.raises(kis.KISConfigError):
         kis.KISConfig.from_mapping({"profile": "live"})  # only paper/live-readonly
@@ -108,6 +125,24 @@ def test_kis_requests_pin_host_and_tr_id_by_environment(monkeypatch) -> None:
     assert len(calls) == 1
     assert calls[0]["url"].startswith("https://openapivts.koreainvestment.com:29443")
     assert calls[0]["headers"]["tr_id"] == kis._TR_ORDER_BUY["paper"]
+
+
+def test_kis_paper_sell_and_cancel_send_the_paper_tr_id_to_the_paper_host(monkeypatch) -> None:
+    calls = []
+
+    def fake_request(method, url, *, headers, params=None, json=None, timeout=None):
+        calls.append((url, headers["tr_id"]))
+        return _FakeResponse(url, headers, {"rt_cd": "0", "output": {"ODNO": "1", "KRX_FWDG_ORD_ORGNO": "b"}})
+
+    monkeypatch.setattr(kis, "_access_token", lambda cfg: "tok")
+    monkeypatch.setattr(kis.requests, "request", fake_request)
+
+    cfg = kis.KISConfig(app_key="k", app_secret="s", account_no="12345678", profile="paper")
+    kis.place_order(cfg, symbol="005930", side="sell", quantity=1)
+    kis.cancel_order(cfg, "1", order_branch="b")
+
+    assert [tr_id for _url, tr_id in calls] == ["VTTC0011U", "VTTC0013U"]
+    assert all(url.startswith("https://openapivts.koreainvestment.com:29443") for url, _tr_id in calls)
 
 
 def test_kis_live_readonly_config_never_reaches_the_paper_order_call(monkeypatch) -> None:
@@ -213,6 +248,84 @@ def test_kis_get_paginated_follows_tr_cont_until_the_final_page(monkeypatch) -> 
     monkeypatch.setattr(kis, "_request", fake_request)
     merged = kis._get_paginated(cfg, "/some/path", tr_id="X", params={"CTX_AREA_FK100": "", "CTX_AREA_NK100": ""})
     assert [row["n"] for row in merged["output1"]] == [1, 2, 3]
+
+
+def test_kis_get_paginated_refuses_to_return_a_truncated_result(monkeypatch) -> None:
+    """A response that never stops saying "more" must not come back as a
+    complete-looking short list once the page cap is reached."""
+    cfg = kis.KISConfig(app_key="k", app_secret="s", account_no="12345678", profile="paper")
+    monkeypatch.setattr(kis, "_request", lambda *a, **k: ({"output1": [{"n": 1}]}, {"tr_cont": "M"}))
+    with pytest.raises(kis.KISAPIError, match="truncated"):
+        kis._get_paginated(cfg, "/some/path", tr_id="X", params={})
+
+
+def test_kis_cancel_order_rejects_a_fractional_or_negative_quantity() -> None:
+    cfg = kis.KISConfig(app_key="k", app_secret="s", account_no="12345678", profile="paper")
+    for quantity in (2.5, -1):
+        result = kis.cancel_order(cfg, "1", order_branch="b", quantity=quantity)
+        assert result["status"] == "error", quantity
+
+
+def test_kis_today_is_the_korean_date_not_the_machine_date(monkeypatch) -> None:
+    instant = datetime(2030, 1, 1, 20, 0, tzinfo=timezone.utc)  # 2030-01-02 05:00 in Seoul
+
+    class _Clock:
+        @staticmethod
+        def now(tz=None):
+            return instant.astimezone(tz) if tz else instant
+
+    monkeypatch.setattr(kis, "datetime", _Clock)
+    assert kis._kst_today() == "20300102"
+
+
+class _TokenResponse:
+    status_code = 200
+
+    def __init__(self, body: dict):
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+def test_kis_token_without_expires_in_is_cached_not_reissued(monkeypatch, tmp_path) -> None:
+    """KIS limits token issuance to once a minute; a response that omits
+    expires_in must still be reused rather than re-issued on every call."""
+    cfg = kis.KISConfig(app_key="k", app_secret="s", account_no="12345678", profile="paper")
+    monkeypatch.setattr(kis, "_token_cache_path", lambda cfg: tmp_path / "kis-token-paper.json")
+    issued = []
+
+    def fake_post(url, **kwargs):
+        issued.append(url)
+        return _TokenResponse({"access_token": "tok"})
+
+    monkeypatch.setattr(kis.requests, "post", fake_post)
+    assert kis._access_token(cfg) == "tok"
+    assert kis._access_token(cfg) == "tok"
+    assert len(issued) == 1
+
+
+def test_kis_token_error_does_not_echo_the_token_response(monkeypatch, tmp_path) -> None:
+    cfg = kis.KISConfig(app_key="k", app_secret="s", account_no="12345678", profile="paper")
+    monkeypatch.setattr(kis, "_token_cache_path", lambda cfg: tmp_path / "kis-token-paper.json")
+    monkeypatch.setattr(kis.requests, "post", lambda url, **kwargs: _TokenResponse({"refresh_secret": "s3cr3t"}))
+    with pytest.raises(kis.KISAPIError) as excinfo:
+        kis._access_token(cfg)
+    assert "s3cr3t" not in str(excinfo.value)
+
+
+@pytest.mark.skipif(not hasattr(os, "fchmod"), reason="POSIX file modes")
+def test_kis_token_cache_is_owner_only_even_over_an_older_file(monkeypatch, tmp_path) -> None:
+    cfg = kis.KISConfig(app_key="k", app_secret="s", account_no="12345678", profile="paper")
+    cache = tmp_path / "kis-token-paper.json"
+    cache.write_text("{}", encoding="utf-8")
+    cache.chmod(0o644)
+    monkeypatch.setattr(kis, "_token_cache_path", lambda cfg: cache)
+    monkeypatch.setattr(
+        kis.requests, "post", lambda url, **kwargs: _TokenResponse({"access_token": "tok", "expires_in": 86400})
+    )
+    assert kis._access_token(cfg) == "tok"
+    assert cache.stat().st_mode & 0o777 == 0o600
 
 
 def test_kis_get_historical_bars_limit_zero_returns_no_bars(monkeypatch) -> None:

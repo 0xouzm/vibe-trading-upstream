@@ -98,6 +98,11 @@ _CONNECTOR_COMPATIBILITY: dict[str, PortfolioCompatibility] = {
         "open_positions",
         "Account totals and instrument quote resolution require verification.",
     ),
+    # No "scalable" entry: its profile does not declare account.read /
+    # positions.read, so it is not a portfolio-eligible connection. The
+    # holdings reply shape is unverified (no published tool argument schemas),
+    # so a portfolio read could not be mapped; add the entry with the
+    # normalisation once a live tools/list settles the shape (#1367).
 }
 
 _EXPERIMENTAL_DEFAULT = PortfolioCompatibility(

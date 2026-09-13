@@ -18,7 +18,7 @@ from typing import Any, Callable
 from src.agent.context import ContextBuilder
 from src.agent.progress import HeartbeatTimer
 from src.agent.skills import SkillsLoader
-from src.agent.tools import ToolRegistry
+from src.agent.tools import BaseTool, ToolRegistry
 from src.config.limits import truncate_tool_result
 from src.config.schema import AgentConfig
 from src.providers.chat import ChatLLM, LLMResponse, ProviderStreamError
@@ -981,7 +981,9 @@ def _run_worker_impl(
                  **mcp_meta},
             )
             tc_start = time.monotonic()
-            args = {**tc.arguments, "run_dir": str(artifact_dir)}
+            args, run_dir_refusal = _tool_arguments(
+                registry.get(tc.name), tc.arguments, artifact_dir
+            )
 
             # Wrap tool execution in a heartbeat so the events.jsonl tail has a
             # fresh timestamp every few seconds. The stale-run reaper relies on
@@ -1001,7 +1003,13 @@ def _run_worker_impl(
                 interval=_HEARTBEAT_INTERVAL_S,
                 emit=_on_heartbeat,
             ):
-                result = registry.execute(tc.name, args)
+                if run_dir_refusal is not None:
+                    result = json.dumps(
+                        {"status": "error", "error": run_dir_refusal},
+                        ensure_ascii=False,
+                    )
+                else:
+                    result = registry.execute(tc.name, args)
             result_is_error = _is_error_result(result)
             if tc.name != "load_skill" and not result_is_error:
                 data_tool_calls += 1
@@ -1097,6 +1105,56 @@ def _remote_tool_metadata(registry: ToolRegistry, tool_name: str) -> dict[str, s
     if spec is None:
         return {}
     return {"server": spec.server_name, "remote_tool": spec.remote_name}
+
+
+def _tool_arguments(
+    tool: BaseTool | None, arguments: dict[str, Any], artifact_dir: Path
+) -> tuple[dict[str, Any], str | None]:
+    """Confine a worker tool call's ``run_dir`` to the agent's own workspace.
+
+    Returns the arguments to execute with, plus a refusal reason when the
+    model's ``run_dir`` is not usable.
+
+    A tool that does not declare ``run_dir`` is workspace-scoped: the worker
+    supplies one so it reads and writes inside ``artifact_dir`` **and only
+    there** — that value is the confinement root the file tools resolve
+    against, so it is not the model's to choose.
+
+    A tool that *does* declare ``run_dir`` is being pointed at a directory by
+    the model, so that value is honoured within the same boundary: a relative
+    value resolves under the workspace (the filesystem the model's own file
+    tools showed it), an absolute value inside the workspace is taken as-is,
+    and anything resolving outside is refused. Refusing is deliberate — the
+    alternative, silently swapping in the workspace, is what made a real run
+    pass ten paths that were all discarded while the error named no directory.
+    """
+    args = dict(arguments)
+    declared = (getattr(tool, "parameters", None) or {}).get("properties") or {}
+    workspace = artifact_dir.resolve()
+
+    if "run_dir" not in declared:
+        args["run_dir"] = str(artifact_dir)
+        return args, None
+
+    value = str(args.get("run_dir") or "").strip()
+    if not value:
+        args["run_dir"] = str(artifact_dir)
+        return args, None
+
+    supplied = Path(value)
+    resolved = (
+        supplied.resolve()
+        if supplied.is_absolute()
+        else (workspace / supplied).resolve()
+    )
+    if not resolved.is_relative_to(workspace):
+        return args, (
+            f"run_dir {value!r} is outside this agent's workspace. A run_dir "
+            f"must be inside {workspace} — pass a relative path such as "
+            '"runs/<name>" to point at a directory you created there.'
+        )
+    args["run_dir"] = str(resolved)
+    return args, None
 
 
 def _preview_tool_arguments(arguments: dict) -> dict[str, str]:

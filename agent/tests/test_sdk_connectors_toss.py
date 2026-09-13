@@ -81,32 +81,51 @@ def test_toss_invalid_profile_rejected() -> None:
 
 
 #: A single holdings item shaped exactly like GET /api/v1/holdings per the
-#: openapi.json v1.2.15 spec (confirmed by review on #1409).
+#: openapi.json v1.2.15 spec (confirmed by review on #1409). Every quantity,
+#: price, money amount and rate is a string in the real API -- kept as such
+#: here on purpose, since a numeric fixture would hide a field-name or
+#: nesting bug that the real (string) response would still trigger.
 _HOLDINGS_PAYLOAD = {
     "result": {
-        "totalPurchaseAmount": {"krw": 700000, "usd": None},
-        "marketValue": {"amount": {"krw": 715000, "usd": None}, "amountAfterCost": {"krw": 714000, "usd": None}},
-        "profitLoss": {
-            "amount": {"krw": 15000, "usd": None},
-            "amountAfterCost": {"krw": 14000, "usd": None},
-            "rate": 2.14,
-            "rateAfterCost": 2.0,
+        "totalPurchaseAmount": {"krw": "700000", "usd": None},
+        "marketValue": {
+            "amount": {"krw": "715000", "usd": None},
+            "amountAfterCost": {"krw": "714000", "usd": None},
         },
-        "dailyProfitLoss": {"krw": 1500, "usd": None},
+        "profitLoss": {
+            "amount": {"krw": "15000", "usd": None},
+            "amountAfterCost": {"krw": "14000", "usd": None},
+            "rate": "2.14",
+            "rateAfterCost": "2.0",
+        },
+        "dailyProfitLoss": {"amount": {"krw": "1500", "usd": None}, "rate": "0.21"},
         "items": [
             {
                 "symbol": "005930",
                 "name": "Samsung Electronics",
                 "marketCountry": "KR",
                 "currency": "KRW",
-                "quantity": 10,
+                "quantity": "10",
                 "lastPrice": "71500",
                 "averagePurchasePrice": "70000",
                 "marketValue": {"purchaseAmount": "700000", "amount": "715000", "amountAfterCost": "714000"},
                 "profitLoss": {"amount": "15000", "amountAfterCost": "14000", "rate": "2.14", "rateAfterCost": "2.0"},
-                "dailyProfitLoss": "1500",
-                "cost": "1000",
-            }
+                "dailyProfitLoss": {"amount": "1500", "rate": "0.21"},
+                "cost": {"commission": "150", "tax": None},
+            },
+            {
+                "symbol": "AAPL",
+                "name": "Apple",
+                "marketCountry": "US",
+                "currency": "USD",
+                "quantity": "3",
+                "lastPrice": "227.5",
+                "averagePurchasePrice": "220.0",
+                "marketValue": {"purchaseAmount": "660.0", "amount": "682.5", "amountAfterCost": "681.0"},
+                "profitLoss": {"amount": "22.5", "amountAfterCost": "21.0", "rate": "3.4", "rateAfterCost": "3.2"},
+                "dailyProfitLoss": {"amount": "5.0", "rate": "0.7"},
+                "cost": {"commission": "1.5", "tax": "0.03"},
+            },
         ],
     }
 }
@@ -128,13 +147,23 @@ def test_toss_positions_reads_holdings_and_unwraps_nested_items(monkeypatch) -> 
         {
             "symbol": "005930",
             "name": "Samsung Electronics",
-            "quantity": 10,
+            "quantity": "10",
             "average_price": "70000",
             "current_price": "71500",
             "pnl": "15000",
             "currency": "KRW",
             "market": "KR",
-        }
+        },
+        {
+            "symbol": "AAPL",
+            "name": "Apple",
+            "quantity": "3",
+            "average_price": "220.0",
+            "current_price": "227.5",
+            "pnl": "22.5",
+            "currency": "USD",  # a hard-coded "KRW" here would still pass a same-currency-only fixture
+            "market": "US",
+        },
     ]
 
 
@@ -144,9 +173,29 @@ def test_toss_account_snapshot_reads_holdings_totals_without_flattening_currency
     result = toss.get_account_snapshot(cfg)
 
     assert result["status"] == "ok"
-    assert result["account"]["total_purchase_amount"] == {"krw": 700000, "usd": None}
-    assert result["account"]["market_value"]["amount"] == {"krw": 715000, "usd": None}
-    assert result["account"]["profit_loss"]["rate"] == 2.14
+    assert result["account"]["total_purchase_amount"] == {"krw": "700000", "usd": None}
+    assert result["account"]["market_value"]["amount"] == {"krw": "715000", "usd": None}
+    assert result["account"]["profit_loss"]["rate"] == "2.14"
+    assert result["account"]["daily_profit_loss"] == {"amount": {"krw": "1500", "usd": None}, "rate": "0.21"}
+
+
+def _closed_page(orders: list[dict], *, has_next: bool, next_cursor: str | None = None) -> dict:
+    return {"result": {"orders": orders, "hasNext": has_next, "nextCursor": next_cursor}}
+
+
+_OPEN_ORDER_ROW = {
+    "orderId": "1",
+    "symbol": "005930",
+    "side": "BUY",
+    "orderType": "LIMIT",
+    "timeInForce": "GTC",
+    "status": "PARTIAL_FILLED",
+    "price": "70000",
+    "quantity": "5",
+    "currency": "KRW",
+    "orderedAt": "t1",
+    "execution": {"filledQuantity": "2", "averageFilledPrice": "70000"},
+}
 
 
 def test_toss_open_orders_calls_status_open_and_closed_separately(monkeypatch) -> None:
@@ -157,34 +206,15 @@ def test_toss_open_orders_calls_status_open_and_closed_separately(monkeypatch) -
     def fake_get(cfg, path, *, authed, account_scoped, params=None):
         calls.append(params)
         assert path == "/api/v1/orders"
-        if params == {"status": "OPEN"}:
-            return {
-                "result": {
-                    "orders": [
-                        {
-                            "orderId": "1",
-                            "symbol": "005930",
-                            "side": "BUY",
-                            "orderType": "LIMIT",
-                            "status": "PARTIAL_FILLED",
-                            "price": "70000",
-                            "quantity": 5,
-                            "currency": "KRW",
-                            "orderedAt": "t1",
-                            "execution": {"filledQuantity": 2, "averageFilledPrice": "70000"},
-                        }
-                    ],
-                    "hasNext": False,
-                    "nextCursor": None,
-                }
-            }
-        return {"result": {"orders": [], "hasNext": False, "nextCursor": None}}
+        if params.get("status") == "OPEN":
+            return _closed_page([_OPEN_ORDER_ROW], has_next=False)
+        return _closed_page([], has_next=False)
 
     monkeypatch.setattr(toss, "_get", fake_get)
     cfg = toss.TossConfig(client_id="c", client_secret="s", account_seq="1")
     result = toss.get_open_orders(cfg, include_executions=True)
 
-    assert calls == [{"status": "OPEN"}, {"status": "CLOSED"}]
+    assert calls == [{"status": "OPEN"}, {"status": "CLOSED", "limit": 100}]
     assert result["open_orders"] == [
         {
             "order_id": "1",
@@ -192,14 +222,50 @@ def test_toss_open_orders_calls_status_open_and_closed_separately(monkeypatch) -
             "side": "BUY",
             "order_type": "LIMIT",
             "status": "PARTIAL_FILLED",
-            "quantity": 5,
-            "filled_quantity": 2,
+            "quantity": "5",
+            "filled_quantity": "2",
             "price": "70000",
             "currency": "KRW",
+            "time_in_force": "GTC",
             "created_at": "t1",
         }
     ]
     assert result["executions"] == []
+
+
+def test_toss_closed_orders_follow_cursor_across_pages(monkeypatch) -> None:
+    pages = {
+        None: _closed_page([{"orderId": "1"}], has_next=True, next_cursor="page-2"),
+        "page-2": _closed_page([{"orderId": "2"}], has_next=False),
+    }
+
+    def fake_get(cfg, path, *, authed, account_scoped, params=None):
+        if params.get("status") == "OPEN":
+            return _closed_page([], has_next=False)
+        return pages[params.get("cursor")]
+
+    monkeypatch.setattr(toss, "_get", fake_get)
+    cfg = toss.TossConfig(client_id="c", client_secret="s", account_seq="1")
+    result = toss.get_open_orders(cfg, include_executions=True)
+
+    assert [row["order_id"] for row in result["executions"]] == ["1", "2"]
+
+
+def test_toss_closed_orders_pagination_cap_errors_instead_of_truncating(monkeypatch) -> None:
+    """A history longer than the page cap must be a clear error, not a
+    shorter list that looks complete."""
+
+    def fake_get(cfg, path, *, authed, account_scoped, params=None):
+        if params.get("status") == "OPEN":
+            return _closed_page([], has_next=False)
+        return _closed_page([{"orderId": "x"}], has_next=True, next_cursor="more")
+
+    monkeypatch.setattr(toss, "_get", fake_get)
+    cfg = toss.TossConfig(client_id="c", client_secret="s", account_seq="1")
+    result = toss.get_open_orders(cfg, include_executions=True)
+
+    assert result["status"] == "error"
+    assert "executions" not in result
 
 
 def test_toss_get_quote_unwraps_result_list(monkeypatch) -> None:

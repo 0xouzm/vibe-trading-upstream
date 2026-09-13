@@ -243,17 +243,54 @@ def get_positions(config: TossConfig | None = None) -> dict[str, Any]:
     }
 
 
+#: Safety cap on the CLOSED order-history pagination loop. Reaching it raises
+#: rather than returning a shorter list -- a truncated history that looks
+#: complete is the failure this cap exists to avoid.
+_MAX_ORDER_HISTORY_PAGES = 20
+
+#: Per-page size for CLOSED (max the API allows; OPEN ignores this entirely).
+_ORDER_HISTORY_PAGE_SIZE = 100
+
+
+def _fetch_closed_orders(cfg: TossConfig) -> list[Any]:
+    """Fetch every CLOSED order, following ``cursor``/``hasNext`` to completion.
+
+    ``limit``/``cursor`` apply only to ``CLOSED`` -- ``OPEN`` returns
+    everything in one call and ignores both, so this is not shared with the
+    open-order read.
+    """
+    rows: list[Any] = []
+    cursor: str | None = None
+    for _ in range(_MAX_ORDER_HISTORY_PAGES):
+        params: dict[str, Any] = {"status": "CLOSED", "limit": _ORDER_HISTORY_PAGE_SIZE}
+        if cursor:
+            params["cursor"] = cursor
+        payload = _get(cfg, "/api/v1/orders", authed=True, account_scoped=True, params=params)
+        page = _unwrap(payload)
+        page = page if isinstance(page, Mapping) else {}
+        rows.extend(_as_iter(page.get("orders")))
+        if not page.get("hasNext"):
+            return rows
+        cursor = page.get("nextCursor")
+        if not cursor:
+            return rows  # hasNext claimed true with nothing to continue from
+    raise TossAPIError(
+        f"Toss closed-order history has more than {_MAX_ORDER_HISTORY_PAGES} pages "
+        f"of {_ORDER_HISTORY_PAGE_SIZE}; refusing to return a silently truncated list"
+    )
+
+
 def get_open_orders(
     config: TossConfig | None = None,
     *,
     include_executions: bool = False,
 ) -> dict[str, Any]:
-    """Fetch open Toss orders, optionally with recently closed ones.
+    """Fetch open Toss orders, optionally with the full closed-order history.
 
     ``status`` is a required query parameter on ``/api/v1/orders`` -- it is
     not something to derive client-side from each row, so open and closed are
-    two separate calls, the same as the original design. ``CLOSED`` is
-    paginated by the API (``limit``/``cursor``); this fetches one page.
+    two separate calls. ``CLOSED`` is paginated by the API; see
+    :func:`_fetch_closed_orders`.
     """
     cfg = config or load_config()
     open_payload = _get(cfg, "/api/v1/orders", authed=True, account_scoped=True, params={"status": "OPEN"})
@@ -264,10 +301,11 @@ def get_open_orders(
         "open_orders": [_order_to_dict(item) for item in _extract_items(open_payload)],
     }
     if include_executions:
-        closed_payload = _get(
-            cfg, "/api/v1/orders", authed=True, account_scoped=True, params={"status": "CLOSED"}
-        )
-        result["executions"] = [_order_to_dict(item) for item in _extract_items(closed_payload)]
+        try:
+            closed_rows = _fetch_closed_orders(cfg)
+        except TossAPIError as exc:
+            return {"status": "error", "error": str(exc), "profile": cfg.profile, "paper_guard": PAPER_GUARD}
+        result["executions"] = [_order_to_dict(item) for item in closed_rows]
     return result
 
 
@@ -621,6 +659,7 @@ def _order_to_dict(item: Any) -> dict[str, Any]:
         "filled_quantity": _nested(item, "execution", "filledQuantity"),
         "price": _first(item, ("price", "limitPrice")),
         "currency": _first(item, ("currency",)),
+        "time_in_force": _first(item, ("timeInForce",)),
         "created_at": _first(item, ("orderedAt", "createdAt")),
     }
 

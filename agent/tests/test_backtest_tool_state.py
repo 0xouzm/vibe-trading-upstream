@@ -70,6 +70,28 @@ def test_validation_error_records_no_state(tool_run_dir):
     assert not (tool_run_dir / "state.json").exists()
 
 
+def test_validation_error_names_the_directory_it_checked(tool_run_dir):
+    """The path matters: a caller whose run_dir was supplied by someone else
+    (e.g. a swarm worker injecting the agent workspace) has no way to tell that
+    the tool looked somewhere other than the path it passed."""
+    (tool_run_dir / "config.json").unlink()
+
+    envelope = json.loads(run_backtest(str(tool_run_dir)))
+
+    assert str(tool_run_dir) in envelope["error"]
+    assert "hint" in envelope, "mirrors autopilot_tool's missing-artifact envelope"
+
+
+def test_missing_signal_engine_names_the_directory_it_checked(tool_run_dir):
+    (tool_run_dir / "code" / "signal_engine.py").unlink()
+
+    envelope = json.loads(run_backtest(str(tool_run_dir)))
+
+    assert envelope["status"] == "error"
+    assert str(tool_run_dir) in envelope["error"]
+    assert "hint" in envelope
+
+
 def test_timeout_records_state_failed_and_returns_error_envelope(tool_run_dir):
     with patch("src.tools.backtest_tool.emit_progress"), patch("src.tools.backtest_tool.Runner") as runner_cls:
         runner_cls.return_value.timeout = 300

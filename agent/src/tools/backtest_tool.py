@@ -31,7 +31,14 @@ def run_backtest(run_dir: str) -> str:
 
     config_path = run_path / "config.json"
     if not config_path.exists():
-        return json.dumps({"status": "error", "error": "config.json not found"}, ensure_ascii=False)
+        return json.dumps(
+            {
+                "status": "error",
+                "error": f"config.json not found in {run_path}",
+                "hint": "config.json belongs at the root of run_dir.",
+            },
+            ensure_ascii=False,
+        )
 
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -46,7 +53,14 @@ def run_backtest(run_dir: str) -> str:
 
     signal_path = run_path / "code" / "signal_engine.py"
     if not signal_path.exists():
-        return json.dumps({"status": "error", "error": "code/signal_engine.py not found"}, ensure_ascii=False)
+        return json.dumps(
+            {
+                "status": "error",
+                "error": f"code/signal_engine.py not found in {run_path}",
+                "hint": "signal_engine.py belongs in code/ inside run_dir.",
+            },
+            ensure_ascii=False,
+        )
 
     agent_root = Path(__file__).resolve().parents[2]
     entry_script = agent_root / "backtest" / "runner.py"

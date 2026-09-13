@@ -19,7 +19,7 @@ import pandas as pd
 import pytest
 
 from backtest.engines.options_portfolio import _calc_options_metrics
-from backtest.metrics import calc_metrics, effective_bars_per_year
+from backtest.metrics import calc_bars_per_year, calc_metrics, effective_bars_per_year
 from backtest.risk_xray import compute_risk_xray
 from backtest.validation import _sharpe, run_validation
 
@@ -110,3 +110,68 @@ class TestConsumersShareTheConvention:
         assert metrics["annual_return"] == pytest.approx(
             growth ** (self.expected_bpy / 120) - 1, rel=1e-6
         )
+
+
+class TestSingleMarketAnnualisationChecksTheServedData:
+    """The declared interval is a request, not a fact about what arrived.
+
+    A loader may legitimately serve coarser bars than asked for — the local
+    loader cannot upsample a daily file to ``1H`` and only logs a warning —
+    and annualising at the declared rate then scales CAGR, Sharpe and the
+    annualised volatility by the ratio between the two.
+    """
+
+    @staticmethod
+    def _daily(n: int = 654) -> dict:
+        idx = pd.date_range("2024-01-02", periods=n, freq="B")
+        return {"600519.SH": pd.DataFrame({"close": [10.0] * n}, index=idx)}
+
+    def test_matching_declaration_keeps_the_per_source_table(self):
+        """A correctly served run must keep the trading-day table it always had,
+        not drift to the measured count (252 declared vs ~261 measured)."""
+        from backtest.runner import _annualisation_bars
+
+        assert _annualisation_bars("1D", "tushare", self._daily(), ["600519.SH"]) == 252
+
+    def test_declared_intraday_against_daily_bars_uses_the_observed_count(self):
+        from backtest.runner import _annualisation_bars
+
+        declared = calc_bars_per_year("1H", "tushare")
+        resolved = _annualisation_bars("1H", "tushare", self._daily(), ["600519.SH"])
+
+        assert declared > 1000                      # the declaration is intraday
+        assert resolved < 400                       # the data is not
+        assert resolved == effective_bars_per_year(self._daily()["600519.SH"].index)
+
+    def test_crypto_daily_is_not_tripped_by_the_check(self):
+        """365-day markets measure close to their declared count."""
+        from backtest.runner import _annualisation_bars
+
+        n = 700
+        idx = pd.date_range("2024-01-02", periods=n, freq="D")
+        data = {"BTC-USDT": pd.DataFrame({"close": [10.0] * n}, index=idx)}
+        assert _annualisation_bars("1D", "okx", data, ["BTC-USDT"]) == 365
+
+    @pytest.mark.parametrize("data", [{}, {"600519.SH": pd.DataFrame({"close": []})}])
+    def test_unmeasurable_data_falls_back_to_the_declaration(self, data):
+        from backtest.runner import _annualisation_bars
+
+        assert _annualisation_bars("1D", "tushare", data, ["600519.SH"]) == 252
+
+    def test_only_price_frames_are_measured(self):
+        """Injected fundamental panels must not decide the annualisation."""
+        from backtest.runner import _annualisation_bars
+
+        data = self._daily()
+        data["_fundamentals"] = pd.DataFrame(
+            {"pe": [1.0] * 5}, index=pd.date_range("2024-01-02", periods=5, freq="YE")
+        )
+        assert _annualisation_bars("1D", "tushare", data, ["600519.SH"]) == 252
+
+    def test_mismatch_is_logged(self, caplog):
+        from backtest.runner import _annualisation_bars
+
+        with caplog.at_level("WARNING", logger="backtest.runner"):
+            _annualisation_bars("1H", "tushare", self._daily(), ["600519.SH"])
+
+        assert any("1H" in r.getMessage() for r in caplog.records)

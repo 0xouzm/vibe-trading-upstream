@@ -1281,13 +1281,14 @@ def main(run_dir: Path) -> None:
 
     # Annualization bars
     effective_source = _detect_primary_source(codes, source)
-    from backtest.metrics import calc_bars_per_year
     # Cross-market: use calendar-day annualization (bars_per_year=None)
     market_types = {_detect_market(c) for c in codes}
     if len(market_types) > 1:
         bars_per_year = None
     else:
-        bars_per_year = calc_bars_per_year(interval, effective_source)
+        bars_per_year = _annualisation_bars(
+            interval, effective_source, data_map, codes
+        )
 
     # Every source has already been fetched, sanitized, and enriched above.
     # Reuse that exact snapshot so provider costs and run-card provenance stay
@@ -1300,6 +1301,70 @@ def main(run_dir: Path) -> None:
     else:
         market_engine = _create_market_engine(effective_source, config, codes)
         market_engine.run_backtest(config, loader, signal_engine, run_dir, bars_per_year=bars_per_year)
+
+
+#: How far the declared interval's bar count may sit from the count actually
+#: observed before the declaration is treated as wrong. Neighbouring intervals
+#: differ by at least 2x (``30m`` -> ``1H``), while the calendar-vs-trading-day
+#: spread inside one interval is a few percent (a business-daily series measures
+#: ~261 against a declared 252), so 1.5 separates the two cases cleanly.
+_ANNUALISATION_MISMATCH_RATIO = 1.5
+
+
+def _annualisation_bars(
+    interval: str, source: str, data_map: dict, codes: List[str]
+) -> int:
+    """Bars per year for a single-market run, checked against the served data.
+
+    ``interval`` is what the caller asked for, not a fact about what arrived. A
+    loader may legitimately serve coarser bars than requested -- the local
+    loader cannot upsample a daily file to ``1H`` and says so only in a log
+    warning -- and annualising at the declared rate then scales CAGR, Sharpe and
+    the annualised volatility by the ratio between the two.
+
+    Measuring the served index is the convention
+    :func:`~backtest.metrics.effective_bars_per_year` already applies to
+    cross-market runs. Here it is used as a *check* rather than a replacement,
+    so a correctly served single-market run keeps the per-source trading-day
+    table it has always had and no existing run card moves.
+
+    Args:
+        interval: Bar size the caller declared.
+        source: Primary source name, for the per-source trading-day table.
+        data_map: Fetched ``code -> frame`` map.
+        codes: The instrument codes, so injected fundamental panels stay out
+            of the measurement.
+
+    Returns:
+        The declared count, or the observed one when the two disagree by at
+        least :data:`_ANNUALISATION_MISMATCH_RATIO`.
+    """
+    from backtest.metrics import calc_bars_per_year, effective_bars_per_year
+
+    declared = calc_bars_per_year(interval, source)
+    indexes = [
+        data_map[code].index
+        for code in codes
+        if code in data_map and len(data_map[code]) >= 2
+    ]
+    if not indexes:
+        return declared
+    index = max(indexes, key=len)
+    observed = effective_bars_per_year(index, default=declared)
+    if observed <= 0:
+        return declared
+    ratio = max(declared, observed) / min(declared, observed)
+    if ratio < _ANNUALISATION_MISMATCH_RATIO:
+        return declared
+    logger.warning(
+        "interval=%s declares %d bars/year but the served data measures %d "
+        "(%d bars over %d days); annualising on the served data. The loader "
+        "returned bars coarser or finer than requested -- check the earlier "
+        "loader warning, and set interval to the granularity the source "
+        "actually has.",
+        interval, declared, observed, len(index), (index[-1] - index[0]).days,
+    )
+    return observed
 
 
 def _create_market_engine(source: str, config: dict, codes: List[str]):

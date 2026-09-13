@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from src.live.classification import ToolClass
+from src.portfolio.normalization import normalize_position
 from src.trading import profiles, service
 from src.trading.connectors.upbit import sdk as up
 from src.trading.connectors.upbit.classification import UPBIT_TOOL_CLASS
@@ -184,6 +185,52 @@ def test_upbit_service_unconfigured(monkeypatch, tmp_path) -> None:
     assert result["status"] == "error"
     assert result["connector"] == "upbit"
     assert result["transport"] == "broker_sdk"
+
+
+def test_upbit_positions_report_the_coin_as_symbol_and_krw_as_currency(monkeypatch) -> None:
+    """currency must be the currency average_cost is quoted in (unit_currency),
+    not the coin -- otherwise the portfolio layer prices a BTC position in BTC."""
+    monkeypatch.setattr(
+        up,
+        "_accounts",
+        lambda cfg: [
+            {"currency": "BTC", "balance": "0.5", "locked": "0", "avg_buy_price": "140000000", "unit_currency": "KRW"}
+        ],
+    )
+    cfg = up.UpbitConfig(access_key="ak", secret_key="sk", profile="paper")
+    result = up.get_positions(cfg)
+
+    assert result["positions"] == [
+        {
+            "symbol": "BTC",
+            "asset_type": "crypto",
+            "currency": "KRW",
+            "quantity": 0.5,
+            "available": 0.5,
+            "locked": 0.0,
+            "average_cost": 140_000_000.0,
+        }
+    ]
+
+
+def test_upbit_position_row_normalizes_as_a_krw_priced_crypto_position(monkeypatch) -> None:
+    """End-to-end through the portfolio contract: src/portfolio/normalization.py
+    must see a crypto position priced in KRW, not a stock priced in BTC."""
+    monkeypatch.setattr(
+        up,
+        "_accounts",
+        lambda cfg: [
+            {"currency": "BTC", "balance": "0.5", "locked": "0", "avg_buy_price": "140000000", "unit_currency": "KRW"}
+        ],
+    )
+    cfg = up.UpbitConfig(access_key="ak", secret_key="sk", profile="paper")
+    row = up.get_positions(cfg)["positions"][0]
+
+    normalized = normalize_position("upbit", row)
+    assert normalized["symbol"] == "BTC"
+    assert normalized["asset_type"] == "crypto"
+    assert normalized["currency"] == "KRW"
+    assert normalized["cost_price"] == 140_000_000.0
 
 
 def test_upbit_order_ops_classified_write() -> None:

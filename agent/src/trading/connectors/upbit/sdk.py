@@ -239,7 +239,15 @@ def get_account_snapshot(config: UpbitConfig | None = None) -> dict[str, Any]:
 
 
 def get_positions(config: UpbitConfig | None = None) -> dict[str, Any]:
-    """Fetch current crypto holdings (every non-KRW balance)."""
+    """Fetch current crypto holdings (every non-KRW balance).
+
+    ``currency`` here is the currency ``average_cost`` (and a market price,
+    were one attached) is quoted in -- Upbit's own ``unit_currency`` -- not
+    the coin itself, which is ``symbol``. ``normalize_position`` in
+    ``src/portfolio/normalization.py`` reads exactly these two fields as the
+    quote currency and the traded symbol respectively, so getting them
+    backwards here would price a BTC position in BTC.
+    """
     cfg = config or load_config()
     accounts = _accounts(cfg)
 
@@ -253,17 +261,13 @@ def get_positions(config: UpbitConfig | None = None) -> dict[str, Any]:
             continue
         unit_currency = str(item.get("unit_currency") or "KRW")
         rows.append({
-            "symbol": f"{unit_currency}-{currency}",
-            "currency": currency,
+            "symbol": currency,
+            "asset_type": "crypto",
+            "currency": unit_currency,
             "quantity": quantity,
             "available": _as_float(item.get("balance")),
             "locked": _as_float(item.get("locked")),
-            # avg_buy_price is a price per unit of `currency`, denominated in
-            # `unit_currency` (e.g. a KRW price for a BTC position) -- not in
-            # `currency` itself, which is what `average_cost` alone would imply.
             "average_cost": _as_float(item.get("avg_buy_price")),
-            "average_cost_currency": unit_currency,
-            "unit_currency": unit_currency,
         })
 
     return {"status": "ok", "profile": cfg.profile, "is_paper": cfg.is_paper, "positions": rows}

@@ -127,9 +127,9 @@
     "connectorVerifyFailed": "Verbindungsverifizierung fehlgeschlagen.",
     "diagnosticCredentialsPartial": "Anmeldedaten sind unvollständig. Konfigurieren Sie alle erforderlichen Variablen und erstellen Sie den Dienst neu.",
     "diagnosticCredentialsConflict": "Anmeldedaten-Quellen kollidieren. Behalten Sie eine vollständige Quelle und versuchen Sie es erneut.",
-    "diagnosticSdkMissing": "Das Longbridge SDK ist im Backend-Dienst nicht installiert.",
+    "diagnosticSdkMissing": "Das für diesen Broker erforderliche SDK ist im Backend-Dienst nicht installiert.",
     "diagnosticAuthenticationFailed": "Authentifizierung fehlgeschlagen. Prüfen Sie die konfigurierten Anmeldedaten.",
-    "diagnosticNetworkUnreachable": "Der Longbridge-Dienst ist nicht erreichbar. Prüfen Sie den Netzwerkzugriff und versuchen Sie es erneut.",
+    "diagnosticNetworkUnreachable": "Der Broker-Dienst oder das lokale Gateway ist nicht erreichbar. Prüfen Sie die Verbindungsadresse und den Netzwerkzugriff und versuchen Sie es erneut.",
     "diagnosticBrokerError": "Der Broker hat die schreibgeschützte Verifizierungsanfrage abgelehnt. Versuchen Sie es erneut oder prüfen Sie die Backend-Logs."
   },
   "scheduled": {

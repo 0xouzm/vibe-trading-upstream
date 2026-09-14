@@ -122,9 +122,9 @@
     "connectorVerifyFailed": "接続を検証できませんでした。",
     "diagnosticCredentialsPartial": "認証情報が不足しています。必要な変数をすべて設定し、サービスを再作成してください。",
     "diagnosticCredentialsConflict": "認証情報の取得元が競合しています。完全な取得元を1つだけ残して、再試行してください。",
-    "diagnosticSdkMissing": "バックエンドサービスに Longbridge SDK がインストールされていません。",
+    "diagnosticSdkMissing": "このブローカーに必要な SDK がバックエンドサービスにインストールされていません。",
     "diagnosticAuthenticationFailed": "認証に失敗しました。設定した認証情報を確認してください。",
-    "diagnosticNetworkUnreachable": "Longbridge サービスに接続できません。ネットワーク接続を確認して再試行してください。",
+    "diagnosticNetworkUnreachable": "ブローカーのサービスまたはローカルゲートウェイに接続できません。接続先アドレスとネットワーク接続を確認して再試行してください。",
     "diagnosticBrokerError": "ブローカーが読み取り専用の検証リクエストを拒否しました。再試行するか、バックエンドのログを確認してください。"
   },
   "scheduled": {

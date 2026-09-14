@@ -122,9 +122,9 @@
     "connectorVerifyFailed": "فشل التحقق من الاتصال.",
     "diagnosticCredentialsPartial": "بيانات الاعتماد غير مكتملة. اضبط جميع المتغيرات المطلوبة، ثم أعد إنشاء الخدمة.",
     "diagnosticCredentialsConflict": "تتعارض مصادر بيانات الاعتماد. احتفظ بمصدر واحد مكتمل، ثم أعد المحاولة.",
-    "diagnosticSdkMissing": "حزمة Longbridge SDK غير مثبّتة في خدمة الخادم.",
+    "diagnosticSdkMissing": "حزمة SDK المطلوبة لهذا الوسيط غير مثبّتة في خدمة الخادم.",
     "diagnosticAuthenticationFailed": "فشلت المصادقة. تحقق من بيانات الاعتماد المضبوطة.",
-    "diagnosticNetworkUnreachable": "يتعذر الوصول إلى خدمة Longbridge. تحقق من اتصال الشبكة، ثم أعد المحاولة.",
+    "diagnosticNetworkUnreachable": "يتعذر الوصول إلى خدمة الوسيط أو البوابة المحلية. تحقق من عنوان الاتصال واتصال الشبكة، ثم أعد المحاولة.",
     "diagnosticBrokerError": "رفض الوسيط طلب التحقق المخصص للقراءة فقط. أعد المحاولة أو راجع سجلات الخادم."
   },
   "scheduled": {

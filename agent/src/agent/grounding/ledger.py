@@ -110,6 +110,14 @@ class GroundingLedger(
         # names an instrument the run really handled.
         self._session_symbol_roots: set[str] = set()
 
+        # Six-digit codes the user typed, with or without a venue suffix.
+        self._bare_codes: set[str] = {
+            run
+            for run in "".join(ch if "0" <= ch <= "9" else " " for ch in user_message).split()
+            if len(run) == 6
+        }
+        self._bare_code_hits: dict[str, dict[str, str]] = {}
+
         self._seed_symbols(user_message, source="user_message")
         self.persist()
 
@@ -166,6 +174,28 @@ class GroundingLedger(
         """Return how many figures the discounted release cut, or 0."""
         return int((self._released or {}).get("figures_removed", 0))
 
+    @staticmethod
+    def streamable_length(text: str) -> int:
+        """Return how much of a streaming answer may be shown live.
+
+        Everything from the figures block's fence on is the model's declaration
+        to the gate, not answer text, and a last line that could still become
+        that fence is held back until it is complete.
+
+        Args:
+            text: The answer streamed so far.
+
+        Returns:
+            The length of the prefix that is safe to emit.
+        """
+        span = parse_figures_block(text).span
+        if span is not None:
+            return span[0]
+        line_start = text.rfind("\n") + 1
+        if text[line_start:].lstrip()[:1] in ("`", "~"):
+            return line_start
+        return len(text)
+
     def identity_summary(self) -> dict[str, Any]:
         """Return compact identity state for traces and tool errors."""
         return {
@@ -219,6 +249,7 @@ class GroundingLedger(
             self._ingest_resolution(arguments, payload, call_id)
         elif tool_name == "get_market_data":
             self._ingest_market_data(arguments, payload, call_id)
+            self._lock_bare_codes(arguments, payload, call_id)
         elif payload is not None:
             self._ingest_generic_numeric(tool_name, arguments, payload, call_id)
         self.persist()

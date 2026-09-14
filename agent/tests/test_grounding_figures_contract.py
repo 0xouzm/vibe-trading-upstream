@@ -665,3 +665,54 @@ def test_a_fabricated_figure_is_refused_under_all_the_same_words(
     }
 
     assert set(verdicts.values()) == {False}, verdicts
+
+
+# ---------------------------------------------------------------------------
+# The prompt's own examples, and streaming
+# ---------------------------------------------------------------------------
+
+
+def _prompt_blocks() -> list[str]:
+    from src.agent.context import _SYSTEM_PROMPT
+
+    return [
+        "```figures" + chunk.split("```")[0] + "```"
+        for chunk in _SYSTEM_PROMPT.split("```figures")[1:]
+    ]
+
+
+def test_every_figures_example_in_the_system_prompt_parses() -> None:
+    """A malformed example teaches every run to write a malformed block."""
+    blocks = [parse_figures_block("answer\n\n" + raw) for raw in _prompt_blocks()]
+
+    assert len(blocks) == 2
+    assert all(block.malformed == () for block in blocks)
+    assert {d.role for block in blocks for d in block.declarations} == set(ROLES)
+
+
+def test_the_chinese_prompt_example_passes_the_gate_it_describes(tmp_path: Path) -> None:
+    """The example sits on the same two bars this module probes with."""
+    ledger = _ledger(tmp_path)
+    prose = (
+        "159516.SZ（akshare，CNY）最新收盘 0.666 元，第一档 0.646 元，"
+        "较 5 月高点回撤 37%，买入参考 0.62 元。"
+    )
+
+    result = ledger.validate_final_answer(prose + "\n\n" + _prompt_blocks()[0])
+
+    assert result.valid, result.issues
+    assert result.released_text == prose
+
+
+@pytest.mark.parametrize(
+    ("text", "safe"),
+    [
+        ("答案。", len("答案。")),
+        ("答案。\n\n```figures\n0.666 | observed", len("答案。\n\n")),
+        ("答案。\n\n``", len("答案。\n\n")),
+        ("答案。\n\n```fig", len("答案。\n\n")),
+        ("答案。\n```python\nx = 1\n", len("答案。\n```python\nx = 1\n")),
+    ],
+)
+def test_streaming_holds_back_the_figures_fence_and_nothing_else(text: str, safe: int) -> None:
+    assert GroundingLedger.streamable_length(text) == safe

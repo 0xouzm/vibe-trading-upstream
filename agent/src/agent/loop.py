@@ -1394,10 +1394,26 @@ class AgentLoop:
                     self._grounding and self._grounding.should_buffer_output
                 )
 
+                streamed_chars = 0
+
                 def _on_text_chunk(delta: str) -> None:
+                    nonlocal streamed_chars
                     thinking_chunks.append(delta)
-                    if not buffer_text_output:
-                        self._emit("text_delta", {"delta": delta, "iter": current_iter})
+                    if buffer_text_output:
+                        return
+                    # The figures block never streams: see streamable_length.
+                    text = "".join(thinking_chunks)
+                    safe = (
+                        self._grounding.streamable_length(text)
+                        if self._grounding is not None
+                        else len(text)
+                    )
+                    if safe > streamed_chars:
+                        self._emit(
+                            "text_delta",
+                            {"delta": text[streamed_chars:safe], "iter": current_iter},
+                        )
+                        streamed_chars = safe
 
                 def _on_reasoning_chunk(delta: str) -> None:
                     # Throttled: long reasoning streams produce hundreds of
@@ -1480,6 +1496,7 @@ class AgentLoop:
                         },
                     )
                     thinking_chunks.clear()
+                    streamed_chars = 0
                     reasoning_chars = 0
                     last_reasoning_emit = None
                     # Wait on the cancel event, not time.sleep: the delay now
@@ -1841,6 +1858,15 @@ class AgentLoop:
                                 "text_delta",
                                 {"delta": final_content, "iter": current_iter},
                             )
+                        elif not self._released_fallback:
+                            # Flush a held-back last line that never became a
+                            # figures fence; a stripped block leaves nothing.
+                            shown = "".join(thinking_chunks)[:streamed_chars]
+                            if final_content.startswith(shown) and len(final_content) > streamed_chars:
+                                self._emit(
+                                    "text_delta",
+                                    {"delta": final_content[streamed_chars:], "iter": current_iter},
+                                )
                     should_continue_goal = False
                     continuation_snapshot = None
                     _max_cont = _goal_max_continuations()

@@ -180,19 +180,39 @@ Decide which workflow to use based on the request:
   ask the user which one to use; re-querying will not collapse a genuine
   shortlist, and you may not pick one silently.
 - **Evidence-grounded numbers:** treat top-level `ok: false`, `success: false`,
-  or error/failed status as tool failure. Every final market number must be an
-  observed tool value, or explicitly labelled derived with its source inputs
-  and arithmetically correct formula visible. Price claims must surface the
-  locked canonical symbol+venue suffix, actual data source, and quote currency
-  — all three may be written in the user's language (`雅虎`, `腾讯`, `元`).
-  Never change a tool's OHLC/price range into a different range or entry price.
-  A proposed entry price that is not itself an observed value must be written
-  as an explicit formula over observed inputs — an OHLC value or a
-  price-denominated indicator this session fetched — e.g.
-  `基于收盘价 0.666 × 0.97 = 0.646`; an entry level written without such a
-  formula is cut from the released answer.
-  If evidence is missing or conflicting, report it as unavailable and ask for
+  or error/failed status as tool failure. Price claims must surface the locked
+  canonical symbol+venue suffix, actual data source, and quote currency — all
+  three may be written in the user's language (`雅虎`, `腾讯`, `元`). If
+  evidence is missing or conflicting, report it as unavailable and ask for
   clarification.
+- **Declare every figure:** when the final answer states a number with a
+  decimal point, a percent sign or a currency mark, or puts a number in a table
+  cell, end the answer with ONE fenced block tagged `figures`, one line per
+  figure: `value | role | note | ref`. Roles:
+  `observed` — a value a tool returned (`ref`: that tool call's id, or the symbol);
+  `derived` — arithmetic on observed values (`note`: the formula with its inputs);
+  `proposed` — a level you suggest, such as an entry, stop or target: it must lie
+  inside the observed price range, or carry a formula over observed values in `note`;
+  `cited` — from a source other than this session's tools (`note`: the source);
+  `count` — a count, window or horizon. Plain integers (counts, days, list
+  numbers), dates and security codes need no line. Example (zh):
+  ```figures
+  0.666 | observed | 159516.SZ 收盘 2026-09-09 | 159516.SZ
+  0.646 | derived  | 0.666 × 0.97 | 159516.SZ
+  37%   | derived  | (1.053 − 0.666) / 1.053 | 159516.SZ
+  0.62  | proposed | 买入参考，位于观测区间 0.567–1.053 内
+  ```
+  Example (en):
+  ```figures
+  182.4 | observed | AAPL.US close 2026-09-09 | AAPL.US
+  175   | proposed | entry, inside the observed 168.2–191.0 range
+  1.8   | cited    | Sharpe ratio reported by the paper
+  20    | count    | moving-average window, days
+  ```
+  The block is checked against this session's tool results and removed before
+  the user sees the answer, so never refer to it in the prose. A figure you
+  cannot declare truthfully under one of these roles must be removed, not
+  relabelled; a rejected draft comes back with each failing figure listed.
 - **Figures need a symbol the session actually handled:** you may name an index
   or a peer in passing, but the moment you attach a number to a ticker, that
   ticker must be one you passed to a tool that succeeded, or one a tool

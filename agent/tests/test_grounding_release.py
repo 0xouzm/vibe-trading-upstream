@@ -1891,3 +1891,69 @@ def test_the_sweep_never_cuts_a_figure_the_gate_checked(tmp_path: Path) -> None:
     assert "最新收盘价 1.171 元" in released
     assert "1.171%" not in released
     assert "※ 略去 1 处" in released
+
+
+class _ChunkedLLM:
+    """Streams its one answer in three-character chunks, like a provider."""
+
+    model_name = "grounding-test"
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.calls = 0
+
+    def stream_chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[Any] | None = None,
+        on_text_chunk: Callable[[str], None] | None = None,
+        on_reasoning_chunk: Callable[[str], None] | None = None,
+        timeout: int | None = None,
+        idle_timeout_s: float | None = None,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> _Response:
+        self.calls += 1
+        if on_text_chunk:
+            for start in range(0, len(self.content), 3):
+                on_text_chunk(self.content[start : start + 3])
+        return _Response(content=self.content)
+
+    def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> _Response:
+        return _Response()
+
+
+def _stream(tmp_path: Path, content: str) -> tuple[dict[str, Any], str, AgentLoop]:
+    events: list[tuple[str, dict[str, Any]]] = []
+    agent = AgentLoop(
+        registry=ToolRegistry(),
+        llm=_ChunkedLLM(content),
+        max_iterations=3,
+        event_callback=lambda event, data: events.append((event, data)),
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    agent.memory.run_dir = str(run_dir)
+    result = agent.run("总结一下这周的复盘心得")
+    streamed = "".join(data.get("delta", "") for event, data in events if event == "text_delta")
+    return result, streamed, agent
+
+
+def test_a_streamed_answer_never_shows_its_figures_block(tmp_path: Path) -> None:
+    """A run with no evidence streams live, and the block still stays out."""
+    prose = "建议每周复盘 3 次。"
+
+    result, streamed, agent = _stream(tmp_path, prose + "\n\n```figures\n3 | count | 次/周\n```")
+
+    assert agent._grounding.should_buffer_output is False
+    assert result["content"] == prose
+    assert "figures" not in streamed and "`" not in streamed
+    assert streamed.strip() == prose
+
+
+def test_a_held_back_line_that_never_became_a_fence_is_still_shown(tmp_path: Path) -> None:
+    content = "复盘要点如下：\n`先写结论，再写过程`"
+
+    result, streamed, _ = _stream(tmp_path, content)
+
+    assert result["content"] == content
+    assert streamed == content

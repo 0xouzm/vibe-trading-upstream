@@ -425,6 +425,10 @@ class ToolAuthorization:
         )
 
 
+# Identity records locked from a bare code the user typed (spec decision 4).
+_BARE_CODE_KEY = "bare:"
+
+
 class _IdentityMixin:
     """Identity behaviour of :class:`GroundingLedger`."""
 
@@ -482,6 +486,8 @@ class _IdentityMixin:
 
         self._identity_required = True
         self._buffer_output = True
+        if set(symbols) <= self._bare_code_symbols(tool_name, symbols):
+            return ToolAuthorization(allowed=True, symbols=symbols)
         authorized = {_normalize_symbol(item) for item in batch_authorized_symbols}
         frozen_status = batch_identity_status or self.identity_status
         if frozen_status != "locked" or not authorized:
@@ -938,6 +944,100 @@ class _IdentityMixin:
                 if symbol and symbol not in symbols:
                     symbols.append(symbol)
         return symbols
+
+    def _roots_locked_elsewhere(self) -> set[str]:
+        """Code roots already locked by an explicit suffix or the resolver."""
+        return {
+            record.symbol.rsplit(".", 1)[0]
+            for key, record in self._identities.items()
+            if record.status == "locked"
+            and record.symbol
+            and "." in record.symbol
+            and not key.startswith(_BARE_CODE_KEY)
+        }
+
+    def _bare_code_symbols(self, tool_name: str, symbols: Iterable[str]) -> set[str]:
+        """Consumer symbols vouched for by a bare six-digit code the user typed.
+
+        A user who wrote ``159516`` named the instrument; only the venue suffix
+        is the model's choice, and ``get_market_data`` returning rows for
+        exactly one venue settles it (see :meth:`_lock_bare_codes`). ``000xxx``
+        is excluded because those digits are both a Shanghai index and a
+        Shenzhen stock, and a root something else already locked keeps that
+        lock's venue.
+
+        Args:
+            tool_name: Requested tool.
+            symbols: Canonical symbols the call asks for.
+
+        Returns:
+            The subset that may be fetched before any resolver call.
+        """
+        if tool_name != "get_market_data":
+            return set()
+        taken = self._roots_locked_elsewhere()
+        eligible: set[str] = set()
+        for symbol in symbols:
+            root, dot, _ = symbol.rpartition(".")
+            if dot and root in self._bare_codes and root not in taken and not root.startswith("000"):
+                eligible.add(symbol)
+        return eligible
+
+    def _lock_bare_codes(
+        self,
+        arguments: Mapping[str, Any],
+        payload: dict[str, Any] | None,
+        call_id: str,
+    ) -> None:
+        """Lock a bare code once exactly one of its venues has returned rows.
+
+        Rows for a second venue of the same code turn the record ambiguous, so
+        the run falls back to the resolver instead of keeping a guessed venue.
+
+        Args:
+            arguments: The succeeding ``get_market_data`` call's arguments.
+            payload: Its parsed result.
+            call_id: Provider tool-call identity.
+        """
+        requested = self._bare_code_symbols(
+            "get_market_data", self._extract_symbol_arguments(arguments)
+        )
+        if not requested or not isinstance(payload, dict):
+            return
+        for raw_symbol, raw_rows in payload.items():
+            rows = raw_rows.get("data") if isinstance(raw_rows, dict) else raw_rows
+            symbol = _normalize_symbol(raw_symbol)
+            if symbol in requested and isinstance(rows, list) and rows:
+                self._bare_code_hits.setdefault(symbol.rsplit(".", 1)[0], {}).setdefault(
+                    symbol, call_id
+                )
+        for root, hits in self._bare_code_hits.items():
+            key = f"{_BARE_CODE_KEY}{root}"
+            existing = self._identities.get(key)
+            version = existing.version + 1 if existing else 1
+            if len(hits) == 1:
+                if existing is not None:
+                    continue
+                (symbol, source_call), = hits.items()
+                self._identities[key] = IdentityRecord(
+                    query=root,
+                    status="locked",
+                    symbol=symbol,
+                    venue=_infer_venue(symbol),
+                    instrument_type=_infer_instrument_type(symbol),
+                    currency=_infer_currency(symbol),
+                    source_tool_call_id=source_call,
+                    source=["get_market_data"],
+                    version=version,
+                )
+            elif existing is None or existing.status != "ambiguous":
+                self._identities[key] = IdentityRecord(
+                    query=root,
+                    status="ambiguous",
+                    source_tool_call_id=call_id,
+                    candidates=[{"symbol": symbol} for symbol in sorted(hits)],
+                    version=version,
+                )
 
     def _track_session_symbols(
         self,

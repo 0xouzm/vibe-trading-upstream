@@ -553,7 +553,7 @@ clon (`pip install -e .`).
 </details>
 
 <details>
-<summary><b>Conectores de Broker</b> <sub>15 brokers — lectura + paper, live acotado donde esté soportado</sub></summary>
+<summary><b>Conectores de Broker</b> <sub>17 brokers — lectura + paper, live acotado donde esté soportado</sub></summary>
 
 Perfiles centrados en el conector. La mayoría hace lectura + colocación de órdenes en cuenta paper — IBKR es de solo lectura, Robinhood es solo live (sin cuenta paper), y Trading 212 y Toss Securities rechazan la colocación de órdenes por completo, incluido el paper; la colocación de órdenes live está acotada por un mandato definido por el usuario (lista blanca de símbolos, límites de tamaño de orden / exposición, límite diario de operaciones, interruptor de apagado instantáneo) y nunca retiene fondos — el broker ejecuta. Las herramientas de colocación de órdenes se mantienen fuera de MCP (solo agente + CLI). Las rutas de investigación / backtest están estructuralmente vetadas de cualquier endpoint live.
 

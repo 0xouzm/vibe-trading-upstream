@@ -60,6 +60,7 @@ def test_sdk_profiles_registered() -> None:
         "etoro-live-sdk-readonly", "etoro-live-trade",
         "kis-paper-sdk", "kis-paper-trade", "kis-live-sdk-readonly",
         "upbit-paper-sdk", "upbit-paper-trade", "upbit-live-sdk-readonly",
+        "toss-live-sdk-readonly",
     } <= ids
 
 

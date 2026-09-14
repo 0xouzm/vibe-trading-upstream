@@ -19,6 +19,7 @@ from src.trading.connectors.robinhood.profiles import ROBINHOOD_PROFILES
 from src.trading.connectors.shoonya.profiles import SHOONYA_PROFILES
 from src.trading.connectors.tiger.profiles import TIGER_PROFILES
 from src.trading.connectors.etoro.profiles import ETORO_PROFILES
+from src.trading.connectors.toss.profiles import TOSS_PROFILES
 from src.trading.connectors.trading212.profiles import TRADING212_PROFILES
 from src.trading.connectors.upbit.profiles import UPBIT_PROFILES
 from src.trading.connectors.zerodha.profiles import ZERODHA_PROFILES
@@ -44,6 +45,7 @@ BUILTIN_PROFILES: tuple[TradingProfile, ...] = (
     *ZERODHA_PROFILES,
     *KIS_PROFILES,
     *UPBIT_PROFILES,
+    *TOSS_PROFILES,
 )
 
 

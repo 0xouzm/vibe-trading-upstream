@@ -27,6 +27,7 @@ _SDK_CONNECTOR_MODULES = {
     "zerodha": "src.trading.connectors.zerodha.sdk",
     "kis": "src.trading.connectors.kis.sdk",
     "upbit": "src.trading.connectors.upbit.sdk",
+    "toss": "src.trading.connectors.toss.sdk",
     "trading212": "src.trading.connectors.trading212.sdk",
     "mt5": "src.trading.connectors.mt5.sdk",
     "etoro": "src.trading.connectors.etoro.sdk",

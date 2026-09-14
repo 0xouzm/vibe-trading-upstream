@@ -1449,6 +1449,10 @@ def _remote_tool_name(connector: str, operation: str) -> str | None:
         from src.trading.connectors.robinhood.mcp import remote_tool_name
 
         return remote_tool_name(operation)
+    if connector == "scalable":
+        from src.trading.connectors.scalable.mcp import remote_tool_name
+
+        return remote_tool_name(operation)
     return None
 
 
@@ -1460,6 +1464,10 @@ def _remote_arguments(connector: str, operation: str, arguments: dict[str, Any])
         return remote_arguments(operation, arguments)
     if connector == "robinhood":
         from src.trading.connectors.robinhood.mcp import remote_arguments
+
+        return remote_arguments(operation, arguments)
+    if connector == "scalable":
+        from src.trading.connectors.scalable.mcp import remote_arguments
 
         return remote_arguments(operation, arguments)
     return {}

@@ -33,6 +33,7 @@ from src.trading.connectors.longbridge.classification import LONGBRIDGE_TOOL_CLA
 from src.trading.connectors.mt5.classification import MT5_TOOL_CLASS
 from src.trading.connectors.okx.classification import OKX_TOOL_CLASS
 from src.trading.connectors.robinhood.classification import ROBINHOOD_TOOL_CLASS
+from src.trading.connectors.scalable.classification import SCALABLE_TOOL_CLASS
 from src.trading.connectors.shoonya.classification import SHOONYA_TOOL_CLASS
 from src.trading.connectors.tiger.classification import TIGER_TOOL_CLASS
 from src.trading.connectors.etoro.classification import ETORO_TOOL_CLASS
@@ -65,6 +66,7 @@ _BROKER_CURATED_MAPS = {
     "kis": KIS_TOOL_CLASS,
     "upbit": UPBIT_TOOL_CLASS,
     "toss": TOSS_TOOL_CLASS,
+    "scalable": SCALABLE_TOOL_CLASS,
 }
 
 

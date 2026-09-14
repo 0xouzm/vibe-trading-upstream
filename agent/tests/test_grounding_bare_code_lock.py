@@ -143,3 +143,13 @@ def test_a_root_the_user_locked_with_a_suffix_keeps_its_venue(tmp_path: Path) ->
     assert decision.allowed is False
     assert decision.error_code == "identity_mismatch"
     assert ledger.authorized_symbols == {"159516.SZ"}
+
+
+def test_a_typed_code_does_not_carry_an_untyped_one_through(tmp_path: Path) -> None:
+    """Every symbol in the call must be vouched for, not just one of them."""
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="159516 现在能买吗？给我一个买入价")
+
+    decision = _fetch(ledger, "c1", ["159516.SZ", "510300.SH"])
+
+    assert decision.allowed is False
+    assert ledger.authorized_symbols == set()

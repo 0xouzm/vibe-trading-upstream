@@ -1591,7 +1591,14 @@ class AgentLoop:
                     if not buffer_text_output:
                         self._emit(
                             "thinking_done",
-                            {"iter": current_iter, "content": thinking_text[:500]},
+                            {
+                                "iter": current_iter,
+                                "content": (
+                                    thinking_text[: self._grounding.streamable_length(thinking_text)]
+                                    if self._grounding is not None
+                                    else thinking_text
+                                )[:500],
+                            },
                         )
 
                 # Content-filter skip: provider blocked the response — continue
@@ -1622,6 +1629,7 @@ class AgentLoop:
 
                 if not response.has_tool_calls:
                     final_content = response.content or ""
+                    syntax_fallback_emitted = False
                     if not final_content:
                         empty_model_response_iter = iteration
                         trace.write(
@@ -1698,6 +1706,7 @@ class AgentLoop:
                             "text_delta",
                             {"delta": final_content, "iter": current_iter},
                         )
+                        syntax_fallback_emitted = True
                     if self._grounding is not None:
                         validation = self._grounding.validate_final_answer(final_content)
                         if not validation.valid:
@@ -1862,12 +1871,12 @@ class AgentLoop:
                                 "text_delta",
                                 {"delta": final_content, "iter": current_iter},
                             )
-                        elif buffer_text_output:
+                        elif buffer_text_output and not syntax_fallback_emitted:
                             self._emit(
                                 "text_delta",
                                 {"delta": final_content, "iter": current_iter},
                             )
-                        elif not self._released_fallback:
+                        elif not self._released_fallback and not syntax_fallback_emitted:
                             # Flush a held-back last line that never became a
                             # figures fence; a stripped block leaves nothing.
                             shown = "".join(thinking_chunks)[:streamed_chars]
@@ -1965,6 +1974,17 @@ class AgentLoop:
                     react_trace.append({"type": "answer", "content": final_content[:500]})
                     break
 
+                if not buffer_text_output and self._grounding is not None:
+                    # The turn is over, so a held-back last line is complete: it is
+                    # shown unless it opens a figures block.
+                    turn_text = "".join(thinking_chunks)
+                    safe = min(len(turn_text), self._grounding.streamable_length(turn_text + "\n"))
+                    if safe > streamed_chars:
+                        self._emit(
+                            "text_delta",
+                            {"delta": turn_text[streamed_chars:safe], "iter": current_iter},
+                        )
+                        streamed_chars = safe
                 assistant_message = context.format_assistant_tool_calls(
                     response.tool_calls,
                     content=response.content,

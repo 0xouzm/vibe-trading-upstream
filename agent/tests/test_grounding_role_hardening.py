@@ -654,3 +654,34 @@ def test_a_formula_may_be_followed_by_its_explanation(tmp_path: Path) -> None:
 
     assert explained.valid is True, explained.issues
     assert "derivation_result_mismatch" in _reasons(wrong)
+
+
+def test_a_referenced_table_cell_is_checked_against_its_own_column(tmp_path: Path) -> None:
+    """A close cell declared with the call's ref may not borrow that call's high."""
+    table = "\n\n| 日期 | 收盘 |\n|---|---|\n| 2026-09-09 | {} |\n"
+
+    high_as_close = _ledger(tmp_path / "high", MARKET_A).validate_final_answer(
+        HDR + table.format("0.681") + _block("0.681 | observed | close | c1")
+    )
+    close = _ledger(tmp_path / "close", MARKET_A).validate_final_answer(
+        HDR + table.format("0.666") + _block("0.666 | observed | close | c1")
+    )
+
+    assert high_as_close.valid is False
+    assert close.valid is True, close.issues
+
+
+@pytest.mark.parametrize(
+    ("leaf", "kind"),
+    [
+        ("var", "tail_risk"),
+        ("var_95", "tail_risk"),
+        ("strategy_var_95", "tail_risk"),
+        ("cvar", "tail_risk"),
+        ("es", "tail_risk"),
+        ("var_explained", None),
+        ("sales_es", None),
+    ],
+)
+def test_short_tail_risk_names_count_only_as_the_whole_leaf(leaf: str, kind: str | None) -> None:
+    assert _metric_kind_for_path(leaf) == kind

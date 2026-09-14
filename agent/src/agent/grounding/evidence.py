@@ -346,6 +346,11 @@ def _is_registered_price_indicator(tool: str, path: str) -> bool:
     return False
 
 
+# Tail-risk names short enough to be a fragment of an unrelated leaf count only
+# as the whole leaf: "var_explained" and "sales_es" are not a VaR.
+_EXACT_ONLY_ALIASES = frozenset({"var", "es"})
+
+
 def _metric_kind_for_path(path: str) -> str | None:
     """Map an evidence JSON path to an analysis metric kind.
 
@@ -362,7 +367,8 @@ def _metric_kind_for_path(path: str) -> str | None:
     tokens = [token for token in re.split(r"[_.]", leaf) if token]
     for size in (2, 1):
         for start in range(len(tokens) - size, -1, -1):
-            kind = _ANALYSIS_KIND_ALIASES.get("_".join(tokens[start : start + size]))
+            key = "_".join(tokens[start : start + size])
+            kind = None if key in _EXACT_ONLY_ALIASES else _ANALYSIS_KIND_ALIASES.get(key)
             if kind is not None:
                 return kind
     return None

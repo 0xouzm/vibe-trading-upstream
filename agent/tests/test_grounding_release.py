@@ -1968,3 +1968,106 @@ def test_prose_after_the_figures_block_still_reaches_the_stream(tmp_path: Path) 
     assert "figures" not in streamed
     assert "补充：先写结论。" in result["content"]
     assert streamed.rstrip().endswith("补充：先写结论。")
+
+
+def test_the_tool_call_syntax_fallback_reaches_the_stream_once(tmp_path: Path) -> None:
+    """A buffered run released the fallback in its own branch and again as the answer."""
+    llm = _ScriptedLLM([_Response(content='<invoke name="get_market_data">')])
+
+    result, events, _ = _run(tmp_path, llm, max_iterations=1)
+
+    deltas = [data.get("delta", "") for event, data in events if event == "text_delta"]
+    assert len(deltas) == 1, deltas
+    assert "tool-call syntax" in deltas[0]
+    assert result["content"] == deltas[0]
+
+
+def test_thinking_done_never_carries_the_figures_block(tmp_path: Path) -> None:
+    content = "建议每周复盘 3 次。\n\n```figures\n3 | count | 次/周\n```"
+    events: list[tuple[str, dict[str, Any]]] = []
+    agent = AgentLoop(
+        registry=ToolRegistry(),
+        llm=_ChunkedLLM(content),
+        max_iterations=3,
+        event_callback=lambda event, data: events.append((event, data)),
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    agent.memory.run_dir = str(run_dir)
+
+    agent.run("总结一下这周的复盘心得")
+
+    thoughts = [data.get("content", "") for event, data in events if event == "thinking_done"]
+    assert thoughts
+    assert all("figures" not in thought for thought in thoughts)
+
+
+class _NoteTool(BaseTool):
+    name = "note_progress"
+    description = "Record a note."
+    parameters = {"type": "object", "properties": {}}
+    repeatable = True
+
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+
+    def execute(self, **kwargs: Any) -> str:
+        return json.dumps({"status": "ok", "note": self.reply})
+
+
+def test_a_held_back_line_in_a_tool_call_turn_is_shown(tmp_path: Path) -> None:
+    """The last line could only have become a fence while the turn was streaming."""
+    registry = ToolRegistry()
+    registry.register(_NoteTool("ok"))
+    llm = _ScriptedLLM(
+        [
+            _Response(content="先记一笔：\n`先写结论`", tool_calls=[_tool_call("n1", "note_progress")]),
+            _Response(content="记好了。"),
+        ]
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    agent = AgentLoop(
+        registry=registry,
+        llm=llm,
+        max_iterations=4,
+        event_callback=lambda event, data: events.append((event, data)),
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    agent.memory.run_dir = str(run_dir)
+
+    agent.run("总结一下这周的复盘心得")
+
+    streamed = "".join(data.get("delta", "") for event, data in events if event == "text_delta")
+    assert "`先写结论`" in streamed
+
+
+def test_a_figures_block_ending_a_tool_call_turn_is_not_shown(tmp_path: Path) -> None:
+    """Completing the last line reveals a fence; the block after it stays held."""
+    registry = ToolRegistry()
+    registry.register(_NoteTool("ok"))
+    llm = _ScriptedLLM(
+        [
+            _Response(
+                content="先记一笔。\n\n```figures\n3 | count | 次\n```",
+                tool_calls=[_tool_call("n1", "note_progress")],
+            ),
+            _Response(content="记好了。"),
+        ]
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    agent = AgentLoop(
+        registry=registry,
+        llm=llm,
+        max_iterations=4,
+        event_callback=lambda event, data: events.append((event, data)),
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    agent.memory.run_dir = str(run_dir)
+
+    agent.run("总结一下这周的复盘心得")
+
+    streamed = "".join(data.get("delta", "") for event, data in events if event == "text_delta")
+    assert "先记一笔。" in streamed
+    assert "figures" not in streamed

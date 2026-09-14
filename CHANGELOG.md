@@ -110,6 +110,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   about prices it never mentioned; a market answer that observed no price
   still falls back. A malformed figures block no longer forces the fallback
   either: the block is dropped and the draft is checked as written.
+- **The tool-call-syntax fallback reaches the chat once.** When a model answered
+  the forced-text iteration with tool-call markup in a run whose output is
+  buffered, the replacement message was streamed by its own branch and again as
+  the released answer, so the chat and the CLI showed it twice.
 - **A redaction footnote the model wrote itself is removed** before the real
   cuts, so a released answer never carries two contradictory footnotes or a
   marker for a cut that did not happen.

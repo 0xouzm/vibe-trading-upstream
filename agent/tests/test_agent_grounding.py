@@ -144,12 +144,15 @@ class _PrivateCompanySkillTool(BaseTool):
     }
     repeatable = True
 
-    def __init__(self) -> None:
+    def __init__(self, content: str) -> None:
+        # A required argument keeps registry discovery from instantiating this
+        # stub as the real load_skill for later tests (see CLAUDE.md).
+        self.content = content
         self.calls = 0
 
     def execute(self, **kwargs: Any) -> str:
         self.calls += 1
-        return json.dumps({"status": "ok", "content": "private company workflow"})
+        return json.dumps({"status": "ok", "content": self.content})
 
 
 def _tool_call(call_id: str, tool_name: str, **arguments: Any) -> SimpleNamespace:
@@ -162,7 +165,7 @@ def _build_direct_agent(
 ) -> tuple[AgentLoop, _ResolverTool, _MarketTool, _PrivateCompanySkillTool, TraceWriter]:
     resolver = _ResolverTool(resolver_result)
     market = _MarketTool(_market_payload())
-    private_skill = _PrivateCompanySkillTool()
+    private_skill = _PrivateCompanySkillTool("private company workflow")
     registry = ToolRegistry()
     for tool in (resolver, market, private_skill):
         registry.register(tool)

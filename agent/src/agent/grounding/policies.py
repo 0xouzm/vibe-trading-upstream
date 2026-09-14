@@ -655,6 +655,10 @@ class _PolicyMixin:
             records = [
                 record for record in records if not record.symbol or record.symbol == symbol
             ]
+        if figure is not None and figure.column:
+            # A table cell quotes its own column, not whatever else the call returned.
+            records = [record for record in records if record.field == figure.column]
+            metrics = []
         if figure is not None and figure.percent:
             records = [
                 record

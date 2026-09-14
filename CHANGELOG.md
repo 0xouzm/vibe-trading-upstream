@@ -7,139 +7,112 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- **A rejected final answer is released with its unverified figures cut out,
-  not replaced by a refusal.** When the grounding gate's revision budget is
-  spent, the last draft used to be discarded wholesale for a three-sentence
-  fallback — after the user had waited through every revision (a ten-minute
-  run for one ETF ended that way). Now each rejected figure, with the unit
-  glued to it, is replaced by `（略※）` / `(omitted※)` at the character span
-  the validator flagged; the same figure is swept out of the rest of the
-  document so the footnote's count is the truth; a footnote says how many
-  were omitted and why; the missing source/currency words are appended; and
-  the whole released document — footnote included — is re-checked by the same
-  gate before release. Two kinds of figure are never cut: one the run actually
-  observed, and one a valid formula in the same answer justifies — sweeping a
-  rejected entry price also removed it from
-  `基于 MA20 0.7158 × 0.95 = 0.680`, the derivation the correction prompt asks
-  for. The canned fallback remains for what cannot be cut (an identity finding, a
-  misattributed symbol, a run that never observed a price, a cut that still
-  fails). The run is still marked `degraded` with a reason naming the
-  redaction, and the release path's own rechecks are no longer counted as
-  rejected model drafts — they used to shrink the revision budget and
-  overstate the rejected-draft count in the run reason and the artifact. The
-  zero-round provenance repair takes the same non-recording path, and the
-  document that actually shipped is recorded once in
-  `artifacts/grounding_evidence.json` under `released`, so the artifact
-  carries evidence for the fail-closed promise instead of nothing at all.
-- **The redaction footnote is the only redaction statement in the released
-  document.** A draft that wrote its own "※ 略去 0 处……" shipped two
-  contradictory footnotes; a marker pasted into the body read as a cut that
-  never happened. Both are stripped before the real cuts are made. Each line
-  also takes its marker from its own script, so a Chinese report containing an
-  English table no longer releases "| First |（略※） |", the column padding
-  after a table pipe survives, and a compound unit is not split in half —
-  "建议买入价 0.95 元/股" no longer becomes "建议买入价（略※）/股". A percent
-  figure this same gate accepted in this same run is never swept out from
-  under it and footnoted as unmatched.
-- **A draft whose only defect is a missing source or currency word gets the
-  word appended, not another model round.** `data_source_not_surfaced` and
-  `currency_not_surfaced` are deterministic omissions the ledger can fill;
-  regenerating a multi-minute report to add "tencent" was the whole cost of
-  that rejection. `canonical_symbol_not_surfaced` is deliberately not
-  repaired: the symbol is the figure's subject, so appending a data note
-  naming 562500.SH under an answer about 贵州茅台 would footnote a
-  misattribution instead of fixing it. Neither is a draft carrying a price
-  COLUMN no validator reads ("| 档位 | 挂单价 |"): the note says where this
-  run's prices came from, and attaching it to an unchecked ladder price in
-  zero model rounds spends the one round that was the model's last chance to
-  drop that figure.
+- **The final-answer grounding gate no longer guesses what a number is from the
+  words around it.** Only a number's SHAPE is inferred — a decimal point, a
+  percent sign, a currency mark or a table cell makes it a measurement; dates
+  (including year-less "09-14"), years, security codes, line-leading ordinals
+  and fenced text are structure; a plain integer is not checked — so a sentence
+  gets the same verdict in every language. A measurement that equals a price
+  or volume this session's tools returned needs nothing more. Any other one is
+  declared in a fenced `figures` block at the end of the answer, one line per
+  figure — `value | role | note | ref` — and checked by role: `observed` must
+  appear in the referenced call or tool (`ref` may name either), filtered to
+  the figure's own symbol, with a currency-marked figure compared only against
+  money-denominated values and a percent only against non-price ones;
+  `derived` needs an evaluable formula whose added or subtracted operands are
+  all observed, matching the figure at the precision and sign it was written
+  with; `proposed` is a price inside its own symbol's observed range or a
+  derivation; `cited` must name its source on the figure's own line, because
+  the block is stripped before anyone reads the answer; `count` covers counts,
+  weights, thresholds and probabilities, and a currency-marked figure declared
+  `count` is checked as observed. No role other than `observed` may sit in a
+  price column. The block is stripped from the released answer and never
+  streamed; the artifact keeps it. The price-word, level-word,
+  derivation-phrase and metric-subject catalogues are deleted with it
+  (65 compiled regexes → 12, all shape), and `src/agent/grounding.py` is now
+  the `src/agent/grounding/` package.
+- **A rejected answer costs one correction round, not four, and is then
+  released with its failing figures cut rather than refused.** The correction
+  prompt lists every failing figure as written, with its declared role and what
+  the evidence says (the observed range, the nearest observed values, or what
+  its own formula evaluates to, in the figure's units), and names the three
+  ways out: declare, rewrite to an observed value, or remove. If the second
+  draft still fails, each failing figure is replaced by `（略※）` /
+  `(omitted※)` at its own span, bare-integer restatements of a cut figure are
+  swept too, a footnote says how many were omitted and why, and the whole
+  document — footnote included — must pass the same gate before release. The
+  canned fallback is left for an identity finding, a run that never observed a
+  price, or a cut that still fails. Drafts that triggered bounded
+  `search_symbol` / `get_market_data` recovery do not spend the correction
+  budget. The run stays `degraded` with a reason naming the redaction, the
+  release path's rechecks are not counted as rejected drafts, and the shipped
+  document is recorded under `released` in `artifacts/grounding_evidence.json`.
+- **A draft missing only a source or currency word gets a data note appended,
+  not another model round.** The canonical symbol is deliberately not repaired
+  this way: it is the figure's subject, and a note naming it under an answer
+  about another instrument would footnote a misattribution.
+- **The chat shows that the answer is being checked.** The agent loop emits
+  `grounding_status` (`{stage: "revising", round, issues}` after a rejection,
+  `{stage: "released_redacted", removed}` before a cut release), and the chat
+  page shows "Checking the figures in this answer (round N)…" until answer text
+  arrives, in all eight locales.
 
 ### Fixed
 
-- **The grounding gate now accepts the derivations a correcting model
-  actually writes.** A formula whose result was written with `≈` / `约` /
-  `approximately` was rejected with the multiplier read as a quoted price; a
-  derivation from an observed moving average (`基于 SMA20 1.150 × 0.95 =
-  1.093`) failed to parse because the indicator name's digits leaked into the
-  arithmetic; a bare equation without a `基于` keyword was not tried at all.
-  The Chinese and English spellings are one shared list, so a correct English
-  derivation no longer burns a revision round its Chinese twin skips.
-  Observed inputs and correct arithmetic are still required, and only the
-  formula's own operands and result are exempted — an invented entry price
-  riding along in the same clause is still rejected.
-- **A drawdown stated against an observed high is arithmetic, not an
-  invented backtest metric.** "较 5 月高点 1.053 元已回撤约 37%" was rejected
-  as an unevidenced drawdown figure although both endpoints were observed
-  prices in the same line; the endpoint-arithmetic exemption the return
-  branch already had now covers drawdown. Only the falling direction grounds
-  a drawdown — the inverse rise between the same two endpoints does not — and
-  a figure is matched at half a unit of the precision it was written with, in
-  the units it was written in: "约 37%" accepts a derived 36.75%, "40%" does
-  not, and a percent figure is never compared against the fraction form.
-- **Price-denominated indicator values the session fetched are observed
-  evidence.** `sma_20`, a Bollinger band, a pivot level (`r1`/`s1` included)
-  or VWAP returned by `technical_indicators` was compared against OHLC bars
-  only and rejected as a fabricated price when quoted. The decision is made
-  on the leaf name, so a difference, a crossover flag, a direction, a
-  bandwidth or a window parameter under the same family is not admitted; RSI,
-  MACD, volume averages and row counts stay excluded. One symbol's indicator
-  does not ground an unattributed price claim on a line naming another
-  instrument.
-- **An indicator reading answers a price LEVEL claim and nothing else.** The
-  rule was first written as a denylist — an indicator may satisfy any price
-  claim except one naming an OHLC field — against a hand-written list of
-  field phrases, and a hand-written denylist is only as complete as the day
-  it was typed. With the session's `sma_20` at 1.150 and the observed close at
-  1.171, "收盘价为 1.150 元" was caught while "closed at 1.150", "the close was
-  1.150" and "highest price was 1.150" were released, and every spelling of a
-  spot quote (现价 / 最新价 / 成交价 / 报价 / 股价 / current price / the quote
-  is) leaked in both scripts because a spot quote names no OHLC field. It is
-  an allowlist now: an indicator may answer 支撑 / 阻力 / 均线 / band / pivot
-  and their kin, and every other price claim is compared against OHLC
-  evidence at the unchanged 0.5% band. A level word this list misses costs a
-  correction round; a denylist gap released a fabricated print.
-- **A formula's result may not be a market print.** "2026-06-23 收盘价 =
-  1.171 × 0.80 = 0.937" is true arithmetic whose result is claimed to be a
-  close the run observed as 1.137, and the exemption written to accept the
-  derivations the correction prompt asks for released it. When a word naming a
-  print labels the equation itself, its operands stay exempt and the result is
-  compared. "基于收盘价 1.171 × 0.80 = 0.937 作为买入价" — the same arithmetic
-  with the word on an operand and the result proposed as an entry — still
-  passes.
-- **A derivation exempts the occurrence inside it, not every copy of the
-  number beside it.** "建议买入价 0.95 元（0.95 × 1.171 = 1.11245 参考）" is
-  arithmetic that derives nothing, and a value-scoped exemption let the entry
-  price outside the bracket inherit what its own copy inside the bracket
-  earned — releasing a price 19% below every observed bar. The redaction sweep
-  is scoped the same way: a valid formula protects its own characters, so the
-  derivation survives intact while a restatement of the rejected figure
-  elsewhere in the document is still cut.
-- **An English period ends a clause, exactly as 。 does.** Two English
-  sentences sharing a line were one clause, so the header sentence's "last
-  close" labelled the level claim after it and a derivation in the first
-  sentence exempted a fabricated price in the second — while the Chinese
-  translation of the same text got the opposite verdict, because 。 always
-  split.
-- **A strategy's performance metric needs backtest evidence, not arithmetic on
-  two prices.** "回测显示该策略最大回撤 5.9%（从 1.180 跌至 1.110）" rode out of
-  a session with no backtest in it at all, on the exemption written for a
-  PRICE drawdown against an observed high. The subject word decides:
-  策略 / 回测 / 组合 / 净值 / strategy / backtest / portfolio / NAV keeps the
-  unchanged backtest-evidence requirement, and "股价较 5 月高点 1.053 元已回撤
-  约 37%" keeps the exemption. That exemption is now applied figure by figure
-  — one correct ratio used to carry every other percentage in its clause out
-  with it — and the derivation half of it is measured in the clause the claim
-  was measured in, not anywhere on the line.
-- **A metric figure is not grounded by happening to equal an observed price.**
-  A run holds hundreds of observed values spanning the instrument's range, so
-  any percent-free metric written in that range collides with one:
-  "策略夏普比率 1.171" and "| 夏普比率 | 1.171 |" were released as grounded
-  against an observed close. The figure must also be written as a price — a
-  price word ahead of it or a currency unit on it — and a metric CELL is
-  exempt only when it restates a pair of observed prints
-  ("| 峰值→当前 | 1.180 → 1.110 |"), which is the shape the exemption was
-  added for.
-
+- **Plain integers in prose are not price claims.** A list number ("输出原则
+  4"), a window length or a count was checked like a quoted price and could be
+  cut from a released answer.
+- **A drawdown against an observed high passes wherever the endpoints are
+  written.** "较 5 月高点 1.053 元已回撤约 37%" was rejected when its endpoints sat
+  on another line; a `derived` declaration does not depend on layout.
+- **Price-denominated indicator values are evidence, by registration.**
+  Moving averages, Bollinger bands and similar levels returned by
+  `technical_indicators` are registered per tool as observed price evidence;
+  RSI, MACD and other non-price leaves are not, and nothing is decided from a
+  field name's words.
+- **A year-less date is a date, and "24.6M" is 24.6 million.** Two real runs
+  that followed the contract were still released redacted: "2026-09-11 /
+  09-14" in a table cell shipped as "2026-09-11 /（略※）-（略※）", and
+  "24.6M → 22.6M lots" as "(omitted※)M → (omitted※)M". A zero-padded MM-DD,
+  or one opened by a full date in the same cell or line, is structure (an
+  unpadded "| 11-12 |" is still checked, since it may be a price range). K / M
+  / B / 千 / 万 / 亿 glued to a figure scale its comparison with the evidence,
+  never its shape, and a cut removes the mark with the figure. Replayed on
+  both runs' tool results, each second draft now passes as written.
+- **Metadata counts are not metrics, and a tool's tail-risk result can ground
+  a VaR** (#1420, #1426). `return_observations`, `n_returns`, `return_window`,
+  `vol_lookback`, `max_drawdown_duration`, `aligned_days` and their `*_window` /
+  `*_lookback` / `*_obs` / `n_*` / `*_count` / `*_days` / `*_duration` families
+  no longer ground a percentage ("年化收益 81%" from 81 observations); `var`,
+  `var_95`, `var_99`, `cvar`, `es` and `expected_shortfall` leaves are tail-risk
+  evidence, so a correct VaR is no longer refused.
+- **A correction names the prints of the figure's own instrument** (#1433). The
+  "nearest observed" values come from that symbol (and its table column or
+  `ref`), not from every field of every symbol in the run.
+- **A number is read the way the chat renders it** (#1418). Zero-width
+  characters, a full-width or Arabic decimal point, a no-break space before
+  "%", the U+2212 minus sign, a backslash escape ("0\\.888"), an HTML entity
+  and an ISO code glued to the digits ("CNY0.888") no longer split a price into
+  unchecked integers; a decimal comma ("0,666 CNY", "12,5 %") is a decimal
+  while a valid grouping ("-1,250.00") stays grouped. Fences follow CommonMark,
+  and an unterminated code fence no longer exempts the rest of the answer.
+- **A year is not a price shield.** "$2050", "1999 元" and a 2031 under a close
+  column are checked; a price placed in a date or code column is checked; a
+  compact date, a dotted date and a time are structure. 円 and 원 are currency
+  marks, and "52pp" / "5200bp" are measurements.
+- **A declaration cannot relocate or launder a figure.** A figure the sentence
+  writes about one instrument cannot be declared another's close; a
+  currency-marked result cannot be derived from an RSI or a volume; `count`,
+  `derived` and `proposed` cannot sit in a price column.
+- **A general answer with no tool evidence is cut, not refused.** A question
+  about no instrument ("印花税怎么收") whose figures the gate cannot check is
+  released with those figures omitted and a footnote, instead of a refusal
+  about prices it never mentioned; a market answer that observed no price
+  still falls back. A malformed figures block no longer forces the fallback
+  either: the block is dropped and the draft is checked as written.
+- **A redaction footnote the model wrote itself is removed** before the real
+  cuts, so a released answer never carries two contradictory footnotes or a
+  marker for a cut that did not happen.
 ## [0.1.15] — 2026-09-09
 
 Rolls up 551 commits / 162 merged pull requests since 0.1.14, from 35

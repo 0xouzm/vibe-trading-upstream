@@ -568,7 +568,7 @@ Perfiles centrados en el conector. La mayoría hace lectura + colocación de ór
 | **eToro** | global | lectura + paper + live acotado (API pública; las claves demo solo alcanzan rutas `/demo`, además de flujos de copy-trading) |
 | **MetaTrader 5** | forex / CFD | lectura + paper + live acotado (estilo Exness; guardia de identidad demo ⇔ paper) |
 | **KIS** (Korea Investment & Securities) | Corea (KOSPI/KOSDAQ) | lectura + paper genuino (모의투자, un sandbox real del lado del broker en un host separado) — la colocación de órdenes live aún no está conectada para este mercado |
-| **Longbridge** · **Dhan** · **Shoonya** · **Zerodha** | EE. UU. / HK · India (NSE/BSE) | solo lectura + paper — sin discriminador de runtime paper/live, por lo que la colocación de órdenes live se rechaza de forma estricta |
+| **Longbridge** · **Dhan** · **Shoonya** · **Zerodha** · **Upbit** | EE. UU. / HK · India (NSE/BSE) · Corea (cripto) | solo lectura + paper — sin discriminador de runtime paper/live, por lo que la colocación de órdenes live se rechaza de forma estricta |
 | **Trading 212** | Reino Unido / UE | completamente de solo lectura — `place_order` / `cancel_order` se rechazan de forma estricta incluso en paper |
 
 Paper-vs-live es una **guardia de runtime estructural por broker** (formato de id de cuenta, separación de host, flag demo, o entorno de trading), nunca un flag de configuración que el agente pueda cambiar. Un broker que no exponga tal discriminador queda limitado a paper + solo lectura.

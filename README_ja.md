@@ -564,7 +564,7 @@ connector-first のプロファイル。多くは read + ペーパー口座で�
 | **eToro** | global | read + paper + bounded live（Public API；demo キーは構造上 `/demo` パスにしか到達せず、コピートレードのワークフローにも対応） |
 | **MetaTrader 5** | forex / CFD | read + paper + bounded live (Exness-style; demo ⇔ paper identity guard) |
 | **KIS**（韓国投資証券） | 韓国 (KOSPI/KOSDAQ) | read + 本物のペーパー（모의투자、別ホストの本物のブローカー側サンドボックス）—— このマーケットのライブ発注は未対応 |
-| **Longbridge** · **Dhan** · **Shoonya** · **Zerodha** | US / HK · India (NSE/BSE) | read + paper only — no runtime paper/live discriminator, so live order placement is hard-refused |
+| **Longbridge** · **Dhan** · **Shoonya** · **Zerodha** · **Upbit** | US / HK · India (NSE/BSE) · Korea (crypto) | read + paper only — no runtime paper/live discriminator, so live order placement is hard-refused |
 | **Trading 212** | UK / EU | fully read-only — `place_order` / `cancel_order` hard-refuse even paper |
 
 Paper-vs-live is a **structural per-broker runtime guard** (account-id format, host separation, demo flag, or trade environment), never a config flag the agent can flip. A broker exposing no such discriminator is capped at paper + read-only.

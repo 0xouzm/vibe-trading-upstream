@@ -577,7 +577,7 @@ LONGBRIDGE_ACCESS_TOKEN=...
 | **eToro** | global | 读取 + 模拟盘 + 受约束实盘（Public API；demo 密钥在结构上只能访问 `/demo` 路径，另支持跟单交易流程） |
 | **MetaTrader 5** | forex / CFD | 读取 + 模拟盘 + 受约束实盘（Exness 风格；demo ⇔ 模拟盘身份守卫） |
 | **KIS** | 韩国 (KOSPI/KOSDAQ) | 读取 + 真实模拟盘（모의투자，独立主机上的真实券商侧沙盒）——该市场的实盘下单尚未接入 |
-| **Longbridge** · **Dhan** · **Shoonya** · **Zerodha** | US / HK · India (NSE/BSE) | 仅读取 + 模拟盘——无运行时模拟/实盘判别标识，因此实盘下单被硬拒 |
+| **Longbridge** · **Dhan** · **Shoonya** · **Zerodha** · **Upbit** | US / HK · India (NSE/BSE) · 韩国 (crypto) | 仅读取 + 模拟盘——无运行时模拟/实盘判别标识，因此实盘下单被硬拒 |
 | **Trading 212** | UK / EU | 完全只读——`place_order` / `cancel_order` 连模拟盘也硬拒 |
 
 模拟盘与实盘的区分是**每家券商的结构性运行时守卫**（account-id 格式、host 隔离、demo 标志或交易环境），绝非 agent 能翻转的配置开关。不暴露此类判别标识的券商一律封顶为模拟盘 + 只读。

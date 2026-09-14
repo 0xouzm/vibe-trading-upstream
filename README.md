@@ -603,7 +603,7 @@ Connector-first profiles. Most do read + paper-account order placement — IBKR 
 | **eToro** | global | read + paper + bounded live (Public API; demo keys reach only `/demo` paths, plus copy-trading workflows) |
 | **MetaTrader 5** | forex / CFD | read + paper + bounded live (Exness-style; demo ⇔ paper identity guard) |
 | **KIS** (한국투자증권) | Korea (KOSPI/KOSDAQ) | read + genuine paper (모의투자, a real broker-side sandbox on a separate host) — live order placement not yet wired for this market |
-| **Longbridge** · **Dhan** · **Shoonya** · **Zerodha** | US / HK · India (NSE/BSE) | read + paper only — no runtime paper/live discriminator, so live order placement is hard-refused |
+| **Longbridge** · **Dhan** · **Shoonya** · **Zerodha** · **Upbit** | US / HK · India (NSE/BSE) · Korea (crypto) | read + paper only — no runtime paper/live discriminator, so live order placement is hard-refused |
 | **Trading 212** | UK / EU | fully read-only — `place_order` / `cancel_order` hard-refuse even paper |
 
 Paper-vs-live is a **structural per-broker runtime guard** (account-id format, host separation, demo flag, or trade environment), never a config flag the agent can flip. A broker exposing no such discriminator is capped at paper + read-only.

@@ -37,6 +37,7 @@ from src.trading.connectors.shoonya.classification import SHOONYA_TOOL_CLASS
 from src.trading.connectors.tiger.classification import TIGER_TOOL_CLASS
 from src.trading.connectors.etoro.classification import ETORO_TOOL_CLASS
 from src.trading.connectors.trading212.classification import TRADING212_TOOL_CLASS
+from src.trading.connectors.upbit.classification import UPBIT_TOOL_CLASS
 from src.trading.connectors.zerodha.classification import ZERODHA_TOOL_CLASS
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ _BROKER_CURATED_MAPS = {
     "etoro": ETORO_TOOL_CLASS,
     "zerodha": ZERODHA_TOOL_CLASS,
     "kis": KIS_TOOL_CLASS,
+    "upbit": UPBIT_TOOL_CLASS,
 }
 
 

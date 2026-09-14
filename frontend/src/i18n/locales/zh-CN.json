@@ -122,9 +122,9 @@
     "connectorVerifyFailed": "连接验证失败。",
     "diagnosticCredentialsPartial": "凭证不完整。请配置所有必需变量并重新创建服务。",
     "diagnosticCredentialsConflict": "凭证来源冲突。请仅保留一套完整来源，然后重试。",
-    "diagnosticSdkMissing": "后端服务未安装 Longbridge SDK。",
+    "diagnosticSdkMissing": "后端服务未安装此券商所需的 SDK。",
     "diagnosticAuthenticationFailed": "认证失败。请检查已配置的凭证。",
-    "diagnosticNetworkUnreachable": "无法连接 Longbridge 服务。请检查网络后重试。",
+    "diagnosticNetworkUnreachable": "无法连接券商服务或本地网关。请检查连接地址和网络后重试。",
     "diagnosticBrokerError": "券商拒绝了只读验证请求。请重试或检查后端日志。"
   },
   "scheduled": {

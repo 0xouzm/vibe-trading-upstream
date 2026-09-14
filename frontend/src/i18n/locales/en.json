@@ -127,9 +127,9 @@
     "connectorVerifyFailed": "Connection verification failed.",
     "diagnosticCredentialsPartial": "Credentials are incomplete. Configure all required variables and recreate the service.",
     "diagnosticCredentialsConflict": "Credential sources conflict. Keep one complete source, then retry.",
-    "diagnosticSdkMissing": "The Longbridge SDK is not installed in the backend service.",
+    "diagnosticSdkMissing": "The SDK required by this broker is not installed in the backend service.",
     "diagnosticAuthenticationFailed": "Authentication failed. Check the configured credentials.",
-    "diagnosticNetworkUnreachable": "The Longbridge service is unreachable. Check network access and retry.",
+    "diagnosticNetworkUnreachable": "The broker service or local gateway is unreachable. Check the connection address and network access, then retry.",
     "diagnosticBrokerError": "The broker rejected the read-only verification request. Retry or check backend logs."
   },
   "scheduled": {

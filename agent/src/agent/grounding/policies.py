@@ -84,6 +84,11 @@ _OTHER_CURRENCY_PREFIXES = "港美日欧韩台新加澳"
 #: Relative band a value must fall in to count as matching evidence.
 _TOLERANCE = 0.005
 
+#: A plain integer is read as a price only for an instrument quoted in the
+#: thousands (600519.SH, an index, BTC). Below that, a prose integer is a window,
+#: a horizon or a count ("20 日均线", "200-day") and stays unchecked.
+_INTEGER_PRICE_FLOOR = 1000.0
+
 #: Price fields a rejected prose figure is pointed at, in order (#1433).
 _CITABLE_FIELDS = ("close", "price", "adj_close")
 
@@ -447,14 +452,27 @@ class _PolicyMixin:
             for declaration in block.declarations
             if declaration.role == "observed"
         }
+        # Multipliers a declared derivation uses: a count equal to one is that factor.
+        derived_constants = [
+            operand
+            for declaration in block.declarations
+            if declaration.role == "derived"
+            for evaluated in [_formula_in_note(declaration.note)]
+            if evaluated is not None
+            for operand in evaluated[1]
+        ]
         checked_price = False
         for figure in figures:
-            if figure.shape != "measured":
+            if figure.shape not in ("measured", "bare"):
                 continue
             declaration = block.match(figure.value, figure.percent)
             symbol = self._figure_symbol(
                 content, figure, declaration, line_symbols, document_symbol, records
             )
+            if figure.shape == "bare" and not self._poses_as_price(
+                figure, self._price_band(symbol, records)
+            ):
+                continue
             if declaration is not None:
                 written = self._written_symbol(content, figure, line_symbols, records)
                 if written and symbol and written != symbol:
@@ -505,10 +523,26 @@ class _PolicyMixin:
                 )
                 continue
             if role == "count":
-                if not _is_plain_count(figure):
+                posing = (
+                    _is_plain_count(figure)
+                    and self._poses_as_price(figure, self._price_band(symbol, records))
+                    and not _close_any(figure.value, derived_constants)
+                )
+                if not _is_plain_count(figure) or posing:
                     checked_price = True
                     issues.extend(
-                        self._count_as_observed(figure, declaration, symbol, records)
+                        self._count_as_observed(
+                            figure,
+                            declaration,
+                            symbol,
+                            records,
+                            why=(
+                                "it sits in the instrument's observed price range and no "
+                                "declared derivation uses it"
+                                if posing
+                                else "a count cannot carry a currency mark"
+                            ),
+                        )
                     )
                 continue
             if role == "cited":
@@ -770,17 +804,50 @@ class _PolicyMixin:
         declaration: Declaration,
         symbol: str | None,
         records: Sequence[EvidenceRecord],
+        *,
+        why: str = "a count cannot carry a currency mark",
     ) -> list[dict[str, Any]]:
-        """Check a ``count`` that carries a measurement as the observation it is."""
+        """Check a ``count`` that looks like a price as the observation it claims to be."""
         found = self._check_observed(figure, declaration, symbol, records)
         for issue in found:
             issue["role"] = "count"
             issue["message"] = (
-                f"{figure.text} is declared count, but a count cannot carry a currency "
-                "mark, so it was checked as observed: "
-                + issue["message"][len(figure.text) + 1 :]
+                f"{figure.text} is declared count, but {why}, so it was checked as "
+                "observed: " + issue["message"][len(figure.text) + 1 :]
             )
         return found
+
+    def _price_band(
+        self, symbol: str | None, records: Sequence[EvidenceRecord]
+    ) -> tuple[float, float] | None:
+        """The observed price range of a figure's instrument, or None when unknown."""
+        if symbol is None and len({record.symbol for record in records if record.symbol}) > 1:
+            return None
+        prices = [value for value in self._price_pool(symbol, records) if value > 0]
+        return (min(prices), max(prices)) if prices else None
+
+    @staticmethod
+    def _poses_as_price(figure: Figure, band: tuple[float, float] | None) -> bool:
+        """Whether an unmarked number sits where its instrument's price does.
+
+        A decimal inside the observed range (±10%) reads as a quote. An integer
+        does only for an instrument quoted in the thousands, between half and
+        twice its range. A percent is never a price.
+
+        Args:
+            figure: The figure.
+            band: The instrument's observed ``(low, high)``, or None.
+
+        Returns:
+            True when the number should be checked as a price.
+        """
+        if band is None or figure.percent:
+            return False
+        low, high = band
+        value = abs(figure.value)
+        if "." in (figure.digits or figure.text):
+            return low * 0.9 <= value <= high * 1.1
+        return low >= _INTEGER_PRICE_FLOOR and low * 0.5 <= value <= high * 2.0
 
     def _metric_pool(self, symbol: str | None) -> list[float]:
         """Metric values from completed analysis results and metric-named leaves."""

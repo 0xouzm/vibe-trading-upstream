@@ -851,7 +851,9 @@ def scan_figures(content: str, block: FiguresBlock) -> list[Figure]:
         for index, (line, start) in enumerate(_lines_with_offsets(content))
     ]
     fences = _fenced_blocks(content)
-    hard: list[tuple[int, int]] = [(start, end) for start, end, _, _ in fences]
+    # A fence tagged with a language holds code; an untagged one is how a model
+    # sets off a plan or a quote, so its numbers are read as prose.
+    hard: list[tuple[int, int]] = [(start, end) for start, end, info, _ in fences if info]
     soft: list[tuple[int, int]] = []
     dates = list(_DATE_RE.finditer(text))
     full_dates = [match for match in dates if match.group("full")]

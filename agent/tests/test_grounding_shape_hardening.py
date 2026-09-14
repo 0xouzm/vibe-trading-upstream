@@ -495,9 +495,12 @@ def test_a_second_figures_opener_ends_an_unclosed_first_block() -> None:
 
 
 def test_streaming_holds_back_from_the_first_block() -> None:
-    text = HDR + _block(HDR_ROW) + "\n\n更多。" + _block("3 | count | n")
+    lead = "先说结论。"
+    text = lead + _block(HDR_ROW) + "\n\n更多。" + _block("3 | count | n")
 
-    assert GroundingLedger.streamable_length(text) == len(HDR) + 2
+    assert GroundingLedger.streamable_length(text) == len(lead) + 2
+    # A measurement before the block holds the stream earlier still.
+    assert GroundingLedger.streamable_length(HDR + _block(HDR_ROW)) == HDR.index("0.666")
 
 
 # ---------------------------------------------------------------------------

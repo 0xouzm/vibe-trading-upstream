@@ -137,7 +137,7 @@ def test_a_count_cannot_carry_a_currency_mark(tmp_path: Path, prose: str, row: s
         ("建议持有 3.5 个月。", "3.5 | count | 月"),
         ("建议持有 3.0 个月。", "3.0 | count | 月"),
         ("仓位上限 5%。", "5% | count | 仓位参数"),
-        ("折扣系数 0.97。", "0.97 | count | 系数"),
+        ("权重 0.30。", "0.30 | count | 权重"),
         ("主观判断上涨概率 70%。", "70% | count | 主观判断"),
     ],
 )
@@ -685,3 +685,40 @@ def test_a_referenced_table_cell_is_checked_against_its_own_column(tmp_path: Pat
 )
 def test_short_tail_risk_names_count_only_as_the_whole_leaf(leaf: str, kind: str | None) -> None:
     assert _metric_kind_for_path(leaf) == kind
+
+
+def test_an_integer_price_of_an_instrument_quoted_in_the_thousands_is_checked(tmp_path: Path) -> None:
+    """"最新收盘 1520" was unchecked for 600519.SH; "200 日均线" and a 0.6-yuan ETF's "20 日" stay so."""
+    head = "600519.SH（akshare，CNY）"
+
+    def verdict(name: str, markets: tuple[Any, ...], text: str, message: str):
+        return _ledger(tmp_path / name, *markets, message=message).validate_final_answer(text)
+
+    invented = verdict("bad", (MARKET_B,), head + "最新收盘 1520。", f"分析 {B}")
+    observed = verdict("good", (MARKET_B,), head + "最新收盘 1450。", f"分析 {B}")
+    window = verdict("window", (MARKET_B,), head + "最新收盘 1450，跌破 200 日均线。", f"分析 {B}")
+    small = verdict("small", (MARKET_A,), HDR + " 跌破 20 日均线。", f"分析 {A}")
+
+    assert invented.valid is False
+    assert observed.valid is True, observed.issues
+    assert window.valid is True, window.issues
+    assert small.valid is True, small.issues
+
+
+def test_a_count_inside_the_price_range_needs_a_derivation(tmp_path: Path) -> None:
+    """An unmarked price declared count is checked; a multiplier its derivation uses is not."""
+    posing = _ledger(tmp_path / "posing", MARKET_A).validate_final_answer(
+        HDR + " 最新收盘 0.888。" + _block(ROW, "0.888 | count | n")
+    )
+    factor = _ledger(tmp_path / "factor", MARKET_A).validate_final_answer(
+        HDR + " 第一档 0.646 元，折扣系数 0.97。"
+        + _block(ROW, "0.646 | derived | 0.666 × 0.97 | c1", "0.97 | count | 系数")
+    )
+    weight = _ledger(tmp_path / "weight", MARKET_A).validate_final_answer(
+        HDR + " 权重 0.30。" + _block(ROW, "0.30 | count | 权重")
+    )
+
+    assert posing.valid is False
+    assert "observed price range" in posing.issues[0]["message"]
+    assert factor.valid is True, factor.issues
+    assert weight.valid is True, weight.issues

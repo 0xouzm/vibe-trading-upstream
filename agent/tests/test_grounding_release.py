@@ -2071,3 +2071,36 @@ def test_a_figures_block_ending_a_tool_call_turn_is_not_shown(tmp_path: Path) ->
     streamed = "".join(data.get("delta", "") for event, data in events if event == "text_delta")
     assert "先记一笔。" in streamed
     assert "figures" not in streamed
+
+
+def test_an_unchecked_measurement_never_streams_before_the_gate(tmp_path: Path) -> None:
+    """An unbuffered draft stops streaming at its first measurement; a rejection resets it."""
+    llm = _ScriptedLLM(
+        [_Response(content="本周收益约 12.5%，好于上周。"), _Response(content="本周整体不错。")]
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    agent = AgentLoop(
+        registry=ToolRegistry(),
+        llm=llm,
+        max_iterations=4,
+        event_callback=lambda event, data: events.append((event, data)),
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    agent.memory.run_dir = str(run_dir)
+
+    result = agent.run("总结一下这周的复盘心得")
+
+    streamed = "".join(data.get("delta", "") for event, data in events if event == "text_delta")
+    assert "12.5" not in streamed
+    assert [data for event, data in events if event == "stream_reset"]
+    assert result["content"] == "本周整体不错。"
+
+
+def test_a_checked_measurement_streams_once_the_gate_passes(tmp_path: Path) -> None:
+    prose = "仓位上限 5%。"
+
+    result, streamed, _ = _stream(tmp_path, prose + "\n\n```figures\n5% | count | 仓位参数\n```")
+
+    assert result["content"] == prose
+    assert streamed == prose

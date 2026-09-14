@@ -731,6 +731,9 @@ def test_the_chinese_prompt_example_passes_the_gate_it_describes(tmp_path: Path)
         ("答案。\n\n``", len("答案。\n\n")),
         ("答案。\n\n```fig", len("答案。\n\n")),
         ("答案。\n```python\nx = 1\n", len("答案。\n```python\nx = 1\n")),
+        ("收盘 0.666 元。", len("收盘 ")),            # an unchecked measurement waits
+        ("复盘 3", len("复盘 ")),                     # a number still being written waits
+        ("复盘 3 次。", len("复盘 3 次。")),          # a finished bare integer streams
     ],
 )
 def test_streaming_holds_back_the_figures_fence_and_nothing_else(text: str, safe: int) -> None:
@@ -787,3 +790,14 @@ def test_a_magnitude_mark_is_a_glued_symbol_not_a_word(
     from src.agent.grounding.figures import magnitude_suffix
 
     assert magnitude_suffix(text, end) == expected
+
+
+def test_an_untagged_fence_is_prose_and_a_tagged_one_is_code() -> None:
+    """A trading plan set off in a bare fence was released unchecked."""
+    untagged = "交易计划：\n```\n入场 0.881\n止损 0.800\n```"
+    tagged = "代码：\n```python\nentry = 0.881\n```"
+
+    measured = {f.text for f in scan_figures(untagged, parse_figures_block(untagged)) if f.shape == "measured"}
+
+    assert measured == {"0.881", "0.800"}
+    assert not [f for f in scan_figures(tagged, parse_figures_block(tagged)) if f.shape == "measured"]

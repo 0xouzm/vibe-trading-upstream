@@ -1396,18 +1396,21 @@ class AgentLoop:
 
                 streamed_chars = 0
                 stream_total = 0
+                stream_frozen = False
 
                 def _on_text_chunk(delta: str) -> None:
-                    nonlocal streamed_chars, stream_total
+                    nonlocal streamed_chars, stream_total, stream_frozen
                     thinking_chunks.append(delta)
                     stream_total += len(delta)
-                    if buffer_text_output:
+                    if buffer_text_output or stream_frozen:
                         return
-                    # The figures block never streams: see streamable_length.
-                    # Only a fence character can hold text back, so a clean
-                    # stream is emitted as it arrives instead of re-parsing the
-                    # whole answer on every chunk.
-                    if streamed_chars + len(delta) == stream_total and not ("`" in delta or "~" in delta):
+                    # Neither the figures block nor an unchecked measurement streams
+                    # (see streamable_length). Only a fence character or a digit
+                    # can hold text back, so any other chunk is emitted as it
+                    # arrives instead of re-parsing the whole answer.
+                    if streamed_chars + len(delta) == stream_total and not any(
+                        char in "`~" or char.isdigit() for char in delta
+                    ):
                         self._emit("text_delta", {"delta": delta, "iter": current_iter})
                         streamed_chars = stream_total
                         return
@@ -1417,6 +1420,9 @@ class AgentLoop:
                         if self._grounding is not None
                         else len(text)
                     )
+                    if self._grounding is not None and safe < len(text):
+                        # Held at a measurement: nothing after it streams this turn.
+                        stream_frozen = self._grounding.measurement_start(text) == safe
                     if safe > streamed_chars:
                         self._emit(
                             "text_delta",
@@ -1507,6 +1513,7 @@ class AgentLoop:
                     thinking_chunks.clear()
                     streamed_chars = 0
                     stream_total = 0
+                    stream_frozen = False
                     reasoning_chars = 0
                     last_reasoning_emit = None
                     # Wait on the cancel event, not time.sleep: the delay now
@@ -1749,6 +1756,13 @@ class AgentLoop:
                                 value=final_content,
                                 offload_kind=f"answer-rejected-{current_iter}",
                             )
+                            if not buffer_text_output and streamed_chars:
+                                # The stream showed this draft up to its first unchecked
+                                # number; the next draft or the released answer replaces it.
+                                self._emit(
+                                    "stream_reset",
+                                    {"iter": current_iter, "reason": "grounding_rejected"},
+                                )
                             react_trace.append(
                                 {
                                     "type": "answer_rejected",

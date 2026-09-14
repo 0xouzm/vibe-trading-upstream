@@ -170,9 +170,11 @@ class GroundingLedger(
     def streamable_length(text: str) -> int:
         """Return how much of a streaming answer may be shown live.
 
-        Everything from the figures block's fence on is the model's declaration
-        to the gate, not answer text, and a last line that could still become
-        that fence is held back until it is complete.
+        Held back: everything from the figures block's fence on (the model's
+        declaration to the gate), a last line that could still become that fence,
+        everything from the first measurement-shaped number (the gate has not
+        checked it, and a rejected draft must not have shown it), and a number
+        still being written ("0." before "666").
 
         Args:
             text: The answer streamed so far.
@@ -181,12 +183,32 @@ class GroundingLedger(
             The length of the prefix that is safe to emit.
         """
         span = parse_figures_block(text).span
+        limit = len(text)
         if span is not None:
-            return span[0]
-        line_start = text.rfind("\n") + 1
-        if text[line_start:].lstrip()[:1] in ("`", "~"):
-            return line_start
-        return len(text)
+            limit = span[0]
+        else:
+            line_start = text.rfind("\n") + 1
+            if text[line_start:].lstrip()[:1] in ("`", "~"):
+                limit = line_start
+        prefix = text[:limit]
+        measured = GroundingLedger.measurement_start(prefix)
+        if measured is not None:
+            return measured
+        trimmed = prefix.rstrip(" \t")
+        cursor = len(trimmed)
+        while cursor and (trimmed[cursor - 1].isdigit() or trimmed[cursor - 1] in ".,"):
+            cursor -= 1
+        if any(char.isdigit() for char in trimmed[cursor:]):
+            return cursor
+        return limit
+
+    @staticmethod
+    def measurement_start(text: str) -> int | None:
+        """Where the first measurement-shaped number in ``text`` starts, or None."""
+        for figure in scan_figures(text, parse_figures_block(text)):
+            if figure.shape == "measured":
+                return figure.start
+        return None
 
     def identity_summary(self) -> dict[str, Any]:
         """Return compact identity state for traces and tool errors."""

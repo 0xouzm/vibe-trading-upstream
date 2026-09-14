@@ -17,6 +17,7 @@ from src.agent.grounding.figures import (
     _lines_with_offsets,
     currency_prefix_start,
     currency_suffix_end,
+    magnitude_suffix,
     parse_figures_block,
     scan_figures,
 )
@@ -659,7 +660,7 @@ class _ReleaseMixin:
                 continue
             removed.append(text[start:end])
             start = max(cursor, currency_prefix_start(text, start))
-            end = currency_suffix_end(text, end)
+            end = currency_suffix_end(text, magnitude_suffix(text, end)[1])
             marker = self._marker_for(text, start)
             if marker is _REDACTION_MARKER_ZH:
                 # "建议买入价 0.95 元" → "建议买入价（略※）": flush against the word,

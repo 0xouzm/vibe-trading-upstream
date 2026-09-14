@@ -520,6 +520,8 @@ class _PolicyMixin:
         """
         if _close_any(figure.value, direct):
             return True
+        if figure.scale != 1.0 and _close_any(figure.value * figure.scale, direct):
+            return True
         candidates = {abs(figure.value), abs(figure.value) / 100.0}
         magnitudes = [abs(target) for target in scaled]
         return any(_close_any(candidate, magnitudes) for candidate in candidates)

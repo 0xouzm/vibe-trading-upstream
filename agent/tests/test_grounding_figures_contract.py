@@ -135,6 +135,7 @@ def test_the_block_parses_the_spec_example() -> None:
         "0.666 | OBSERVED | close | c1",              # role case
         "￥0.666 | observed | close | c1",            # currency mark on the value
         "1,234.50 | observed | close | c1",           # grouped thousands
+        "0.235M | observed | volume | c1",            # magnitude mark on the value
     ],
 )
 def test_the_parser_is_lenient_about_form(line: str) -> None:
@@ -274,6 +275,10 @@ def _shapes(text: str) -> dict[str, str]:
         "The 2026-09-09 close",                 # ISO date, English prose
         "On 2024 levels",                       # bare year, English prose
         "3. First conclusion",                  # ordered-list marker, English
+        "2026-09-11 / 09-14 两次盘中低点",       # zero-padded MM-DD after a full date
+        "09-14 收盘",                           # zero-padded MM-DD alone
+        "2026-10-11 / 10-14 两次盘中低点",       # unpadded MM-DD opened by a full date
+        "| 价位 | 含义 |\n|---|---|\n| 近端支撑 | 2026-09-11 / 09-14 盘中低点 |",  # real run
     ],
 )
 def test_structural_shapes_need_no_declaration(text: str) -> None:
@@ -294,6 +299,8 @@ def test_structural_shapes_need_no_declaration(text: str) -> None:
         "The close was 0.666",                    # decimal, English prose
         "Down 37% from the high",                 # percent, English prose
         "revenue of 400.5 billion",               # decimal, English prose
+        "| 区间 |\n|---|\n| 11-12 |",            # unpadded MM-DD shape may be a price range
+        "| 日期 | 区间 |\n|---|---|\n| 2026-09-09 | 11-12 |",  # a date in ANOTHER cell
     ],
 )
 def test_measurement_shapes_must_be_declared(text: str) -> None:
@@ -314,6 +321,7 @@ def test_measurement_shapes_must_be_declared(text: str) -> None:
         "共 16 个交易日",                          # count noun
         "a 52-week high",                          # window, English prose
         "over 3 sessions",                         # horizon, English prose
+        "a 6M holding horizon",                    # magnitude mark does not make a measurement
     ],
 )
 def test_bare_integers_are_not_checked(text: str) -> None:
@@ -716,3 +724,38 @@ def test_the_chinese_prompt_example_passes_the_gate_it_describes(tmp_path: Path)
 )
 def test_streaming_holds_back_the_figures_fence_and_nothing_else(text: str, safe: int) -> None:
     assert GroundingLedger.streamable_length(text) == safe
+
+
+def test_a_magnitude_mark_scales_the_comparison_not_the_shape(tmp_path: Path) -> None:
+    """A real run quoted volume as "24.6M" and had every one cut.
+
+    The row's volume is 234567. "0.235M" and "23.46万" are that print; "0.300M"
+    is not, and is refused like any other invented figure.
+    """
+    ledger = _ledger(tmp_path)
+
+    in_millions = ledger.validate_final_answer(
+        HDR + " 成交量 0.235M 手。" + _block(HDR_ROW, "0.235M | observed | volume 2026-09-09 | 159516.SZ")
+    )
+    in_wan = ledger.validate_final_answer(
+        HDR + " 成交量 23.46万 手。" + _block(HDR_ROW, "23.46 | observed | volume 2026-09-09 | c1")
+    )
+    invented = ledger.validate_final_answer(
+        HDR + " 成交量 0.300M 手。" + _block(HDR_ROW, "0.300M | observed | volume | 159516.SZ")
+    )
+
+    assert in_millions.valid, in_millions.issues
+    assert in_wan.valid, in_wan.issues
+    assert [issue["value"] for issue in invented.issues] == ["0.300"]
+
+
+def test_a_cut_figure_takes_its_magnitude_mark_with_it(tmp_path: Path) -> None:
+    """A real release read "(omitted※)M → (omitted※)M" before this."""
+    ledger = _ledger(tmp_path)
+    draft = HDR + " 成交量 0.300M 手。"
+
+    released = ledger.redacted_release(draft, ledger.validate_final_answer(draft))
+
+    assert released is not None
+    assert "0.300" not in released
+    assert "M" not in released

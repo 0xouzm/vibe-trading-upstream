@@ -31,7 +31,9 @@ _NUMBER_RE = re.compile(
 # SHAPE 2 — a calendar date or a bare year: structure, never a measurement
 # (spec §3). A year-less "08-10" is two bare integers and needs no mask.
 _DATE_RE = re.compile(
-    r"(?:19|20)\d{2}\s*[-/年]\s*\d{1,2}\s*[-/月]\s*\d{1,2}\s*[日号]?"
+    r"(?P<full>(?:19|20)\d{2}\s*[-/年]\s*\d{1,2}\s*[-/月]\s*\d{1,2}\s*[日号]?)"
+    # A year-less MM-DD / MM/DD; see _short_date_is_structural.
+    r"|(?P<short>(?<![\d.])(?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01])(?!\d|\.\d))"
     r"|\d{1,2}\s*月\s*\d{1,2}\s*[日号]"
     r"|(?:19|20)\d{2}\s*年"
     r"|(?:19|20)\d{2}"
@@ -56,6 +58,10 @@ _CURRENCY_CODES = frozenset(
 )
 
 _PERCENT_CHARS = "%％"
+
+# Magnitude marks glued to a figure ("24.6M", "2.4万"): a symbol set like the
+# currency marks. They scale the comparison with evidence and never decide shape.
+_MAGNITUDES = {"K": 1e3, "M": 1e6, "B": 1e9, "千": 1e3, "万": 1e4, "亿": 1e8}
 
 # A CJK currency word is at most three characters (人民币); bounding the run
 # keeps 元宵/元件, inside longer CJK runs, from reading as money.
@@ -120,6 +126,7 @@ class Figure:
     column: str | None = None
     date: str | None = None
     symbol: str | None = None
+    scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -202,6 +209,8 @@ def _parse_value(text: str) -> tuple[float, bool] | None:
     if percent:
         raw = raw[:-1]
     raw = raw.strip("".join(_CURRENCY_CHARS))
+    if raw and raw[-1] in _MAGNITUDES:
+        raw = raw[:-1]
     if not raw:
         return None
     try:
@@ -374,6 +383,28 @@ def _currency_after(text: str, end: int) -> bool:
     return code.upper() in _CURRENCY_CODES
 
 
+def magnitude_suffix(text: str, end: int) -> tuple[float, int]:
+    """The magnitude mark glued to the right of a figure, if any.
+
+    ``K`` / ``M`` / ``B`` count only when no further letter follows, so "5MB"
+    and "3Mn" are not millions.
+
+    Args:
+        text: The document.
+        end: Where the figure's digits end.
+
+    Returns:
+        ``(multiplier, end past the mark)``, or ``(1.0, end)`` without one.
+    """
+    mark = text[end : end + 1]
+    if not mark or mark not in _MAGNITUDES:
+        return 1.0, end
+    after = text[end + 1 : end + 2]
+    if mark.isascii() and after.isascii() and after.isalpha():
+        return 1.0, end
+    return _MAGNITUDES[mark], end + 1
+
+
 def currency_prefix_start(text: str, start: int) -> int:
     """Where a currency symbol attached to the left of a figure ("$1.10") begins."""
     head = text[:start]
@@ -463,6 +494,28 @@ def _within(span: tuple[int, int], spans: Sequence[tuple[int, int]]) -> bool:
     return any(start <= span[0] and span[1] <= end for start, end in spans)
 
 
+def _short_date_is_structural(content: str, match: re.Match[str], full_dates: Sequence[re.Match[str]]) -> bool:
+    """Whether a year-less ``MM-DD`` is a date rather than an integer range.
+
+    Zero padding ("09-14") is how dates are written and ranges are not. An
+    unpadded one ("10-14") counts only when a full date opens the same table
+    cell or line ("2026-10-11 / 10-14"), because "| 11-12 |" may be a price range.
+
+    Args:
+        content: The candidate answer.
+        match: A ``_DATE_RE`` match of the ``short`` branch.
+        full_dates: Every match of the ``full`` branch.
+
+    Returns:
+        True when the digits are structure.
+    """
+    month, day = match.group("short")[:2], match.group("short")[3:]
+    if month.startswith("0") or day.startswith("0"):
+        return True
+    segment = max(content.rfind("\n", 0, match.start()), content.rfind("|", 0, match.start())) + 1
+    return any(segment <= full.start() and full.end() <= match.start() for full in full_dates)
+
+
 def scan_figures(content: str, block: FiguresBlock) -> list[Figure]:
     """Locate and classify every number in the prose of a draft (spec §3).
 
@@ -487,7 +540,14 @@ def scan_figures(content: str, block: FiguresBlock) -> list[Figure]:
     exempt: list[tuple[int, int]] = [
         (start, end) for start, end, _, _ in _fenced_blocks(content)
     ]
-    for pattern in (_DATE_RE, _CANONICAL_SYMBOL_RE, _ORDINAL_RE):
+    dates = list(_DATE_RE.finditer(content))
+    full_dates = [match for match in dates if match.group("full")]
+    exempt.extend(
+        (match.start(), match.end())
+        for match in dates
+        if not match.group("short") or _short_date_is_structural(content, match, full_dates)
+    )
+    for pattern in (_CANONICAL_SYMBOL_RE, _ORDINAL_RE):
         exempt.extend((match.start(), match.end()) for match in pattern.finditer(content))
 
     cell_at: list[tuple[int, int, TableRow, int]] = []
@@ -533,6 +593,7 @@ def scan_figures(content: str, block: FiguresBlock) -> list[Figure]:
                 date_value = row.cells[row.date_column][0] or None
             if row.symbol_column is not None and row.symbol_column < len(row.cells):
                 symbol_value = row.cells[row.symbol_column][0] or None
+        scale = 1.0 if percent else magnitude_suffix(content, match.end())[0]
         figures.append(
             Figure(
                 text=content[start:end],
@@ -545,6 +606,7 @@ def scan_figures(content: str, block: FiguresBlock) -> list[Figure]:
                 column=column,
                 date=date_value,
                 symbol=symbol_value,
+                scale=scale,
             )
         )
     return figures

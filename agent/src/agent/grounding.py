@@ -85,6 +85,57 @@ _RESOLUTION_INCOMPLETE_STATUSES = {"unresolved", "conflicting", "invalidated"}
 # These budgets are separate from the rejected-draft count so real recovery
 # progress is never cut off at the three-draft retry cap.
 MAX_GROUNDING_RECOVERY_ROUNDS = 6
+# Issue codes whose figure can be cut out of its clause and the draft released
+# (see ``redacted_release``), and the provenance codes a data note repairs.
+_REDACTABLE_CODES = frozenset(
+    {
+        "numeric_claim_conflict",
+        "numeric_claim_unavailable",
+        "unsourced_symbol_figures",
+        "analysis_claim_unavailable",
+    }
+)
+# The provenance codes a data note may fill in deterministically. The source
+# and the currency are metadata ABOUT a figure. ``canonical_symbol_not_surfaced``
+# is deliberately absent: the symbol is the figure's SUBJECT, and appending
+# "562500.SH: source yahoo" under a draft that calls the instrument 贵州茅台
+# footnotes a misattribution instead of repairing it — so the identity binding
+# keeps its model-correction round.
+_REPAIRABLE_PROVENANCE_CODES = frozenset(
+    {"data_source_not_surfaced", "currency_not_surfaced"}
+)
+_MAX_REDACTION_PASSES = 3
+# The in-text mark for an omitted figure. It replaces the number AND the unit
+# glued to it ("0.95 元" → "（略※）", "$1.10" → "(omitted※)") so the sentence
+# still reads as prose, and the ※ points at the one footnote that says how
+# many figures were omitted and why. A bracketed "[value removed]" left the
+# unit dangling and read like a redaction stamp.
+_REDACTION_MARKER_ZH = "（略※）"
+_REDACTION_MARKER_EN = "(omitted※)"
+# Unit / currency tokens glued to a price, swallowed with the figure.
+# The single-character 元 additionally guards against CJK: without it the
+# swallow ate the 元 of 元宵/元旦/元件 and left an orphan "宵节后关注" in the
+# released text. The multi-character units cannot start a longer word the
+# same way, so they keep the Latin-only guard (it is there for USD/USDT).
+# Both guards also refuse a following slash: 元/股 and USD/share are ONE
+# compound unit, and swallowing only its first half rewrote
+# "建议买入价 0.95 元/股" into "建议买入价（略※）/股" — a denominator with
+# nothing left above it.
+_CURRENCY_UNIT_WORDS = (
+    r"人民币|美元|美金|港元|港币|日元|欧元|英镑|"
+    r"CNY|RMB|USD|HKD|JPY|EUR|GBP|CAD|AUD|SGD|USDT"
+)
+_UNIT_AFTER_RE = re.compile(
+    r"\s*(?:(?:" + _CURRENCY_UNIT_WORDS + r")(?![A-Za-z/／])"
+    r"|元(?![A-Za-z/／\u3400-\u9fff]))"
+)
+# The same tokens without the swallow guards. Those guards decide how much
+# text the marker may EAT; this one only asks whether a figure is written as a
+# price, and there "1.180 元已回撤" is as much a quote as "1.180 元。" is.
+_UNIT_TOKEN_AFTER_RE = re.compile(
+    r"\s*(?:" + _CURRENCY_UNIT_WORDS + r"|元)", re.IGNORECASE
+)
+_CURRENCY_BEFORE_RE = re.compile(r"(?:US\$|HK\$|C\$|A\$|S\$|\$|¥|￥|€|£)\s*$")
 MAX_SYMBOL_RESOLUTION_ATTEMPTS = 2
 MAX_PRICE_EVIDENCE_ATTEMPTS = 3
 _PRICE_FIELDS = {"open", "high", "low", "close", "adj_close", "price"}
@@ -275,6 +326,34 @@ _PRICE_CONTEXT_RE = re.compile(
     r"现价|报价|价格|价位)",
     re.IGNORECASE,
 )
+# The vocabulary of a price LEVEL — a band, a moving average, a support or
+# resistance line. It is the only shape for which an indicator reading is
+# admissible evidence, and the rule is stated this way round on purpose.
+#
+# It used to be stated the other way: an indicator was admissible unless the
+# clause named an OHLC field, against a hand-written list of field phrases.
+# A hand-written denylist is only ever as complete as the day it was typed,
+# and it was not complete for one day: with the session's sma_20 at 1.150 and
+# the observed close at 1.171, "收盘价为 1.150 元" was caught while "收盘于"'s
+# English twins "closed at 1.150" / "the close was 1.150" / "highest price was
+# 1.150" were released, and every spot-quote spelling there is — 现价 / 最新价
+# / 成交价 / 报价 / 股价 / current price / the quote is — leaked in both
+# scripts, because a spot quote names the latest print and named no OHLC
+# field. An allowlist fails the other way: a level word this list misses costs
+# a correction round instead of releasing a fabricated print.
+_PRICE_LEVEL_WORD_RE = re.compile(
+    r"(?:\b(?:support|resistance|pivot|moving[- ]average|"
+    r"(?:upper|lower|middle) band|band|channel|bollinger|keltner|donchian|"
+    r"ichimoku|supertrend|vwap|atr)\b|"
+    r"\b(?:SMA|EMA|WMA|DMA|MA|BOLL)\d{0,3}\b|"
+    r"支撑|阻力|压力|均线|上轨|下轨|中轨|轨道|通道|中枢|枢轴|布林)",
+    re.IGNORECASE,
+)
+# A table column whose header names a price. Wider than the OHLC aliases on
+# purpose: 挂单价 / 目标价 / Entry Price are price columns that
+# ``_validate_price_tables`` does not key on and the prose scan skips, so
+# their cells are figures no validator ever reads.
+_PRICE_HEADER_RE = re.compile(r"(?:价格?|价位|price)\s*$", re.IGNORECASE)
 _ANALYSIS_METRIC_RE = re.compile(
     r"(?:\breturn vol(?:atility)?\b|\bmax(?: |\.)?drawdown\b|\bmaxdd\b|"
     r"\bsharpe(?: ratio)?\b|\bwin rate\b|\bhit rate\b|"
@@ -399,6 +478,33 @@ _DERIVATION_RE = re.compile(
     r"(?:\bderived\b|\bcalculated\b|\bformula\b|\bbased on\b|计算|推导|公式|基于)",
     re.IGNORECASE,
 )
+# The separator between a formula and its result. "=" is how the gate first
+# accepted a derivation; "≈" / "≒" / "约" / "约等于" are how a model writes one
+# whose result it rounded, and each was rejected with the multiplier read as a
+# quoted price. The evaluation tolerance already absorbs the rounding.
+# The English spellings are here for the same reason the Chinese ones are:
+# ``test_derived_return_exemption_is_structural_not_phrasal`` is the repo's
+# standing rule that identical arithmetic gets an identical verdict in both
+# languages, and "1.171 * 0.97 approximately 1.136" was still burning a
+# revision round while its ≈ twin passed.
+_RESULT_SEPARATOR_RE = re.compile(
+    r"约等于|≈|≒|=|约|~|\b(?:approximately|approx\.?|about|around|roughly)\b",
+    re.IGNORECASE,
+)
+# The subject of a performance metric decides which evidence may ground it.
+# A strategy's max drawdown is a property of an equity curve a backtest
+# produced; two observed prints of the instrument are not that curve, and
+# neither is any arithmetic on them. "回测显示该策略最大回撤 5.9%（从 1.180
+# 跌至 1.110）" rode out of the session on the endpoint-arithmetic exemption
+# with no backtest anywhere in it. A PRICE-subject drawdown ("股价较 5 月高点
+# 1.053 元已回撤约 37%") is the arithmetic itself and keeps the exemption.
+_STRATEGY_SUBJECT_RE = re.compile(
+    r"(?:\bstrateg(?:y|ies)\b|\bbacktest(?:ed|ing)?\b|\bportfolio\b|"
+    r"\bequity curve\b|\bNAV\b|\bholdings?\b|"
+    r"策略|回测|组合|持仓|净值)",
+    re.IGNORECASE,
+)
+_INDICATOR_IDENTIFIER_RE = re.compile(r"(?<![0-9.])[A-Za-z_]+\d+(?![0-9.])")
 # "从 2026-08-03 的 100.0 涨到 2026-09-02 的 112.4" / "rose from 100.0 to
 # 112.4": a return figure framed as growth between two endpoints is
 # arithmetic on sourced inputs, not an invented backtest metric (#1338
@@ -740,7 +846,21 @@ _SENTENCE_BOUNDARY_RE = re.compile(r"[.!?]\s+(?=[A-Z(（])")
 # derivation such as "(8.5 - 7.9) / 2" must stay in one segment for the
 # formula check, and 公司名（代码）价格 must stay in one segment so the
 # unsourced-symbol gate can see the symbol with its figure (#1260).
-_CLAUSE_SEPARATOR_RE = re.compile(r"[,，;；。、\n]")
+# The English sentence period is a clause separator too. Without it two
+# English sentences sharing a line were ONE clause, so the header's "last
+# close" labelled the whole line and a derivation in the first sentence
+# exempted a fabricated price in the second: "Based on close 1.171 * 0.80 =
+# 0.937. The last traded price is 0.937." validated, while the byte-identical
+# text with a paragraph break between the sentences was rejected — and the
+# Chinese translation was rejected either way, because 。 always split. A
+# per-language split is a per-language verdict, which is exactly what
+# ``test_grounding_language_parity`` exists to stop.
+# The lookahead is what keeps a decimal point, a ticker suffix (562500.SS) and
+# an abbreviation ("approx. 1.10") out: only a period followed by whitespace
+# and the start of a new sentence separates.
+_CLAUSE_SEPARATOR_RE = re.compile(
+    r"[,，;；。、\n]|[.!?](?=\s+[\"'(\[“‘]?[A-Z])"
+)
 
 
 # The ASCII comma both separates clauses and groups thousands, and the clause
@@ -753,17 +873,192 @@ _CLAUSE_SEPARATOR_RE = re.compile(r"[,，;；。、\n]")
 _THOUSANDS_SEPARATOR_RE = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
 
 
-def _split_clauses(text: str) -> list[str]:
-    """Split prose into clauses without breaking a grouped number apart.
+def _matches_any(raw: Any, values: Sequence[float], *, rel: float = 0.005) -> bool:
+    """Whether a measurement-shaped figure equals one of ``values``.
+
+    Args:
+        raw: A figure as ``_measure_numbers`` returns it ("1.136", "5.26%").
+        values: Numeric values to match against.
+        rel: Relative tolerance, absolute floor 1e-9.
+
+    Returns:
+        True when the parsed figure matches any value.
+    """
+    try:
+        number = float(str(raw).strip().rstrip("%％").replace(",", ""))
+    except ValueError:
+        return False
+    return any(abs(number - value) <= max(abs(value) * rel, 1e-9) for value in values)
+
+
+def _format_price(value: float) -> str:
+    """Render an observed price without scientific notation or lost digits.
+
+    ``%g`` switches to scientific notation past six significant digits, so an
+    index level printed in the release footnote read "1.23457e+06".
+    """
+    return format(value, ".10g")
+
+
+def _redaction_targets(values: Sequence[Any]) -> tuple[bool, list[float], list[str]]:
+    """Split issue values into cut-everything / numeric / percent-literal cuts.
+
+    Args:
+        values: The ``value`` field of each issue flagged on one clause.
+
+    Returns:
+        ``(cut_all, numeric targets, percent literals)``. ``cut_all`` is set by
+        a ``None`` value, which is how ``unsourced_symbol_figures`` says "every
+        figure in this clause belongs to an instrument no tool handled".
+    """
+    cut_all = False
+    targets: list[float] = []
+    literals: list[str] = []
+    for value in values:
+        if value is None:
+            cut_all = True
+        elif isinstance(value, bool):
+            continue
+        elif isinstance(value, (int, float)):
+            targets.append(float(value))
+        elif isinstance(value, str) and value.strip():
+            literal = value.strip().replace(" ", "").replace(",", "")
+            if literal.endswith(("%", "％")):
+                literals.append(literal)
+            else:
+                try:
+                    targets.append(float(literal))
+                except ValueError:
+                    continue
+    return cut_all, targets, literals
+
+
+_RELEASE_NOTE_LINE_RE = re.compile(r"^[^\S\n]*※[^\n]*\n?", re.MULTILINE)
+
+
+def _strip_release_markers(content: str) -> str:
+    """Remove any redaction marker or release note the MODEL wrote.
+
+    The marker and the footnote are the gate's own statements about what it
+    cut. A draft carrying "※ 略去 0 处……" of its own shipped both notes, one
+    contradicting the other, and a "（略※）" pasted into the body read as a
+    redaction that never happened.
+
+    Args:
+        content: The rejected draft.
+
+    Returns:
+        The draft with every marker and note-shaped line removed.
+    """
+    stripped = content.replace(_REDACTION_MARKER_ZH, "").replace(
+        _REDACTION_MARKER_EN, ""
+    )
+    return _RELEASE_NOTE_LINE_RE.sub("", stripped)
+
+
+def _figure_reads_as_a_price(text: str, figure: str) -> bool:
+    """Whether ``figure`` is written as a price somewhere in ``text``.
+
+    A price word ahead of it in the clause, a currency symbol in front of it,
+    or a currency/unit token glued behind it. Any one of the three is the
+    ordinary way an answer quotes a price, and none of them is how a metric
+    figure is written.
+
+    Args:
+        text: The clause or cell the figure appears in.
+        figure: The figure exactly as it was written.
+
+    Returns:
+        True when at least one occurrence reads as a price.
+    """
+    for match in re.finditer(re.escape(figure), text):
+        if _UNIT_TOKEN_AFTER_RE.match(text, match.end()):
+            return True
+        if _CURRENCY_BEFORE_RE.search(text[: match.start()]):
+            return True
+        if _PRICE_CONTEXT_RE.search(text[: match.start()]):
+            return True
+    return False
+
+
+def _labels_its_result_observed(text: str, formula_start: int) -> bool:
+    """Whether a market-print word to the left CLAIMS the formula's result.
+
+    The distinguisher is a result separator between the price word and the
+    formula's first operand. "收盘价 = 1.171 × 0.80" reads "the close IS this
+    expression" — the equation's subject is an observation, so its result is
+    a fabricated print. "基于收盘价 1.171 × 0.97 = 1.136" reads "starting from
+    the observed close" — the word labels an OPERAND, and the result is the
+    entry price the answer proposes, which is the shape the correction prompt
+    asks the model to write.
+
+    Args:
+        text: The clause the formula was found in.
+        formula_start: Where the formula's arithmetic run starts in it.
+
+    Returns:
+        True when the formula's result is claimed to be an observed print.
+    """
+    last: re.Match[str] | None = None
+    for match in _OBSERVED_PRICE_WORD_RE.finditer(text[:formula_start]):
+        last = match
+    if last is None:
+        return False
+    return bool(_RESULT_SEPARATOR_RE.search(text[last.end() : formula_start]))
+
+
+def _clause_spans(text: str, offset: int = 0) -> list[tuple[str, int, int]]:
+    """Split prose into clauses, keeping each clause's span in the source text.
+
+    A grouping comma is not a separator and is stripped from the returned
+    segment text, but the span is into the ORIGINAL, un-stripped text. The
+    redaction path needs that: it used to locate a flagged clause with
+    ``text.find(claim)`` on the normalised string, which never matched once a
+    price carried a thousands separator ("1,450.50"), and which matched inside
+    an unrelated longer number when the claim was a bare table cell ("1.10"
+    found inside "21.10").
 
     Args:
         text: One line of candidate answer text.
+        offset: Where ``text`` starts inside the document being validated.
 
     Returns:
-        The clause segments, with thousands separators removed so a grouped
-        price survives as one number.
+        ``(segment, start, end)`` per clause, with ``start``/``end`` measured
+        in the document (``offset`` already added).
     """
-    return _CLAUSE_SEPARATOR_RE.split(_THOUSANDS_SEPARATOR_RE.sub("", text))
+    bounds: list[tuple[int, int]] = []
+    cursor = 0
+    for match in _CLAUSE_SEPARATOR_RE.finditer(text):
+        if match.group(0) == "," and _THOUSANDS_SEPARATOR_RE.match(text, match.start()):
+            continue
+        bounds.append((cursor, match.start()))
+        cursor = match.end()
+    bounds.append((cursor, len(text)))
+    return [
+        (_THOUSANDS_SEPARATOR_RE.sub("", text[start:end]), start + offset, end + offset)
+        for start, end in bounds
+    ]
+
+
+def _lines_with_offsets(content: str) -> list[tuple[str, int]]:
+    """Return each line of ``content`` with its character offset in it.
+
+    ``str.splitlines`` discards the terminators, so an issue raised on a line
+    cannot say where in the document that line sits. Offsets are recovered by
+    scanning forward, which is exact because only line terminators separate
+    one line's end from the next line's start.
+    """
+    positions: list[tuple[str, int]] = []
+    cursor = 0
+    for line in content.splitlines():
+        start = content.find(line, cursor) if line else cursor
+        if start < 0:
+            start = cursor
+        positions.append((line, start))
+        cursor = start + len(line)
+    return positions
+
+
 _TABLE_SEPARATOR_RE = re.compile(r"^:?-{3,}:?$")
 
 _TABLE_FIELD_ALIASES = {
@@ -787,6 +1082,44 @@ _TABLE_FIELD_ALIASES = {
     "收盘价": "close",
 }
 _DATE_HEADERS = {"date", "datetime", "trade date", "timestamp", "日期", "交易日", "时间"}
+
+# A price word that asserts the figure is a MARKET PRINT — an OHLC field or a
+# spot quote. Such a figure is an observation, and an observation is never
+# something a formula produces: "2026-06-23 收盘价 = 1.171 × 0.80 = 0.937"
+# is arithmetic whose result is claimed to be a close the ledger holds as
+# 1.137, and the bare-equation derivation exemption released it. Only the
+# formula's OPERANDS stay exempt under such a label; see
+# ``_labels_its_result_observed``.
+#
+# The OHLC half is DERIVED from ``_TABLE_FIELD_ALIASES``, which is the table
+# path's own source of truth and already carries both scripts — the previous
+# hand-written prose list held "closing price" but not "closed at", and
+# "收盘价" but not "收盘为". The four bare English words are dropped: "open" is
+# a verb, "high"/"low" are adjectives, and "close" only counts when it is not
+# "close to". The spot half has no table equivalent and is written out.
+_OHLC_PROSE_WORDS = sorted(
+    (alias for alias in _TABLE_FIELD_ALIASES if alias not in {"open", "high", "low", "close"}),
+    key=len,
+    reverse=True,
+)
+_OBSERVED_PRICE_WORD_RE = re.compile(
+    "(?:"
+    # ASCII aliases take word boundaries so "closing" does not match inside
+    # "disclosing"; the CJK ones are written without spaces and must not.
+    + "|".join(
+        (r"\b" + re.escape(word) + r"\b") if word.isascii() else re.escape(word)
+        for word in _OHLC_PROSE_WORDS
+    )
+    + r"|\b(?:closed|opened|settled|fixed|traded|quoted|last[- ]traded|changed hands)\s+at\b"
+    + r"|\bthe\s+(?:close|open|high|low)\s+(?:was|is)\b"
+    + r"|\b(?:last|previous|prior|session|intraday|day's|today's)\s+(?:close|open|high|low)\b"
+    + r"|\bclose\b(?!\s+to\b)"
+    + r"|\b(?:current|latest|market|spot|share|last(?: traded)?)\s+price\b"
+    + r"|\bthe\s+quote\b|\btrad(?:es|ing)\s+at\b|\bchanges?\s+hands\s+at\b"
+    + r"|收盘于|收盘为|收报|报收|收于|现价|最新价|最新成交价|成交价|市价|报价|现报|股价"
+    + ")",
+    re.IGNORECASE,
+)
 
 # A loader's id is ASCII, but the answer follows the user's language, so a
 # Chinese report names the same provider in Chinese. Demanding the ASCII id
@@ -1094,6 +1427,94 @@ def _price_field_for_path(path: str) -> str | None:
     return _GENERIC_PRICE_FIELD_ALIASES.get(leaf)
 
 
+# A price-denominated indicator the session fetched is observed evidence in
+# the same sense an OHLC bar is: ``indicators.sma_20: 0.7158`` came out of
+# ``technical_indicators`` for this symbol, and an answer that writes "MA20
+# 0.7158" or derives an entry from it is quoting a tool, not inventing a
+# number. Before this, the value was compared against OHLC bars only and
+# rejected as a fabricated price (deriv2 probe, 2026-09-09). The family list is
+# closed and price-denominated on purpose — a moving average, band, pivot,
+# support/resistance level, VWAP or ATR is in the instrument's currency; RSI,
+# MACD, volume, counts and row totals are not. Letting a quote match
+# ``rows: 54`` or a volume average would gut the fabrication check, so any
+# non-price token anywhere in the path disqualifies the leaf.
+_PRICE_INDICATOR_TOKENS = frozenset(
+    {
+        "sma", "ema", "wma", "dma", "dema", "tema", "hma", "kama", "ma", "vwap", "vwma",
+        "bb", "bbands", "boll", "bollinger", "band", "bands", "keltner", "kc", "donchian",
+        "pivot", "pp", "support", "resistance",
+        "atr", "psar", "sar", "supertrend", "ichimoku", "tenkan", "kijun", "senkou",
+        "chikou", "highest", "lowest",
+    }
+)
+# Generic band leaves. "lower" is a price only under a band family, so these
+# need a family token elsewhere in the path: ``bollinger.lower`` qualifies,
+# a bare ``summary.lower`` does not.
+_PRICE_BAND_LEAVES = frozenset({"upper", "lower", "middle", "mid", "top", "bottom", "basis"})
+# Standard pivot-level spellings. They are matched before the trailing digits
+# are stripped: ``r1`` would otherwise become ``r``, which is in no set, and
+# the six literals ``r1 r2 r3 s1 s2 s3`` sat in the family list unreachable.
+_PIVOT_LEVEL_RE = re.compile(r"^[rs][123]$")
+_NON_PRICE_TOKENS = frozenset(
+    {
+        "volume", "vol", "turnover", "amount", "count", "rows", "returned", "signal",
+        "histogram", "rsi", "kdj", "k", "d", "j", "cci", "adx", "obv", "mfi", "roc",
+        "williams", "wr", "stoch", "pct", "percent", "ratio", "change", "chg", "width",
+        "position", "score", "z", "zscore", "slope", "angle", "days", "bars",
+        # Parameters and derived shapes, not levels: ``params.ma_period: 20``
+        # and ``entry_condition.ma_window: 20`` are settings, ``ma_diff`` and
+        # ``sma_cross`` are differences and booleans. The leaf test below
+        # already rejects those three, but a path that also carries a family
+        # token in another segment must not be readmitted by it.
+        "window", "period", "length", "span", "lookback", "n", "cross", "flag",
+    }
+)
+
+
+def _is_price_denominated_indicator(path: str) -> bool:
+    """Return whether a generic evidence path is a price-denominated indicator.
+
+    The decision is made on the LEAF — the last dotted segment, with a
+    trailing index stripped — not on "some token anywhere in the path". Under
+    the old any-token rule ``indicators.ma_diff``, ``indicators.sma_cross``
+    and ``indicators.supertrend_direction`` were all admitted as observed
+    prices because they carry ``ma`` / ``sma`` / ``supertrend`` somewhere,
+    and a payload with any of them set to 1.30 let the answer print
+    "现价 1.30 元" (attack6 probe, 2026-09-09). A difference, a crossover
+    flag and a direction are not prices.
+
+    Args:
+        path: Recorded evidence field, e.g. ``"indicators.bollinger.lower"``.
+
+    Returns:
+        True when the leaf names a price-denominated indicator level and no
+        path token names a non-price quantity.
+    """
+    text = str(path or "")
+    tokens = [
+        re.sub(r"\d+$", "", token).casefold()
+        for token in re.split(r"[._\[\]\-\s]+", text)
+        if token
+    ]
+    tokens = [token for token in tokens if token]
+    if not tokens:
+        return False
+    if any(token in _NON_PRICE_TOKENS for token in tokens):
+        return False
+    segments = [segment for segment in re.split(r"[.\[\]]+", text) if segment]
+    if not segments:
+        return False
+    leaf = segments[-1].strip().casefold()
+    if _PIVOT_LEVEL_RE.match(leaf):
+        return True
+    leaf = re.sub(r"[_\-]?\d+$", "", leaf) or leaf
+    if leaf in _PRICE_INDICATOR_TOKENS:
+        return True
+    return leaf in _PRICE_BAND_LEAVES and any(
+        token in _PRICE_INDICATOR_TOKENS for token in tokens
+    )
+
+
 def _metric_kind_for_path(path: str) -> str | None:
     """Map an evidence JSON path to an analysis metric kind."""
     leaf = re.sub(r"\[\d+\]$", "", str(path or "").rsplit(".", 1)[-1])
@@ -1382,6 +1803,9 @@ class GroundingLedger:
         self._analysis_completed: list[dict[str, Any]] = []
         self._analysis_metrics: list[dict[str, Any]] = []
         self._validations: list[dict[str, Any]] = []
+        # The one document that actually shipped through the release path, if
+        # any. Not a draft, so it stays out of ``validation_count``.
+        self._released: dict[str, Any] | None = None
         self._recovery_rounds = 0
         self._symbol_resolution_attempts = 0
         self._price_evidence_attempts = 0
@@ -1875,6 +2299,41 @@ class GroundingLedger:
             A deterministic validation result. A record containing only the
             answer hash and structured issues is appended to the artifact.
         """
+        return self._validate(content, record=True)
+
+    def revalidate(self, content: str) -> ValidationResult:
+        """Validate text WITHOUT counting it as a rejected draft.
+
+        For the recheck that follows a deterministic repair or redaction. No
+        model round produced that text, so recording it would spend one unit
+        of the revision budget (``loop.py``) and add an attempt to the
+        artifact that no draft stands behind.
+
+        Args:
+            content: The repaired or redacted answer.
+
+        Returns:
+            A deterministic validation result.
+        """
+        return self._validate(content, record=False)
+
+    def _validate(self, content: str, *, record: bool) -> ValidationResult:
+        """Run the gate, optionally without recording the attempt.
+
+        ``validation_count`` is the run's rejected-DRAFT count: it caps the
+        revision budget (``loop.py``) and is printed to the user as the number
+        of rejected drafts in the degraded-run reason. The release path's own
+        rechecks are not drafts — one successful ``redacted_release`` inflated
+        the count from 1 to 4 with no model round in between, shrinking the
+        budget and overstating the audit number — so they pass ``record=False``.
+
+        Args:
+            content: Candidate assistant answer.
+            record: Whether to append the attempt to the persisted ledger.
+
+        Returns:
+            A deterministic validation result.
+        """
         self._ingest_run_dir_ohlc_csvs()
         issues: list[dict[str, Any]] = []
         issues.extend(self._validate_identity(content))
@@ -1882,6 +2341,8 @@ class GroundingLedger:
         issues.extend(self._validate_price_claims(content))
         issues.extend(self._validate_analysis_claims(content))
         result = ValidationResult(valid=not issues, issues=issues)
+        if not record:
+            return result
         self._validations.append(
             {
                 "attempt": len(self._validations) + 1,
@@ -2031,24 +2492,9 @@ class GroundingLedger:
 
     def safe_fallback(self) -> str:
         """Return a deterministic fail-closed answer after repeated rejection."""
-        is_zh = bool(re.search(r"[\u3400-\u9fff]", self.user_message))
-        price_records = self._price_records()
-        if price_records:
-            by_symbol: dict[str, list[EvidenceRecord]] = {}
-            for record in price_records:
-                by_symbol.setdefault(record.symbol or "unknown", []).append(record)
-            facts = []
-            for symbol, records in sorted(by_symbol.items()):
-                values = [float(record.value) for record in records if record.value is not None]
-                currency = next((record.currency for record in records if record.currency), None)
-                sources = sorted({record.source for record in records if record.source})
-                source_label = "/".join(sources) if sources else "unknown"
-                unit = f" {currency}" if currency else ""
-                facts.append(
-                    f"{symbol}: {min(values):g}–{max(values):g}{unit} "
-                    f"(source: {source_label}; currency conversion: none)"
-                )
-            joined = "；".join(facts) if is_zh else "; ".join(facts)
+        is_zh = self._user_writes_chinese()
+        joined = self._observed_range_summary(is_zh)
+        if joined is not None:
             if is_zh:
                 return (
                     "为避免输出与工具证据冲突的价格，我已拒绝上一版答案。"
@@ -2093,6 +2539,595 @@ class GroundingLedger:
             "produce a trading conclusion. Please confirm the candidate symbol and venue."
         )
 
+    def _user_writes_chinese(self) -> bool:
+        """Return whether user-facing gate text should be Chinese."""
+        return bool(re.search(r"[\u3400-\u9fff]", self.user_message))
+
+    def _observed_range_summary(self, is_zh: bool, content: str | None = None) -> str | None:
+        """Summarise the observed OHLC range per symbol, or None without prices.
+
+        Args:
+            is_zh: Whether to join the facts with Chinese punctuation.
+            content: The answer the summary is attached to, when there is one.
+                The symbol is then printed the way that answer spells it — a
+                footnote on an answer written throughout in ``562500.SS`` used
+                to name ``562500.SH``, because the evidence record is
+                canonicalised.
+
+        Returns:
+            One fact per symbol, or None when the run observed no price.
+        """
+        price_records = self._price_records()
+        if not price_records:
+            return None
+        by_symbol: dict[str, list[EvidenceRecord]] = {}
+        for record in price_records:
+            by_symbol.setdefault(record.symbol or "unknown", []).append(record)
+        facts = []
+        for symbol, records in sorted(by_symbol.items()):
+            values = [float(record.value) for record in records if record.value is not None]
+            currency = next((record.currency for record in records if record.currency), None)
+            sources = sorted({record.source for record in records if record.source})
+            source_label = "/".join(sources) if sources else "unknown"
+            unit = f" {currency}" if currency else ""
+            facts.append(
+                f"{self._answer_symbol_spelling(symbol, content)}: "
+                f"{_format_price(min(values))}–{_format_price(max(values))}{unit} "
+                f"(source: {source_label}; currency conversion: none)"
+            )
+        return "；".join(facts) if is_zh else "; ".join(facts)
+
+    @staticmethod
+    def _answer_symbol_spelling(canonical: str, content: str | None) -> str:
+        """Return the spelling ``content`` uses for a canonical symbol."""
+        if not content:
+            return canonical
+        for match in _CANONICAL_SYMBOL_RE.finditer(content):
+            if _normalize_symbol(match.group(0)) == canonical:
+                return match.group(0)
+        return canonical
+
+    def _provenance_note(self, content: str | None = None) -> str | None:
+        """Build the one-line data note that satisfies the provenance checks.
+
+        Args:
+            content: The answer the note is appended to, so the symbol is
+                printed the way that answer spells it.
+
+        Returns:
+            The note, or None when the run observed no price.
+        """
+        price_records = self._price_records()
+        if not price_records:
+            return None
+        is_zh = self._user_writes_chinese()
+        by_symbol: dict[str, list[EvidenceRecord]] = {}
+        for record in price_records:
+            by_symbol.setdefault(record.symbol or "unknown", []).append(record)
+        parts = []
+        for symbol, records in sorted(by_symbol.items()):
+            sources = sorted(
+                {
+                    record.source
+                    for record in records
+                    if record.source and record.source.casefold() not in {"auto", "unknown"}
+                }
+            )
+            currency = next((record.currency for record in records if record.currency), None)
+            source_label = "/".join(sources) if sources else ("未知" if is_zh else "unknown")
+            currency_label = currency or ("未知" if is_zh else "unknown")
+            spelling = self._answer_symbol_spelling(symbol, content)
+            parts.append(
+                f"{spelling}：行情来源 {source_label}，计价货币 {currency_label}"
+                if is_zh
+                else f"{spelling}: price source {source_label}, quote currency {currency_label}"
+            )
+        if is_zh:
+            return "数据说明：" + "；".join(parts) + "。"
+        return "Data note: " + "; ".join(parts) + "."
+
+    def repair_provenance(
+        self,
+        content: str,
+        validation: ValidationResult,
+        *,
+        require_checked_figures: bool = True,
+    ) -> str | None:
+        """Append a data note when the only defects are missing provenance words.
+
+        ``data_source_not_surfaced`` and ``currency_not_surfaced`` mean the
+        answer quoted a price without naming the source or the currency. Both
+        are known to the ledger, so the omission is deterministic — and
+        regenerating a multi-minute report to add the word "tencent" is a full
+        model round for one word. Nothing here touches a figure: a draft
+        carrying any other issue is returned as None so the numeric checks
+        keep their round.
+
+        ``canonical_symbol_not_surfaced`` is deliberately NOT repaired. That
+        check's job is that a price claim surfaces the symbol it is about, and
+        appending "562500.SH: price source yahoo" under a draft that reads
+        "贵州茅台 最新收盘价 1.171 元" turns a misattribution into a released
+        answer with a footnote naming a different instrument. It keeps its
+        model round (base rate: 1 of 27 rejections in the local traces, so
+        nearly all of the saving survives).
+
+        The repair is also declined when the draft carries a price COLUMN the
+        table validator does not key on ("| 档位 | 挂单价 |"): those cells are
+        outside every validator's reach, and the note says where this run's
+        prices came from. Attaching it to a draft holding an unchecked ladder
+        price attests to a figure the gate never saw, in zero model rounds —
+        the round it used to cost was the last chance to drop that figure.
+
+        Args:
+            content: The rejected draft.
+            validation: Its validation result.
+            require_checked_figures: Decline when an unchecked price column is
+                present. ``redacted_release`` passes False: there the choice
+                is not "repair or one more model round" but "repair or the
+                canned refusal", the revision budget is already spent, and the
+                document it repairs carries the redaction footnote.
+
+        Returns:
+            The draft with a provenance note appended, or None when the issues
+            are not provenance-only, an unchecked price column is present, or
+            there is no price evidence to cite.
+        """
+        codes = {issue.get("code") for issue in validation.issues}
+        if not codes or not codes <= _REPAIRABLE_PROVENANCE_CODES:
+            return None
+        if require_checked_figures and self._has_unchecked_price_column(content):
+            return None
+        note = self._provenance_note(content)
+        if note is None:
+            return None
+        return content.rstrip() + "\n\n" + note
+
+    @staticmethod
+    def _has_unchecked_price_column(content: str) -> bool:
+        """Whether a Markdown table holds a price column no validator reads.
+
+        ``_validate_price_tables`` keys on ``_TABLE_FIELD_ALIASES`` — the OHLC
+        headers — and the prose scan skips every line containing "|". A column
+        headed 挂单价 / 目标价 / Entry price is read by neither.
+
+        Args:
+            content: The draft to inspect.
+
+        Returns:
+            True when such a column carries at least one numeric cell.
+        """
+        lines = content.splitlines()
+        for header, rows, _ in GroundingLedger._pipe_tables(lines):
+            unchecked = [
+                position
+                for position, cell in enumerate(header)
+                if _PRICE_HEADER_RE.search(cell)
+                and cell.strip().casefold() not in _TABLE_FIELD_ALIASES
+            ]
+            if not unchecked:
+                continue
+            for row in rows:
+                for position in unchecked:
+                    if position < len(row) and _NUMBER_RE.search(row[position]):
+                        return True
+        return False
+
+    def redacted_release(self, content: str, validation: ValidationResult) -> str | None:
+        """Release the last rejected draft with its unverified figures cut out.
+
+        Once the revision budget is spent, the draft is still the analysis the
+        user waited through every revision for, and the gate objected to
+        specific figures in specific clauses — not to the trend read, the
+        indicator commentary, or the risk notes around them. Each rejected
+        figure is replaced by a visible marker AT THE SPAN the validator
+        flagged, every other occurrence of the same figure elsewhere in the
+        document is cut with it, the missing provenance words are appended if
+        that is all that remains, and the whole released document — footnote
+        included — is re-validated by the same gate: only text that passes is
+        returned, so nothing the gate rejected reaches the user.
+
+        Fail-closed by construction. None — leave the canned fallback in place —
+        whenever the run never observed a price at all (the draft's numbers then
+        have no basis to stand next to), carries an issue that is not a
+        cut-out-able figure (an identity finding is one), has a flagged clause
+        that cannot be located, or still fails after the cut.
+
+        Args:
+            content: The rejected draft.
+            validation: Its validation result.
+
+        Returns:
+            The redacted, re-validated draft followed by a note stating how many
+            figures were removed and the observed range, or None.
+        """
+        if not self._price_records():
+            return None
+        text = _strip_release_markers(content)
+        removed = 0
+        # Stripping moves every offset after it, and the issue spans are the
+        # only anchor the cuts have, so the verdict is retaken on the text the
+        # cuts will actually be made in.
+        pending = list(
+            validation.issues
+            if text == content
+            else self._validate(text, record=False).issues
+        )
+        # A validator reports one figure per clause, so cutting it can reveal
+        # the next one on the recheck. Cut, recheck, repeat — bounded, and
+        # every cut is a figure the gate itself flagged.
+        for _ in range(_MAX_REDACTION_PASSES):
+            codes = {issue.get("code") for issue in pending}
+            if not codes or not codes <= (_REDACTABLE_CODES | _REPAIRABLE_PROVENANCE_CODES):
+                return None
+            # Two issues can point at one clause ("unsourced symbol" and the
+            # conflict on the same figure), so cuts are grouped per span:
+            # each clause is rewritten once with every value flagged for it.
+            by_span: dict[tuple[int, int], list[Any]] = {}
+            for issue in pending:
+                if issue.get("code") not in _REDACTABLE_CODES:
+                    continue
+                span = self._issue_span(text, issue)
+                if span is None:
+                    return None
+                by_span.setdefault(span, []).append(issue.get("value"))
+            text, count = self._redact_spans(text, by_span)
+            if count == 0:
+                return None
+            removed += count
+            check = self._validate(text, record=False)
+            if not check.valid:
+                repaired = self.repair_provenance(
+                    text, check, require_checked_figures=False
+                )
+                if repaired is not None:
+                    text = repaired
+                    check = self._validate(text, record=False)
+            if check.valid:
+                break
+            pending = list(check.issues)
+        else:
+            return None
+        released = text.rstrip() + "\n\n" + self._release_note(removed, text)
+        # The note carries the observed range and the canonical symbols, so it
+        # is answer text too. Validating the body and shipping body+note left
+        # the released document as a whole unchecked, which contradicted the
+        # fail-closed promise in this docstring.
+        if not self._validate(released, record=False).valid:
+            return None
+        # Recorded beside the drafts but NOT as one: the artifact otherwise
+        # held no evidence for the fail-closed promise above, because every
+        # recheck on this path is deliberately unrecorded.
+        self._released = {
+            "released_at": _utc_now(),
+            "content_sha256": hashlib.sha256(released.encode("utf-8")).hexdigest(),
+            "figures_removed": removed,
+            "revalidated": True,
+        }
+        self.persist()
+        return released
+
+    @staticmethod
+    def _issue_span(text: str, issue: dict[str, Any]) -> tuple[int, int] | None:
+        """Locate the flagged clause in ``text``.
+
+        The validators record the clause's character span, which is the only
+        reliable anchor: the stored ``claim`` is normalised (thousands
+        separators stripped, table cells rendered as "label: value"), so
+        ``text.find(claim)`` missed every price above 999 and every metric
+        table outright, and for a bare numeric cell it matched INSIDE a longer
+        number — "1.10" found in "21.10 亿元", rewriting an untouched turnover
+        figure into "2（略※）".
+
+        The substring fallback that used to sit here is gone. Every one of the
+        six redactable-issue construction sites carries a span, so it was
+        reachable only from a hand-built issue, and it carried a documented
+        digit-boundary rationale for a hazard the span had already settled —
+        which is worse than no code, because a reader trusts it.
+
+        Args:
+            text: The document the issue was raised against.
+            issue: One validation issue.
+
+        Returns:
+            ``(start, end)`` or None when the issue carries no usable span.
+        """
+        span = issue.get("span")
+        if not isinstance(span, (list, tuple)) or len(span) != 2:
+            return None
+        try:
+            start, end = int(span[0]), int(span[1])
+        except (TypeError, ValueError):
+            return None
+        if 0 <= start <= end <= len(text):
+            return start, end
+        return None
+
+    def _release_note(self, removed: int, content: str | None = None) -> str:
+        """Explain the redaction to the user, with the observed range.
+
+        ``redacted_release`` returns None before this is reached when the run
+        holds no price record, which is the only case in which the summary is
+        None — so it is read directly rather than behind an ``or ""`` that
+        described a state the caller cannot produce.
+        """
+        is_zh = self._user_writes_chinese()
+        joined = self._observed_range_summary(is_zh, content)
+        if is_zh:
+            return (
+                f"※ 略去 {removed} 处无法与本会话工具数据对上的数值。"
+                f"已观测 OHLC 范围：{joined}。"
+                "如需买入价，请让我基于已观测的收盘价或均线给出带公式的推导。"
+            )
+        return (
+            f"※ {removed} figure(s) that could not be matched to this session's tool data "
+            f"were omitted. Observed OHLC range: {joined}. "
+            "For an entry price, ask me to derive one with a visible formula from an "
+            "observed close or moving average."
+        )
+
+    def _redact_spans(
+        self,
+        text: str,
+        by_span: dict[tuple[int, int], list[Any]],
+    ) -> tuple[str, int]:
+        """Cut the flagged figures at their spans, then everywhere else.
+
+        Numbers are located on the masked clause (symbols, dates, prospective
+        levels blanked) so a ticker's digits are never cut. A numeric value is
+        matched numerically, a percent-shaped analysis value textually, and a
+        ``None`` value (a clause attributing figures to an unhandled symbol)
+        cuts every number in that clause.
+
+        The second stage is why the footnote can be believed. Cutting only the
+        flagged clause left the same rejected figure standing in a Markdown
+        table under a non-OHLC header or in a bullet with no price word —
+        neither surface is scanned by the validators — while the footnote
+        asserted it had been removed.
+
+        Two kinds of occurrence are never swept, because the gate has already
+        accepted them where they stand: a figure the ledger observed, and a
+        figure sitting inside a valid formula elsewhere in the document.
+        Without the second, the rejected entry price 0.95 was cut out of
+        "基于 MA20 0.7158 × 0.95 = 0.680", mangling the one derivation the
+        correction prompt asks the model to write (159516.SZ replay,
+        2026-09-09).
+
+        The formula protection is scoped to the formula's own character SPANS.
+        Scoped to the VALUE it protected the rejected figure document-wide:
+        with "基于收盘价 1.171 × 0.95 = 1.112" anywhere in the draft, the same
+        0.95 survived in "| 第一档 | 0.95 |" under a footnote saying one figure
+        had been cut — the exact restatement this second stage exists to
+        remove, protected by the derivation the model wrote beside it.
+
+        A percent literal is protected the same way. Cutting every occurrence
+        of a flagged literal took the accepted one with it: "从 1.110 涨到
+        1.171，区间收益率约 5.5%" is endpoint arithmetic this gate validated,
+        and it was cut and footnoted as unmatched because an unrelated
+        "策略年化波动率 5.5%" was flagged in the next clause.
+
+        Args:
+            text: The document to rewrite.
+            by_span: ``(start, end)`` → the values flagged inside that span.
+
+        Returns:
+            The rewritten text and the number of figures replaced.
+        """
+        swept: list[float] = []
+        swept_literals: list[str] = []
+        pieces: list[str] = []
+        cursor = 0
+        total = 0
+        for (start, end), values in sorted(by_span.items()):
+            if start < cursor:
+                continue
+            cut_all, targets, literals = _redaction_targets(values)
+            swept.extend(targets)
+            swept_literals.extend(literals)
+            replaced, count = self._rewrite_segment(
+                text[start:end], cut_all, targets, literals
+            )
+            pieces.append(text[cursor:start])
+            pieces.append(replaced)
+            total += count
+            cursor = end
+        pieces.append(text[cursor:])
+        text = "".join(pieces)
+        if total == 0 or not (swept or swept_literals):
+            return text, total
+        observed = self._observed_price_values()
+        survivors = [
+            target for target in swept if not _matches_any(target, observed, rel=1e-9)
+        ]
+        if not survivors and not swept_literals:
+            return text, total
+        protected = self._derivation_spans(text)
+        if swept_literals:
+            protected += self._accepted_metric_spans(text)
+        # Line by line, so each replacement takes the marker from the script of
+        # its OWN line. Run over the whole document the second stage picked one
+        # marker for everything, and a Chinese report containing an English
+        # table released "| Entry |（略※） |".
+        extra = 0
+        out: list[str] = []
+        cursor = 0
+        for line, start in _lines_with_offsets(text):
+            out.append(text[cursor:start])
+            local = [
+                (span_start - start, span_end - start)
+                for span_start, span_end in protected
+                if span_start >= start and span_end <= start + len(line)
+            ]
+            rewritten, count = self._rewrite_segment(
+                line, False, survivors, swept_literals, protected=local
+            )
+            out.append(rewritten)
+            extra += count
+            cursor = start + len(line)
+        out.append(text[cursor:])
+        return "".join(out), total + extra
+
+    def _observed_price_values(self) -> list[float]:
+        """Every observed price value the run holds, for redaction protection."""
+        return [
+            float(record.value)
+            for record in self._comparable_price_records()
+            if record.value is not None
+        ]
+
+    def _derivation_spans(self, text: str) -> list[tuple[int, int]]:
+        """Where a valid derivation sits in ``text``, in document offsets.
+
+        Args:
+            text: The document about to be swept.
+
+        Returns:
+            The character span of every arithmetically valid,
+            observation-anchored formula in it.
+        """
+        records = self._comparable_price_records()
+        document_symbol = self._symbol_for_claim(text, records)
+        spans: list[tuple[int, int]] = []
+        for line, offset in _lines_with_offsets(text):
+            if not _NUMBER_RE.search(line):
+                continue
+            symbol = self._symbol_for_claim(line, records) or document_symbol
+            for start, end, _, _ in self._derivation_formulas(line, records, symbol):
+                spans.append((offset + start, offset + end))
+        return spans
+
+    def _accepted_metric_spans(self, text: str) -> list[tuple[int, int]]:
+        """Where this gate ACCEPTED a metric figure in ``text``.
+
+        A clause the analysis validator examined — it carries a metric word
+        and a measurement-shaped number — and did not flag is a clause whose
+        figures this gate grounded. Sweeping such a figure out because an
+        unrelated clause states the same percentage cut a validated derivation
+        and footnoted it as unmatched.
+
+        The verdict comes from the validator itself rather than from a second
+        copy of its exemption rules: a clause with no metric word was never
+        examined (a bullet, an unclaimed table column) and is deliberately not
+        protected — that unscanned surface is what the sweep exists for.
+
+        Args:
+            text: The document about to be swept.
+
+        Returns:
+            The character span of every examined-and-accepted metric clause.
+        """
+        flagged = {
+            (int(issue["span"][0]), int(issue["span"][1]))
+            for issue in self._validate(text, record=False).issues
+            if isinstance(issue.get("span"), (list, tuple))
+            and len(issue["span"]) == 2
+        }
+        spans: list[tuple[int, int]] = []
+        for line, offset in _lines_with_offsets(text):
+            for segment, start, end in _clause_spans(line, offset):
+                if not _ANALYSIS_METRIC_RE.search(segment):
+                    continue
+                if not self._measure_numbers(segment):
+                    continue
+                if any(
+                    span_start <= start and end <= span_end
+                    for span_start, span_end in flagged
+                ):
+                    continue
+                spans.append((start, end))
+        return spans
+
+    def _rewrite_segment(
+        self,
+        segment: str,
+        cut_all: bool,
+        targets: Sequence[float],
+        literals: Sequence[str],
+        *,
+        protected: Sequence[tuple[int, int]] = (),
+    ) -> tuple[str, int]:
+        """Replace the wanted figures in one stretch of text with the marker.
+
+        Args:
+            segment: The stretch of the answer to rewrite.
+            cut_all: Cut every number, not only the listed targets.
+            targets: Numeric values to cut.
+            literals: Percent-shaped figures to cut by their written text.
+            protected: Character ranges inside ``segment`` that must survive
+                whatever they contain — a valid formula, or a metric clause
+                this gate accepted. Protection is by POSITION, not by value:
+                the rejected entry price is usually also the multiplier of the
+                correct derivation, and protecting the value protected every
+                restatement of the rejected figure along with it.
+
+        Returns:
+            The rewritten stretch and the number of figures replaced.
+        """
+        if not cut_all and not targets and not literals:
+            return segment, 0
+        # The marker follows the SCRIPT OF THE TEXT BEING CUT, not the user's
+        # message: a Chinese user asking about a US name gets English tables,
+        # and "Suggested entry price（略※） per share." was the result. A
+        # stretch with neither script — a numeric table row — falls back to
+        # the user's language, which is what the footnote is written in.
+        if re.search(r"[\u3400-\u9fff]", segment):
+            marker = _REDACTION_MARKER_ZH
+        elif re.search(r"[A-Za-z]", segment):
+            marker = _REDACTION_MARKER_EN
+        else:
+            marker = (
+                _REDACTION_MARKER_ZH
+                if self._user_writes_chinese()
+                else _REDACTION_MARKER_EN
+            )
+        spans: list[tuple[int, int]] = []
+        if literals:
+            for match in _MEASURE_NUMBER_RE.finditer(segment):
+                normalized = match.group(0).replace(" ", "").replace(",", "")
+                if normalized in literals:
+                    spans.append((match.start(), match.end()))
+        masked = self._masked_candidate_text(segment)
+        for match in _NUMBER_RE.finditer(masked):
+            try:
+                number = float(match.group(0).replace(",", ""))
+            except ValueError:
+                continue
+            if cut_all or _matches_any(number, targets, rel=1e-9):
+                spans.append((match.start(), match.end()))
+        pieces: list[str] = []
+        cursor = 0
+        count = 0
+        for start, end in sorted(set(spans)):
+            if start < cursor:
+                continue
+            if any(
+                keep_start <= start and end <= keep_end
+                for keep_start, keep_end in protected
+            ):
+                continue
+            unit = _UNIT_AFTER_RE.match(segment, end)
+            if unit:
+                end = unit.end()
+            symbol = _CURRENCY_BEFORE_RE.search(segment[cursor:start])
+            if symbol:
+                start = cursor + symbol.start()
+            if marker is _REDACTION_MARKER_ZH:
+                # "建议买入价 0.95 元" → "建议买入价（略※）": a full-width
+                # bracket sits flush against the preceding word. Not against a
+                # table pipe, though — "| 第一档 |（略※） |" loses the column's
+                # padding and reads as a broken row.
+                while (
+                    start > cursor
+                    and segment[start - 1] == " "
+                    and segment[: start - 1].rstrip(" ")[-1:] != "|"
+                ):
+                    start -= 1
+            pieces.append(segment[cursor:start])
+            pieces.append(marker)
+            cursor = end
+            count += 1
+        pieces.append(segment[cursor:])
+        return "".join(pieces), count
+
     def persist(self) -> None:
         """Atomically persist the current structured ledger."""
         artifact_dir = self.run_dir / "artifacts"
@@ -2111,6 +3146,7 @@ class GroundingLedger:
                 "analysis_completed": list(self._analysis_completed),
                 "analysis_evidence": list(self._analysis_metrics),
                 "validations": list(self._validations),
+                "released": dict(self._released) if self._released else None,
             }
             temp.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -2797,8 +3833,8 @@ class GroundingLedger:
         """
         issues: list[dict[str, Any]] = []
         reported: set[str] = set()
-        for line in content.splitlines():
-            for segment in _split_clauses(line):
+        for line, line_offset in _lines_with_offsets(content):
+            for segment, span_start, span_end in _clause_spans(line, line_offset):
                 unknown = sorted(
                     symbol
                     for symbol in _scan_symbols(segment) - self._session_symbols - reported
@@ -2820,6 +3856,7 @@ class GroundingLedger:
                             "code": "unsourced_symbol_figures",
                             "symbol": symbol,
                             "claim": segment.strip()[:200],
+                            "span": [span_start, span_end],
                             "message": (
                                 f"No tool call in this session passed in or returned {symbol}, "
                                 "yet the answer attaches figures to it. Retrieve it, or report "
@@ -2852,7 +3889,8 @@ class GroundingLedger:
             One issue per metric-bearing clause or table cell.
         """
         issues: list[dict[str, Any]] = []
-        lines = content.splitlines()
+        positions = _lines_with_offsets(content)
+        lines = [line for line, _ in positions]
         consumed: set[int] = set()
         price_records = self._comparable_price_records()
         for header, rows, row_indices in self._pipe_tables(lines):
@@ -2862,7 +3900,9 @@ class GroundingLedger:
                 for cell in header
             ]
             has_kind_header = any(kind for _, kind, _ in columns)
-            for row in rows:
+            for row, row_line_index in zip(rows, row_indices):
+                row_start = positions[row_line_index][1]
+                row_span = (row_start, row_start + len(lines[row_line_index]))
                 cells = row + [""] * (len(columns) - len(row))
                 if not has_kind_header:
                     # Generic header ("指标 | 数值", "Metric | Value"): a cell
@@ -2884,7 +3924,8 @@ class GroundingLedger:
                         # "年化收益率为 18.2%" — validate the label's own
                         # numbers against its kind too.
                         self._check_table_cell(
-                            cells[label_index], row_kind, cells[label_index], issues
+                            cells[label_index], row_kind, cells[label_index], issues,
+                            row_span, price_records,
                         )
                         # A forecast frame in the LABEL ("| 预计夏普比率 | 1.2 |")
                         # frames the claimed value clause-wide, exactly as prose
@@ -2904,18 +3945,21 @@ class GroundingLedger:
                                 if label_is_forecast:
                                     continue
                                 self._check_table_cell(
-                                    cells[label_index], row_kind, cells[value_index], issues
+                                    cells[label_index], row_kind, cells[value_index], issues,
+                                    row_span, price_records,
                                 )
                     continue
                 for (cell_text, kind, header_forecast), cell in zip(columns, cells):
                     if kind is None or header_forecast:
                         continue
-                    self._check_table_cell(cell_text, kind, cell, issues)
-        for index, line in enumerate(lines):
+                    self._check_table_cell(
+                        cell_text, kind, cell, issues, row_span, price_records
+                    )
+        for index, (line, line_offset) in enumerate(positions):
             if index in consumed:
                 continue
             line_symbol = self._symbol_for_claim(line, price_records)
-            for segment in _split_clauses(line):
+            for segment, span_start, span_end in _clause_spans(line, line_offset):
                 if _CATEGORICAL_WINDOW_RE.search(segment) and _NUMBER_RE.search(segment):
                     if not any(
                         entry.get("tool") in _ANALYSIS_WINDOW_TOOLS
@@ -2926,6 +3970,7 @@ class GroundingLedger:
                             {
                                 "code": "analysis_claim_unavailable",
                                 "claim": segment.strip()[:200],
+                                "span": [span_start, span_end],
                                 "value": match.group(0) if match else None,
                                 "message": (
                                     "No backtest completed in this session, yet the "
@@ -2956,6 +4001,9 @@ class GroundingLedger:
                     value
                     for value in values
                     if not self._analysis_value_observed(value, kind)
+                    and not self._is_observed_price_figure(
+                        value, price_records, line_symbol, segment
+                    )
                 ]
                 if not unsupported:
                     continue
@@ -2963,22 +4011,72 @@ class GroundingLedger:
                 # than an invented backtest metric (#1338 review): an explicit
                 # formula anchored to observed values, or growth between two
                 # observed endpoints stated in the same line.
-                if kind == "return":
-                    if _DERIVATION_RE.search(line) and self._is_explicit_derivation(
-                        line, price_records, line_symbol
-                    ):
-                        continue
+                # A drawdown stated against an observed high ("较 5 月高点
+                # 1.053 元已回撤约 37%") is the same arithmetic on the same
+                # sourced endpoints, and was rejected as an invented backtest
+                # metric because only the return branch carried the exemption
+                # (owner-forwarded 159516.SZ run, 2026-09-09). Drawdown is
+                # compared by magnitude, as ``_analysis_value_observed`` does.
+                # Neither exemption is available to a STRATEGY-subject
+                # metric. A strategy's max drawdown is a property of an
+                # equity curve, and no arithmetic on two observed prints of
+                # the instrument is that curve: "回测显示该策略最大回撤 5.9%
+                # （从 1.180 跌至 1.110）" was released as grounded with no
+                # backtest in the session at all. Such a figure keeps the
+                # unchanged backtest-evidence requirement above.
+                if kind in {"return", "drawdown"} and not _STRATEGY_SUBJECT_RE.search(
+                    segment
+                ):
+                    if _DERIVATION_RE.search(segment):
+                        # As in the price path: only the values the formula
+                        # justifies are exempt, not every figure beside them.
+                        # Scoped to the CLAUSE, which is where the claim
+                        # itself was measured — a line-scoped exemption let
+                        # "基于 40 × 1.171 = 46.84 计算，策略最大回撤 40%"
+                        # ground the metric in the next clause.
+                        justified = self._derivation_justified_values(
+                            segment, price_records, line_symbol
+                        )
+                        unsupported = [
+                            value
+                            for value in unsupported
+                            if not _matches_any(value, justified)
+                        ]
+                        if not unsupported:
+                            continue
+                    # The operand scan stays LINE-scoped: the endpoints of a
+                    # move are routinely written in two clauses ("当前 0.666
+                    # 元，较 5 月高点 1.053 元已回撤约 37%").
                     operands = self._observed_operands_in_line(
                         line, price_records, line_symbol
                     )
-                    if len(operands) >= 2 and self._return_derived_from_observed(
-                        unsupported, price_records, line_symbol, operands=operands
-                    ):
-                        continue
+                    if len(operands) >= 2:
+                        derived = self._returns_derived_from_observed(
+                            unsupported,
+                            price_records,
+                            line_symbol,
+                            operands=operands,
+                            magnitude=kind == "drawdown",
+                        )
+                        # The endpoints themselves are grounded by the same
+                        # exemption: "较高点 1.180 元已回撤约 6%" states the
+                        # observed high beside the ratio it derives.
+                        unsupported = [
+                            value
+                            for value in unsupported
+                            if value not in derived
+                            and not (
+                                not str(value).endswith(("%", "％"))
+                                and _matches_any(value, operands, rel=1e-9)
+                            )
+                        ]
+                        if not unsupported:
+                            continue
                 issues.append(
                     {
                         "code": "analysis_claim_unavailable",
                         "claim": segment.strip()[:200],
+                        "span": [span_start, span_end],
                         "value": unsupported[0],
                         "kind": kind,
                         "message": (
@@ -2997,6 +4095,8 @@ class GroundingLedger:
         kind: str | None,
         cell: str,
         issues: list[dict[str, Any]],
+        span: tuple[int, int] | None = None,
+        price_records: Sequence[EvidenceRecord] = (),
     ) -> None:
         """Reject one table cell whose numeric value is an unsupported metric.
 
@@ -3009,6 +4109,16 @@ class GroundingLedger:
             kind: The resolved metric kind, already derived from ``label``.
             cell: One value cell to validate.
             issues: Accumulator for ``analysis_claim_unavailable`` issues.
+            span: ``(start, end)`` of the table ROW inside the validated
+                answer. The claim text is the human-readable ``label: cell``,
+                which is not a substring of the draft ("| 最大回撤 | 12% |"),
+                so without the span the release path could never locate a
+                metric table and every metrics report fell back to the canned
+                refusal.
+            price_records: Comparable observed price evidence, so a cell that
+                merely restates observed closes ("| 峰值→当前 | 0.997 → 0.605 |")
+                is not reported as an invented drawdown figure and then cut
+                out of the released answer. Same rule as the prose path.
         """
         if kind is None:
             return
@@ -3019,10 +4129,22 @@ class GroundingLedger:
         # that cell, never its neighbours.
         if _FORECAST_FRAME_RE.search(cell) or _DEFINITION_FRAME_RE.search(cell):
             return
+        # A cell RESTATING endpoints ("| 峰值→当前 | 1.180 → 1.110 |") is not
+        # a metric figure, and cutting it out of the released answer removed
+        # two correctly quoted closes. The restatement shape is what the
+        # exemption is for, so it needs the cell to hold a PAIR: a single
+        # number in a metric cell IS that metric's value, and exempting it on
+        # numeric equality alone released "| 夏普比率 | 1.171 |" as grounded
+        # because 1.171 happened to be an observed close. On a $12.50 stock
+        # the collision is "| 最大回撤 | 12.5 |".
         unsupported = [
             value
             for value in values
             if not self._analysis_value_observed(value, kind)
+            and not (
+                len(values) >= 2
+                and self._matches_observed_price(value, price_records, None)
+            )
         ]
         if not unsupported:
             return
@@ -3030,6 +4152,7 @@ class GroundingLedger:
             {
                 "code": "analysis_claim_unavailable",
                 "claim": f"{label}: {cell}"[:200],
+                "span": list(span) if span else None,
                 "value": unsupported[0],
                 "kind": kind,
                 "message": (
@@ -3116,6 +4239,78 @@ class GroundingLedger:
 
         return any(close(candidate, item) for candidate in candidates for item in observed)
 
+    def _is_observed_price_figure(
+        self,
+        raw: str,
+        records: Sequence[EvidenceRecord],
+        symbol: str | None,
+        text: str,
+    ) -> bool:
+        """Whether a figure in an analysis clause is literally an observed price.
+
+        ``_validate_analysis_claims`` reports the FIRST unmatched number in a
+        clause that mentions a metric, and an observed close sharing a clause
+        with an ungrounded metric was that number: "最新收盘 1.171 元且策略最大
+        回撤 12%" reported 1.171, so the release path cut the correctly quoted
+        close and footnoted it as unverifiable. A value the ledger observed is
+        not an invented backtest metric — its own check is
+        ``_compare_price_claim``, which compares any price-word figure against
+        observed OHLC at the 0.5% band. A percent-written figure is never
+        exempted here, so every drawdown / return / volatility / win-rate
+        percentage keeps the full analysis check.
+
+        Numeric equality is not enough on its own. A run holds hundreds of
+        observed OHLC values spanning the instrument's price range, so ANY
+        percent-free metric written in that range collides with one:
+        "策略夏普比率 1.171" and "策略最大回撤 1.171" were released as grounded
+        against an observed close, with no backtest in the session. The figure
+        must also be WRITTEN as a price — a price word ahead of it or a
+        currency unit glued to it — which is exactly the shape that has its
+        own check in ``_compare_price_claim``.
+
+        Args:
+            raw: A figure as ``_measure_numbers`` returns it.
+            records: Comparable observed price evidence.
+            symbol: Symbol resolved for the line, if any.
+            text: The clause the figure was written in.
+
+        Returns:
+            True when the figure is written without a percent sign, reads as a
+            price in its clause, and equals an observed price value for this
+            symbol.
+        """
+        figure = str(raw).strip()
+        if not _figure_reads_as_a_price(text, figure):
+            return False
+        return self._matches_observed_price(figure, records, symbol)
+
+    def _matches_observed_price(
+        self,
+        raw: str,
+        records: Sequence[EvidenceRecord],
+        symbol: str | None,
+    ) -> bool:
+        """Whether a percent-free figure equals an observed price value.
+
+        Args:
+            raw: A figure as ``_measure_numbers`` returns it.
+            records: Comparable observed price evidence.
+            symbol: Symbol resolved for the claim, if any.
+
+        Returns:
+            True when the figure carries no percent sign and matches evidence.
+        """
+        figure = str(raw).strip()
+        if figure.endswith(("%", "％")):
+            return False
+        candidates = list(records)
+        if symbol:
+            candidates = [record for record in candidates if record.symbol == symbol]
+        observed = [
+            float(record.value) for record in candidates if record.value is not None
+        ]
+        return _matches_any(figure, observed, rel=1e-9)
+
     def _observed_operands_in_line(
         self,
         line: str,
@@ -3151,21 +4346,43 @@ class GroundingLedger:
                     present.add(candidate)
         return sorted(present)
 
-    def _return_derived_from_observed(
+    def _returns_derived_from_observed(
         self,
         claimed: Sequence[str],
         records: Sequence[EvidenceRecord],
         symbol: str | None,
         *,
         operands: Sequence[float] | None = None,
-    ) -> bool:
-        """True when a return figure equals growth between observed endpoints.
+        magnitude: bool = False,
+    ) -> set[str]:
+        """Return the figures that equal growth between observed endpoints.
 
         #1338 review: "AAPL.US 从 2026-08-03 的 100.0 涨到 2026-09-02 的
         112.4，区间收益率为 12.4%" states arithmetic on sourced inputs. Only
-        an exact (±0.5%) match against a pair of observed values grounds the
-        figure; the caller must already have verified the from/to frame, so a
-        bare unanchored return claim never reaches here.
+        a match against a pair of observed values grounds the figure; the
+        caller must already have verified the from/to frame, so a bare
+        unanchored return claim never reaches here.
+
+        The match tolerates the precision the figure was WRITTEN at: "约 37%"
+        for a derived 36.75% asserts that the value rounds to 37, and the flat
+        ±0.5% relative band (±0.18 points there) rejected every integer-percent
+        rounding a model makes. Half a unit of the last written digit is the
+        bound, so "37%" accepts 36.5–37.5 and "36.8%" accepts 36.75–36.85; a
+        figure that is simply wrong ("40%") is as far away as before.
+
+        Args:
+            claimed: Raw figures from the clause, as ``_measure_numbers`` returns them.
+            records: Observed evidence the operands may come from.
+            symbol: Symbol the clause names, if any.
+            operands: Observed values literally present in the clause.
+            magnitude: Compare absolute values (drawdown sign conventions differ).
+
+        Returns:
+            The subset of ``claimed`` the endpoint arithmetic justifies. It
+            used to be one bool for the whole clause, and the caller skipped
+            every figure beside the justified one: "at 0.666 down about 37%
+            from the 1.053 May high with a max drawdown of 60%" released the
+            60% because the 37% checked out.
         """
         if operands is not None:
             observed = sorted(set(operands))
@@ -3177,25 +4394,102 @@ class GroundingLedger:
                 ]
             observed = sorted({float(record.value) for record in candidates})
         if len(observed) < 2:
-            return False
-        values: list[float] = []
+            return set()
+        values: list[tuple[str, float, float, bool]] = []
         for raw in claimed:
+            raw_text = str(raw).strip()
+            text = raw_text.rstrip("%％")
             try:
-                values.append(float(str(raw).rstrip("%％")))
+                value = float(text)
             except ValueError:
                 continue
+            decimals = len(text.split(".", 1)[1]) if "." in text else 0
+            values.append((str(raw), value, 0.5 * 10.0 ** (-decimals), raw_text != text))
+
+        def close(value: float, derived: float, half_unit: float) -> bool:
+            if magnitude:
+                # A drawdown is a fall. Taking absolute values so "回撤 37%"
+                # can match a derived -36.75% also made the INVERSE
+                # derivation match: the same two endpoints read low→high give
+                # +58.11%, and "最大回撤约 58%" was released as grounded
+                # (attack2 probe, 2026-09-09). Only the falling direction may
+                # ground a drawdown.
+                if derived > 0:
+                    return False
+                value, derived = abs(value), abs(derived)
+            return abs(value - derived) <= max(abs(derived) * 0.005, half_unit, 1e-9)
+
+        justified: set[str] = set()
         for base in observed:
             for target in observed:
                 if target == base:
                     continue
                 derived = (target - base) / base
-                for value in values:
-                    if abs(value - derived) <= max(abs(derived) * 0.005, 1e-9):
-                        return True
-                    if abs(value - derived * 100.0) <= max(
-                        abs(derived * 100.0) * 0.005, 1e-9
-                    ):
-                        return True
+                for raw, value, half_unit, is_percent in values:
+                    # ``half_unit`` is half a unit of the last digit the figure
+                    # was WRITTEN with, so it is only meaningful against the
+                    # derivation expressed in those same units. A figure
+                    # carrying "%" is percentage points and is compared only
+                    # against ``derived * 100``; running it against the
+                    # fraction too gave an integer percent a 0.5 band in
+                    # FRACTION units — 50 percentage points — and "区间收益率
+                    # 约 0%" validated against a real +58% move (attack4
+                    # probe, 2026-09-09). A bare figure stays ambiguous and is
+                    # tried both ways, each against its own consistent band.
+                    # A bare figure always carries a decimal point —
+                    # ``_MEASURE_NUMBER_RE`` extracts an integer only with a
+                    # percent sign on it — so the fraction reading is never
+                    # taken with a 0.5 half unit (which would be 50
+                    # percentage points wide).
+                    if not is_percent and close(value, derived, half_unit):
+                        justified.add(raw)
+                    if close(value, derived * 100.0, half_unit):
+                        justified.add(raw)
+        return justified
+
+    @staticmethod
+    def _occurrence_is_derived(
+        segment: str,
+        formulas: Sequence[tuple[int, int, list[float], float]],
+        value: float,
+        start: int,
+        end: int,
+    ) -> bool:
+        """Whether this figure, HERE, is part of a formula that justifies it.
+
+        Two things are decided per occurrence rather than per value.
+
+        The position: a number is exempt only where it sits inside the
+        formula. "建议买入价 0.95 元（0.95 × 1.171 = 1.11245 参考）" is arithmetic
+        that derives nothing, and under a value-scoped exemption the entry
+        price outside the bracket inherited the exemption its own copy inside
+        the bracket earned.
+
+        The role: a formula's RESULT is a number the answer proposes, which is
+        legitimate for an entry price and never legitimate for a market print.
+        "2026-06-23 收盘价 = 1.171 × 0.80 = 0.937" claims a close the ledger
+        holds as 1.137, and the exemption released it. Under an observation
+        label the operands stay exempt and the result is compared.
+
+        Args:
+            segment: The clause the figure was found in.
+            formulas: ``_derivation_formulas`` output for that clause.
+            value: The figure.
+            start: Where the figure starts in ``segment``.
+            end: Where it ends.
+
+        Returns:
+            True when the occurrence may skip the price comparison.
+        """
+        for formula_start, formula_end, inputs, result in formulas:
+            if not (formula_start <= start and end <= formula_end):
+                continue
+            if _matches_any(value, inputs):
+                return True
+            if _matches_any(value, [result]) and not _labels_its_result_observed(
+                segment, formula_start
+            ):
+                return True
         return False
 
     def _validate_price_claims(self, content: str) -> list[dict[str, Any]]:
@@ -3218,11 +4512,11 @@ class GroundingLedger:
             for index, line in enumerate(content.splitlines())
             if index in table_lines
         )
-        for index, line in enumerate(content.splitlines()):
+        for index, (line, line_offset) in enumerate(_lines_with_offsets(content)):
             if index in table_lines or "|" in line:
                 continue
             line_symbol = self._symbol_for_claim(line, records)
-            for segment in _split_clauses(line):
+            for segment, span_start, span_end in _clause_spans(line, line_offset):
                 if not _PRICE_CONTEXT_RE.search(segment):
                     continue
                 values = self._direct_price_values(segment)
@@ -3234,8 +4528,10 @@ class GroundingLedger:
                     or line_symbol
                     or document_symbol
                 )
-                if self._is_explicit_derivation(segment, records, symbol):
-                    continue
+                # Only the formula's own operands and result are exempt, at
+                # the position where they sit; a figure riding along in the
+                # same clause is still compared.
+                formulas = self._derivation_formulas(segment, records, symbol)
                 # NO attribution exemption here, deliberately. A paper's
                 # Sharpe is a figure this run could never have observed, so
                 # citing it is legitimate; a PRICE is exactly what this run
@@ -3243,7 +4539,18 @@ class GroundingLedger:
                 # 412.35" is the laundering shape this gate exists to catch —
                 # adding a citation subject must not buy a fabricated quote a
                 # way through. The exemption stays in the analysis gate only.
-                for value in values:
+                #
+                # An indicator reading is admissible evidence only for a
+                # LEVEL claim; a clause claiming a market print is answered by
+                # OHLC evidence alone.
+                indicator_admissible = bool(
+                    _PRICE_LEVEL_WORD_RE.search(segment)
+                ) and not _OBSERVED_PRICE_WORD_RE.search(segment)
+                for value, value_start, value_end in values:
+                    if self._occurrence_is_derived(
+                        segment, formulas, value, value_start, value_end
+                    ):
+                        continue
                     issue = self._compare_price_claim(
                         value=value,
                         records=records,
@@ -3251,6 +4558,8 @@ class GroundingLedger:
                         date_value=None,
                         symbol=symbol,
                         claim=segment.strip(),
+                        span=(span_start, span_end),
+                        indicator_admissible=indicator_admissible,
                     )
                     if issue:
                         issues.append(issue)
@@ -3374,7 +4683,8 @@ class GroundingLedger:
         content: str,
     ) -> tuple[list[dict[str, Any]], set[int]]:
         """Validate field/date-specific claims in Markdown OHLC tables."""
-        lines = content.splitlines()
+        positions = _lines_with_offsets(content)
+        lines = [line for line, _ in positions]
         issues: list[dict[str, Any]] = []
         consumed: set[int] = set()
         index = 0
@@ -3417,6 +4727,7 @@ class GroundingLedger:
                     values = self._numbers_without_dates_or_percent(row[position])
                     if len(values) != 1:
                         continue
+                    row_start = positions[row_index][1]
                     issue = self._compare_price_claim(
                         value=values[0],
                         records=records,
@@ -3424,6 +4735,12 @@ class GroundingLedger:
                         date_value=date_value,
                         symbol=symbol,
                         claim=row[position].strip(),
+                        # A table cell's claim text is a bare number, so it
+                        # can never be located by substring search — "1.10"
+                        # matched inside "21.10 亿元" and rewrote an untouched
+                        # turnover figure into "2（略※）". The row's own span
+                        # is the anchor; the value inside it is what is cut.
+                        span=(row_start, row_start + len(lines[row_index])),
                     )
                     if issue:
                         issues.append(issue)
@@ -3452,12 +4769,43 @@ class GroundingLedger:
         date_value: str | None,
         symbol: str | None,
         claim: str,
+        span: tuple[int, int] | None = None,
+        indicator_admissible: bool = False,
     ) -> dict[str, Any] | None:
-        """Compare one unlabelled observed claim to the closest evidence value."""
+        """Compare one unlabelled observed claim to the closest evidence value.
+
+        Args:
+            value: The figure the answer states.
+            records: Comparable observed price evidence.
+            field_name: OHLC field the claim is keyed to (table column), if any.
+            date_value: Trade date the claim is keyed to, if any.
+            symbol: Symbol explicitly resolved for the claim, if any.
+            claim: Clause or cell text, for the issue message.
+            span: ``(start, end)`` of the claim inside the validated answer.
+            indicator_admissible: The prose clause states a price LEVEL
+                (支撑位 / 均线 / bollinger band), the one claim an indicator
+                reading may answer. Every other price claim — a named OHLC
+                field, a spot quote, a proposed entry — is compared against
+                OHLC evidence only, which is the rule the table path already
+                applies by filtering on ``field_name``. The table path passes
+                a ``field_name`` for every cell it validates and so leaves
+                this at its default.
+        """
+        resolved_symbol = symbol
         candidates = records
         if symbol:
             candidates = [record for record in candidates if record.symbol == symbol]
         symbols = sorted({record.symbol for record in candidates if record.symbol})
+        # An indicator reading is symbol-bound in a way an OHLC bar's union is
+        # not. With evidence for two instruments and a clause naming neither,
+        # 562500's sma_20 grounded "600519.SH … 其均线在 1.150 元"; the union
+        # below was argued for OHLC quotes, not for a derived level attached
+        # to one symbol. Drop indicator records whenever the claim's symbol
+        # was not explicitly resolved and the run holds more than one.
+        if resolved_symbol is None and len({r.symbol for r in records if r.symbol}) > 1:
+            candidates = [record for record in candidates if record.field != "indicator"]
+        if not indicator_admissible:
+            candidates = [record for record in candidates if record.field != "indicator"]
         if not symbol and len(symbols) == 1:
             symbol = symbols[0]
         # An unattributed claim used to be rejected outright once the run held
@@ -3481,6 +4829,7 @@ class GroundingLedger:
             return {
                 "code": "numeric_claim_unavailable",
                 "claim": claim,
+                "span": list(span) if span else None,
                 "value": value,
                 "symbol": symbol,
                 "field": field_name,
@@ -3493,6 +4842,7 @@ class GroundingLedger:
         return {
             "code": "numeric_claim_conflict",
             "claim": claim,
+            "span": list(span) if span else None,
             "value": value,
             "symbol": symbol,
             "field": field_name,
@@ -3537,6 +4887,8 @@ class GroundingLedger:
                 continue
             field_name = _price_field_for_path(record.field)
             if field_name is None:
+                if _is_price_denominated_indicator(record.field):
+                    records.append(replace(record, field="indicator"))
                 continue
             records.append(replace(record, field=field_name))
         return records
@@ -3608,8 +4960,14 @@ class GroundingLedger:
         return values
 
     @staticmethod
-    def _direct_price_values(text: str) -> list[float]:
+    def _direct_price_values(text: str) -> list[tuple[float, int, int]]:
         """Numbers in a price segment that read as asserted observed values.
+
+        Returned as ``(value, start, end)``: the masking that decides which
+        digits are candidates preserves length, so each offset is the number's
+        offset in ``text``. The caller needs the position, not only the value —
+        a derivation exempts the occurrence sitting inside it, not every copy
+        of the same number in the clause.
 
         ``_numbers_without_dates_or_percent`` returns every non-masked number;
         this further drops numbers that are formula operands rather than claims
@@ -3629,7 +4987,7 @@ class GroundingLedger:
         """
         price_words = list(_PRICE_CONTEXT_RE.finditer(text))
         masked = GroundingLedger._masked_candidate_text(text)
-        values: list[float] = []
+        values: list[tuple[float, int, int]] = []
         for match in _NUMBER_RE.finditer(masked):
             tail = masked[match.end() :].lstrip()
             if tail.startswith(("%", "％")):
@@ -3648,32 +5006,70 @@ class GroundingLedger:
                     span[markers[-1].end() :]
                 ):
                     continue
-            values.append(value)
+            values.append((value, match.start(), match.end()))
         return values
 
-    def _is_explicit_derivation(
+    def _derivation_formulas(
         self,
         text: str,
         records: Sequence[EvidenceRecord],
         symbol: str | None,
-    ) -> bool:
-        """Allow only an arithmetically valid formula anchored to observed input."""
-        if not _DERIVATION_RE.search(text):
-            return False
+    ) -> list[tuple[int, int, list[float], float]]:
+        """Return every arithmetically valid, observation-anchored formula.
+
+        Each entry is ``(start, end, operands, result)`` — the formula's own
+        character span inside ``text``, the operands it consumes and the result
+        it produces. The span is what makes the exemption safe. A value-scoped
+        exemption ("this number equals something a formula justifies") let a
+        figure be exempt EVERYWHERE in the clause once it appeared anywhere in
+        an equation, and a model told by the correction prompt to show its
+        arithmetic can satisfy that with arithmetic that derives nothing:
+        "建议买入价 0.95 元（0.95 × 1.171 = 1.11245 参考）" is true and released
+        an entry price 19% below every observed bar. The occurrence inside the
+        formula is exempt; the one beside it is compared like any other claim.
+
+        There is no keyword or shape precondition. A `基于` / `based on` was
+        once required and an added `_ARITHMETIC_EQUATION_RE` relaxed it to
+        "any two-operand equation"; both are subsumed by what decides below —
+        a result separator, a parseable arithmetic run of at least two
+        operands (``_evaluate_formula``), an input matching observed evidence,
+        and a result that is correct. Deleting the regex changed no verdict in
+        the suite and removes one entry from the regex catalogue.
+
+        Args:
+            text: The clause (or line) to inspect.
+            records: Comparable observed price evidence.
+            symbol: Symbol resolved for the claim, if any.
+
+        Returns:
+            ``(start, end, operands, result)`` per valid formula, in order.
+        """
         candidates = list(records)
         if symbol:
             candidates = [record for record in candidates if record.symbol == symbol]
         candidate_symbols = {record.symbol for record in candidates if record.symbol}
         if not symbol and len(candidate_symbols) > 1:
-            return False
+            return []
         observed = [
             float(record.value) for record in candidates if record.value is not None
         ]
         if not observed:
-            return False
+            return []
 
-        for equals in re.finditer(r"=", text):
-            left = re.search(r"([0-9.,+\-*/×÷()\s]+)$", text[: equals.start()])
+        formulas: list[tuple[int, int, list[float], float]] = []
+        for equals in _RESULT_SEPARATOR_RE.finditer(text):
+            # An indicator identifier carries digits ("SMA20", "MA5"); left in
+            # place they leak into the arithmetic run ("20 1.150 × 0.95") and
+            # the formula fails to parse, so a derivation from an observed
+            # moving average was never accepted. The blanking is
+            # LENGTH-PRESERVING because the offsets below are the exemption's
+            # anchor: collapsing "SMA20" to one space shifted every span after
+            # it and the formula was excluded from its own protection.
+            prefix = _INDICATOR_IDENTIFIER_RE.sub(
+                lambda match: " " * (match.end() - match.start()),
+                text[: equals.start()],
+            )
+            left = re.search(r"([0-9.,+\-*/×÷()\s]+)$", prefix)
             right = re.match(
                 r"\s*([-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)",
                 text[equals.end() :],
@@ -3695,8 +5091,27 @@ class GroundingLedger:
             ):
                 continue
             if abs(computed - claimed) <= max(abs(computed) * 0.005, 1e-9):
-                return True
-        return False
+                formulas.append(
+                    (left.start(1), equals.end() + right.end(), inputs, claimed)
+                )
+        return formulas
+
+    def _derivation_justified_values(
+        self,
+        text: str,
+        records: Sequence[EvidenceRecord],
+        symbol: str | None,
+    ) -> list[float]:
+        """Every operand and result of every valid formula in ``text``.
+
+        The flat form, for the callers that only ask "is this figure one a
+        formula here justifies" without a position to check it at.
+        """
+        justified: list[float] = []
+        for _, _, inputs, result in self._derivation_formulas(text, records, symbol):
+            justified.extend(inputs)
+            justified.append(result)
+        return justified
 
     @staticmethod
     def _evaluate_formula(expression: str) -> tuple[float, list[float]] | None:

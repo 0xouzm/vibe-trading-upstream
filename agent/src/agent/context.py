@@ -186,6 +186,11 @@ Decide which workflow to use based on the request:
   locked canonical symbol+venue suffix, actual data source, and quote currency
   — all three may be written in the user's language (`雅虎`, `腾讯`, `元`).
   Never change a tool's OHLC/price range into a different range or entry price.
+  A proposed entry price that is not itself an observed value must be written
+  as an explicit formula over observed inputs — an OHLC value or a
+  price-denominated indicator this session fetched — e.g.
+  `基于收盘价 0.666 × 0.97 = 0.646`; an entry level written without such a
+  formula is cut from the released answer.
   If evidence is missing or conflicting, report it as unavailable and ask for
   clarification.
 - **Figures need a symbol the session actually handled:** you may name an index

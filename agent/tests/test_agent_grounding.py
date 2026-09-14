@@ -1447,7 +1447,10 @@ def test_price_validation_ignores_formula_variable_digits(tmp_path: Path) -> Non
 
 def test_direct_price_values_structural_rule() -> None:
     """The structural rule decides operand vs. claim at the number level (#1354)."""
-    extract = GroundingLedger._direct_price_values
+    def extract(text: str) -> list[float]:
+        """Values only; the production path also reads each figure's offset."""
+        return [value for value, _, _ in GroundingLedger._direct_price_values(text)]
+
     # Formula operands — a marker between the price word and the number.
     for text in (
         "close/SMA50 > 1.0",

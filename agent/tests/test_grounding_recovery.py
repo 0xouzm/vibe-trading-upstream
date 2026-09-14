@@ -386,5 +386,9 @@ def test_loop_runs_recovery_before_fallback(
     # Recovery and correction steering must never be mid-conversation system
     # messages: Anthropic only accepts a single leading system block.
     assert_system_messages_only_lead(llm.messages_history)
-    # The run still terminates fail-closed once recovery is exhausted.
+    # The run still terminates fail-closed once recovery is exhausted: with no
+    # observed price at all there is nothing a redacted release could stand
+    # on, so the canned refusal is the answer, not a cut-down draft.
     assert result["content"]
+    assert "安全门槛拒绝" in result["content"]
+    assert result.get("degraded") is True

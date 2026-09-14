@@ -45,8 +45,8 @@ _DATE_RE = re.compile(
     # A year-less MM-DD / MM/DD; see _short_date_is_structural.
     r"|(?P<short>(?<![\d.])(?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01])(?!\d|\.\d))"
     r"|(?<![\d.:])(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?![\d:]|\.\d)"
-    # A month alone ("6月初"), a day, or a day range ("8月17–18日").
-    r"|(?<![\d.])\d{1,2}\s*月(?:\s*\d{1,2}(?:\s*[-–—~～]\s*\d{1,2})?\s*[日号])?"
+    # A month alone ("6月初"), a day, a day range ("8月17–18日") or a day list ("9月11/14日").
+    r"|(?<![\d.])\d{1,2}\s*月(?:\s*\d{1,2}(?:\s*[-–—~～/、]\s*\d{1,2})*\s*[日号])?"
     r"|(?:19|20)\d{2}\s*年"
     # A bare year or compact YYYYMMDD loses to a measurement mark ("$2050").
     r"|(?P<soft>(?<![\d.])(?:19|20)\d{2}(?:(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))?(?!\d|\.\d))"

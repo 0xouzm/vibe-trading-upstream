@@ -277,6 +277,7 @@ def _shapes(text: str) -> dict[str, str]:
         "3. First conclusion",                  # ordered-list marker, English
         "8月17–18日高点",                        # CJK month with a day range (real run)
         "6月初低点，8月中旬平台",                  # CJK month alone (real run)
+        "| 次级支撑 | 9月11/14日盘中低点 |",       # CJK month with a day list (real run)
         "| 阻力 | 含义 |\n|---|---|\n| 前高 | 8月17–18日高点 |",  # in a table cell
         "2026-09-11 / 09-14 两次盘中低点",       # zero-padded MM-DD after a full date
         "09-14 收盘",                           # zero-padded MM-DD alone

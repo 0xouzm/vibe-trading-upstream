@@ -127,9 +127,9 @@
     "connectorVerifyFailed": "Falló la verificación de la conexión.",
     "diagnosticCredentialsPartial": "Las credenciales están incompletas. Configura todas las variables requeridas y recrea el servicio.",
     "diagnosticCredentialsConflict": "Las fuentes de credenciales entran en conflicto. Conserva una fuente completa y vuelve a intentar.",
-    "diagnosticSdkMissing": "El SDK de Longbridge no está instalado en el servicio backend.",
+    "diagnosticSdkMissing": "El SDK requerido por este bróker no está instalado en el servicio backend.",
     "diagnosticAuthenticationFailed": "Falló la autenticación. Revisa las credenciales configuradas.",
-    "diagnosticNetworkUnreachable": "El servicio de Longbridge no está accesible. Revisa el acceso a la red y vuelve a intentar.",
+    "diagnosticNetworkUnreachable": "No se puede acceder al servicio del bróker o a la puerta de enlace local. Revisa la dirección de conexión y el acceso a la red y vuelve a intentarlo.",
     "diagnosticBrokerError": "El broker rechazó la solicitud de verificación de solo lectura. Reintenta o revisa los registros del backend."
   },
   "scheduled": {

@@ -122,9 +122,9 @@
     "connectorVerifyFailed": "연결 검증에 실패했습니다.",
     "diagnosticCredentialsPartial": "인증 정보가 불완전합니다. 필수 변수를 모두 설정하고 서비스를 다시 생성하세요.",
     "diagnosticCredentialsConflict": "인증 정보 출처가 충돌합니다. 완전한 출처 하나만 남긴 뒤 다시 시도하세요.",
-    "diagnosticSdkMissing": "백엔드 서비스에 Longbridge SDK가 설치되어 있지 않습니다.",
+    "diagnosticSdkMissing": "이 브로커에 필요한 SDK가 백엔드 서비스에 설치되어 있지 않습니다.",
     "diagnosticAuthenticationFailed": "인증에 실패했습니다. 설정된 인증 정보를 확인하세요.",
-    "diagnosticNetworkUnreachable": "Longbridge 서비스에 연결할 수 없습니다. 네트워크 연결을 확인하고 다시 시도하세요.",
+    "diagnosticNetworkUnreachable": "브로커 서비스 또는 로컬 게이트웨이에 연결할 수 없습니다. 연결 주소와 네트워크 연결을 확인한 후 다시 시도하세요.",
     "diagnosticBrokerError": "브로커가 읽기 전용 검증 요청을 거부했습니다. 다시 시도하거나 백엔드 로그를 확인하세요."
   },
   "scheduled": {

@@ -127,9 +127,9 @@
     "connectorVerifyFailed": "A verificação da conexão falhou.",
     "diagnosticCredentialsPartial": "As credenciais estão incompletas. Configure todas as variáveis ​​necessárias e recrie o serviço.",
     "diagnosticCredentialsConflict": "Conflito de fontes de credenciais. Mantenha uma fonte completa e tente novamente.",
-    "diagnosticSdkMissing": "O Longbridge SDK não está instalado no serviço de backend.",
+    "diagnosticSdkMissing": "O SDK necessário para esta corretora não está instalado no serviço de backend.",
     "diagnosticAuthenticationFailed": "Falha na autenticação. Verifique as credenciais configuradas.",
-    "diagnosticNetworkUnreachable": "O serviço Longbridge está inacessível. Verifique o acesso à rede e tente novamente.",
+    "diagnosticNetworkUnreachable": "O serviço da corretora ou o gateway local está inacessível. Verifique o endereço de conexão e o acesso à rede e tente novamente.",
     "diagnosticBrokerError": "A corretora recusou a solicitação de verificação somente leitura. Tente novamente ou verifique os logs do backend."
   },
   "scheduled": {

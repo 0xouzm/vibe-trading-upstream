@@ -759,3 +759,20 @@ def test_a_cut_figure_takes_its_magnitude_mark_with_it(tmp_path: Path) -> None:
     assert released is not None
     assert "0.300" not in released
     assert "M" not in released
+
+
+@pytest.mark.parametrize(
+    ("text", "end", "expected"),
+    [
+        ("24.6M lots", 4, (1e6, 5)),
+        ("2.4万手", 3, (1e4, 4)),
+        ("5MB of data", 1, (1.0, 1)),
+        ("3 months", 1, (1.0, 1)),
+    ],
+)
+def test_a_magnitude_mark_is_a_glued_symbol_not_a_word(
+    text: str, end: int, expected: tuple[float, int]
+) -> None:
+    from src.agent.grounding.figures import magnitude_suffix
+
+    assert magnitude_suffix(text, end) == expected

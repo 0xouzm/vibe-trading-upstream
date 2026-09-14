@@ -89,14 +89,15 @@ def test_a_declared_delta_passes_in_every_spelling(text: str) -> None:
     """The upper arm: one declaration settles it, in either language.
 
     Without this arm the file is satisfied by a gate that rejects everything,
-    which is the failure mode the mask had in the other direction.
+    which is the failure mode the mask had in the other direction. The source
+    is written on the figure's line because the block never reaches the reader.
     """
     figure = next(
         figure.text
         for figure in scan_figures(text, parse_figures_block(text))
         if figure.shape == "measured"
     )
-    declared = text + (
+    declared = text + " (2026 Q2 filing)" + (
         "\n\n```figures\n" + f"{figure} | cited | 2026 Q2 filing, margin bridge\n```"
     )
 

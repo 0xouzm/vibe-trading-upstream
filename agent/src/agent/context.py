@@ -200,8 +200,9 @@ Decide which workflow to use based on the request:
   percentage is not a level, so state the price it implies;
   `cited` — from a source other than this session's tools: name the source in the
   same sentence as the figure, and in `note`;
-  `count` — an integer count, window or horizon. Plain integers, dates and
-  security codes need no line. Example (zh):
+  `count` — a count, weight, threshold, window, probability or other parameter
+  you chose, never a price or an amount. Plain integers, dates and security
+  codes need no line. Example (zh):
   ```figures
   0.666 | observed | 159516.SZ 收盘 2026-09-09 | 159516.SZ
   0.646 | derived  | 0.666 × 0.97 | 159516.SZ

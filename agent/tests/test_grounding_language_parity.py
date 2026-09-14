@@ -65,14 +65,14 @@ _MUST_ACCEPT = [
     # The same figure, declared: the declaration is what moves the verdict,
     # and it moves both languages together.
     (
-        "The deal closed at a 30.5% premium.\n\n```figures\n"
+        "Per the merger announcement, the deal closed at a 30.5% premium.\n\n```figures\n"
         "30.5% | cited | merger announcement 2026-08-03\n```",
-        "交易以 30.5% 溢价成交。\n\n```figures\n"
+        "据并购公告，交易以 30.5% 溢价成交。\n\n```figures\n"
         "30.5% | cited | 并购公告 2026-08-03\n```",
     ),
     (
         "Gross margin fell 3.6pp.\n\n```figures\n"
-        "3.6 | cited | 2026 Q2 filing, gross margin bridge\n```",
+        "3.6pp | cited | 2026 Q2 filing, gross margin bridge\n```",
         "毛利率下降 3.6 个百分点。\n\n```figures\n"
         "3.6 | cited | 2026 Q2 财报毛利率桥\n```",
     ),

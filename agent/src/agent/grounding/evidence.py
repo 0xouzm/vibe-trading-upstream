@@ -119,6 +119,12 @@ _ANALYSIS_KIND_ALIASES = {
     "return": "return",
     "returns": "return",
     "ic_positive_ratio": "win_rate",
+    "var": "tail_risk",
+    "var_95": "tail_risk",
+    "var_99": "tail_risk",
+    "cvar": "tail_risk",
+    "es": "tail_risk",
+    "expected_shortfall": "tail_risk",
     # Chinese TOOL FIELD NAMES from A-share tools, not answer prose.
     "最大回撤": "drawdown",
     "回撤": "drawdown",
@@ -133,6 +139,18 @@ _ANALYSIS_KIND_ALIASES = {
     "累计收益率": "return",
     "收益率": "return",
 }
+
+# Sample-size, window and duration leaves share a metric's token but hold a
+# count: ``return_observations = 81`` is 81 observations, never an 81% return
+# (#1420/#1426). Matched on the leaf's first and last field-name token.
+_METADATA_COUNT_HEADS = frozenset({"n"})
+
+_METADATA_COUNT_TAILS = frozenset(
+    {"obs", "observations", "window", "lookback", "count", "days", "duration"}
+)
+
+# Money-denominated row fields a currency-marked figure may quote besides a price.
+_AMOUNT_FIELDS = frozenset({"amount", "turnover", "成交额"})
 
 
 def _symbol_from_csv_filename(stem: str) -> str | None:
@@ -247,6 +265,12 @@ def _timestamp_matches_claim_date(timestamp: str, date_value: str) -> bool:
     return stamp_tuple == claim_tuple
 
 
+def _leaf_name(path: str) -> str:
+    """The last field name of an evidence path, without its list index."""
+    leaf = str(path or "").rsplit(".", 1)[-1]
+    return re.sub(r"\[\d+\]$", "", leaf).strip().casefold()
+
+
 def _price_field_for_path(path: str) -> str | None:
     """Map a generic evidence JSON path to a canonical price field.
 
@@ -257,9 +281,25 @@ def _price_field_for_path(path: str) -> str | None:
         The matching member of ``_PRICE_FIELDS``, or ``None`` when the leaf is
         not an unambiguous quote field.
     """
-    leaf = str(path or "").rsplit(".", 1)[-1]
-    leaf = re.sub(r"\[\d+\]$", "", leaf).strip().casefold()
-    return _GENERIC_PRICE_FIELD_ALIASES.get(leaf)
+    return _GENERIC_PRICE_FIELD_ALIASES.get(_leaf_name(path))
+
+
+def _is_metadata_count_leaf(path: str) -> bool:
+    """Whether an evidence leaf is a sample size, window or duration.
+
+    Args:
+        path: Recorded evidence field, e.g. ``"stats.return_observations"``.
+
+    Returns:
+        True for ``n_*`` and ``*_obs`` / ``*_observations`` / ``*_window`` /
+        ``*_lookback`` / ``*_count`` / ``*_days`` / ``*_duration`` leaves.
+    """
+    tokens = [token for token in _leaf_name(path).split("_") if token]
+    if not tokens:
+        return False
+    return tokens[-1] in _METADATA_COUNT_TAILS or (
+        len(tokens) > 1 and tokens[0] in _METADATA_COUNT_HEADS
+    )
 
 
 # Price-denominated indicator leaves, registered per tool and matched by path
@@ -307,9 +347,13 @@ def _is_registered_price_indicator(tool: str, path: str) -> bool:
 
 
 def _metric_kind_for_path(path: str) -> str | None:
-    """Map an evidence JSON path to an analysis metric kind."""
-    leaf = re.sub(r"\[\d+\]$", "", str(path or "").rsplit(".", 1)[-1])
-    leaf = leaf.strip().casefold()
+    """Map an evidence JSON path to an analysis metric kind.
+
+    A metadata count leaf (:func:`_is_metadata_count_leaf`) has no kind.
+    """
+    if _is_metadata_count_leaf(path):
+        return None
+    leaf = _leaf_name(path)
     kind = _ANALYSIS_KIND_ALIASES.get(leaf)
     if kind is not None:
         return kind
@@ -339,6 +383,24 @@ class EvidenceRecord:
     currency: str | None = None
     venue: str | None = None
     currency_conversion: str | None = None
+
+
+def _is_price_kind(record: EvidenceRecord) -> bool:
+    """Whether a record is money-denominated: a quote, a registered level or an amount.
+
+    Args:
+        record: One evidence record, with its raw or canonical field.
+
+    Returns:
+        True for OHLC/quote fields, registered price indicators and
+        amount/turnover leaves.
+    """
+    return (
+        record.field in _PRICE_FIELDS
+        or _price_field_for_path(record.field) is not None
+        or _is_registered_price_indicator(record.tool, record.field)
+        or _leaf_name(record.field) in _AMOUNT_FIELDS
+    )
 
 
 class _EvidenceMixin:

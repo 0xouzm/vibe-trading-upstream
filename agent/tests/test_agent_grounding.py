@@ -1749,7 +1749,7 @@ def test_reference_level_and_currency_thresholds_pass_end_to_end(tmp_path: Path)
 
     result = ledger.validate_final_answer(
         "SPCX.US 8/10 收 138.74 USD、8/12 高 149.60 USD（source: yahoo）。"
-        "8/12 高 149.60 为 6/16 ATH 225.64 以来最高；"
+        "8/12 高 149.60 为 6/16 盘中历史高点 225.64 以来最高；"
         "8/10 收盘 138.74 高于 $135.00 且高于 $119.68。\n\n"
         "```figures\n"
         "138.74 | observed | close 2026-08-10 | prices\n"
@@ -1801,7 +1801,7 @@ def test_validation_summary_with_counts_and_line_cites_passes_end_to_end(
     result = ledger.validate_final_answer(
         "SPCX.US 核验(USD, source: yahoo):❌ 1 项事实错误 — "
         "文档 ~line 206「8/12 高 149.60 为 6/16 ATH 以来最高」不成立,"
-        "6/17–7/10 有 16 个交易日高点高于 149.60,正确为 7/10(150.57)以来最高。\n\n"
+        "6/17–7/10 有 16 个交易日高点高于 149.60,正确为 7/10 盘中高点(150.57)以来最高。\n\n"
         "```figures\n"
         "149.60 | observed | high 2026-08-12 | prices\n"
         "150.57 | cited | 7/10 盘中高点，本会话未取\n"
@@ -2871,7 +2871,7 @@ def test_analysis_definition_is_declared_not_phrased(tmp_path: Path) -> None:
     ledger = GroundingLedger(run_dir=tmp_path, user_message="什么是夏普比率？")
 
     declared = ledger.validate_final_answer(
-        "夏普比率大于 1.0 通常被认为较好。\n\n"
+        "按行业惯例，夏普比率大于 1.0 被认为较好。\n\n"
         "```figures\n1.0 | cited | 行业惯例阈值\n```"
     )
     assert declared.valid is True, declared.issues
@@ -3192,7 +3192,7 @@ def test_a_citation_subject_no_longer_exempts_anything(tmp_path: Path) -> None:
     # NOT carry the sibling the same sentence invents.
     ledger = GroundingLedger(run_dir=tmp_path, user_message="Research the factor.")
     partial = ledger.validate_final_answer(
-        "The paper reports a Sharpe ratio of 1.8, and our strategy achieved "
+        "The Fama-French paper reports a Sharpe ratio of 1.8, and our strategy achieved "
         "an annualized return of 47.3%.\n\n"
         "```figures\n1.8 | cited | Fama-French 2024, table 3\n```"
     )

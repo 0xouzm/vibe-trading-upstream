@@ -1181,7 +1181,7 @@ def test_redacted_release_never_cuts_inside_another_number(tmp_path: Path) -> No
     draft = (
         "562500.SS（Yahoo，CNY）最新收盘价 1.171 元。成交额约 21.10 亿元。"
         "\n\n| 日期 | 收盘价 |\n|---|---|\n| 2026-06-24 | 1.10 |\n"
-        + _block(HDR_ROW, "21.10 | count | 成交额（亿元）", "1.10 | observed | close | prices")
+        + _block(HDR_ROW, "21.10 | cited | 成交额（亿元）", "1.10 | observed | close | prices")
     )
     validation = ledger.validate_final_answer(draft)
     assert [i["value"] for i in validation.issues] == ["1.10"]

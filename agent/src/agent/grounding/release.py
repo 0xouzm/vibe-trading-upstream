@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Any, Sequence
+from typing import Any, Iterable, Sequence
 
 from src.agent.grounding.identity import (
     _CANONICAL_SYMBOL_RE,
@@ -14,12 +14,12 @@ from src.agent.grounding.identity import (
 )
 from src.agent.grounding.evidence import EvidenceRecord
 from src.agent.grounding.figures import (
+    BLOCK_LANGUAGE,
+    Figure,
     _lines_with_offsets,
-    currency_prefix_start,
-    currency_suffix_end,
-    magnitude_suffix,
     parse_figures_block,
     scan_figures,
+    strip_figures_block,
 )
 from src.agent.grounding.policies import ValidationResult
 
@@ -83,6 +83,11 @@ _CORRECTION_REASONS = {
     "cited_as_observed": "it is presented as an observed value of this instrument",
     "unparseable_declaration": "the declaration line could not be read as `value | role | note | ref`",
     "symbol_never_handled": "no tool call in this session passed in or returned that symbol",
+    "additive_operand_not_observed": "a number its note adds or subtracts is not a value this session observed",
+    "role_in_price_column": "it sits in a price column, which holds only observed prints",
+    "proposed_not_a_price": "a proposed level is a price, not a percentage; state the price it implies",
+    "symbol_mismatch": "it is declared for one instrument but the sentence writes it about another",
+    "citation_not_visible": "its source is not named on the figure's own line, and the note is stripped before the user reads the answer",
 }
 
 
@@ -119,22 +124,6 @@ def _correction_line(issue: dict[str, Any]) -> str:
     symbol = issue.get("symbol")
     subject = f"{issue.get('value')} ({symbol})" if symbol else str(issue.get("value"))
     return f"{subject} | {declared} | {evidence}"
-
-
-def _digit_key(text: str) -> str:
-    """The digits a figure was written with, ignoring decoration.
-
-    ``37%``, ``37 %`` and ``37`` share a key; ``3`` and ``3.0`` do not, so a
-    sweep never cuts an unrelated count.
-
-    Args:
-        text: The figure exactly as it appears in the answer.
-
-    Returns:
-        The comparable digit string, or "" when there is none.
-    """
-    body = text.strip().rstrip("%\uff05").strip().lstrip("+-")
-    return body.replace(",", "").strip()
 
 
 def _strip_release_markers(content: str) -> str:
@@ -476,10 +465,15 @@ class _ReleaseMixin:
         """Release the last rejected draft with its unverified figures cut out.
 
         Each rejected figure becomes a marker at its own span, missing provenance
-        is appended, bare restatements of a cut figure are swept, and the result
-        and its footnote are re-validated by the same gate. Fail-closed: None when
-        no price was observed, an issue cannot be cut (an identity finding), a
-        flagged figure cannot be located, or the text still fails.
+        is appended, unchecked restatements of a cut figure (bare, or inside a
+        code fence, compared by normalized digits) are swept, and the result and
+        its footnote are re-validated by the same gate. A block with an
+        unreadable declaration line is dropped first, so every measured figure is
+        checked as observed; if that alone passes, nothing is footnoted.
+        Fail-closed: None when a market answer observed no price, an issue cannot
+        be cut (an identity finding), a flagged figure cannot be located, or the
+        text still fails. A general answer with no tool evidence is released cut,
+        with a footnote that names no range.
 
         Args:
             content: The rejected draft.
@@ -489,12 +483,22 @@ class _ReleaseMixin:
             The redacted, re-validated answer without its declaration block and
             with a note stating how many figures were removed, or None.
         """
-        if not self._price_records():
+        # A market answer with no observed price has nothing to stand on once its
+        # figures are cut; a general answer (no instrument asked about) does.
+        if self._identity_required and not self._price_records():
             return None
         text = _strip_release_markers(content)
         # Stripping shifts offsets and the cuts anchor on issue spans, so the
         # verdict is retaken on the stripped text.
         check = validation if text == content else self._validate(text, record=False)
+        # An unreadable declaration cannot be cut, but the block is not answer
+        # text either: without it the draft is checked in undeclared mode.
+        dropped_block = any(
+            issue.get("code") == "figures_block_malformed" for issue in check.issues
+        )
+        if dropped_block:
+            text = strip_figures_block(text, parse_figures_block(text))
+            check = self._validate(text, record=False)
         removed = 0
         keys: set[str] = set()
         for _ in range(_MAX_REDACTION_PASSES):
@@ -503,39 +507,41 @@ class _ReleaseMixin:
             codes = {issue.get("code") for issue in check.issues}
             if not codes <= (_REDACTABLE_CODES | _REPAIRABLE_PROVENANCE_CODES):
                 return None
-            cut, cut_texts = self._cut_flagged(text, check.issues)
+            cut, cut_keys = self._cut_flagged(text, check.issues)
             if cut is None:
                 return None
-            if cut_texts:
+            if cut_keys:
                 text = cut
-                removed += len(cut_texts)
-                keys.update(_digit_key(item) for item in cut_texts)
+                removed += len(cut_keys)
+                keys.update(cut_keys)
                 check = self._validate(text, record=False)
                 if check.valid:
                     break
             repaired = self.repair_provenance(text, check)
             if repaired is None:
-                if not cut_texts:
+                if not cut_keys:
                     return None
                 continue
             text = repaired
             check = self._validate(text, record=False)
-        if not check.valid or removed == 0:
+        if not check.valid or (removed == 0 and not dropped_block):
             return None
         # A cut figure can still be standing where the shape rules never look.
-        swept, swept_texts = self._sweep_same_values(text, keys - {""})
-        if swept_texts:
+        swept, swept_keys = self._sweep_same_values(text, keys - {""})
+        if swept_keys:
             recheck = self._validate(swept, record=False)
             if not recheck.valid:
                 return None
-            text, check, removed = swept, recheck, removed + len(swept_texts)
+            text, check, removed = swept, recheck, removed + len(swept_keys)
         body = check.released_text
-        note = self._release_note(removed, body)
-        # The note is answer text too (range, symbols), so it passes the same
-        # gate, in undeclared mode.
-        if not self._validate(note, record=False).valid:
-            return None
-        released = body.rstrip() + "\n\n" + note
+        released = body
+        if removed:
+            note = self._release_note(removed, body)
+            # The note is answer text too (range, symbols), so it passes the
+            # same gate, in undeclared mode.
+            if not self._validate(note, record=False).valid:
+                return None
+            released = body.rstrip() + "\n\n" + note
         # Recorded beside the drafts, not as one: every recheck here is
         # unrecorded, so this is the artifact's only evidence of the release.
         self._released = {
@@ -580,19 +586,21 @@ class _ReleaseMixin:
         """Replace every flagged figure with the omission marker.
 
         An issue without a value (``unsourced_symbol_figures``) cuts every
-        measured figure inside its span.
+        measured figure inside its span; any other issue must name the span of
+        a figure the scan located.
 
         Args:
             text: The document to rewrite.
             issues: The issues raised against it.
 
         Returns:
-            ``(rewritten text, figures replaced as written)``, or ``(None, [])``
-            when a flagged issue cannot be located and release must fail closed.
+            ``(rewritten text, normalized digits of each figure cut)``, or
+            ``(None, [])`` when a flagged figure cannot be located and release
+            must fail closed.
         """
-        block = parse_figures_block(text)
-        figures = scan_figures(text, block)
-        cuts: set[tuple[int, int]] = set()
+        figures = scan_figures(text, parse_figures_block(text))
+        located = {(figure.start, figure.end): figure for figure in figures}
+        cuts: dict[tuple[int, int], Figure] = {}
         for issue in issues:
             if issue.get("code") not in _REDACTABLE_CODES:
                 continue
@@ -601,66 +609,70 @@ class _ReleaseMixin:
                 return None, []
             if issue.get("value") is None:
                 cuts.update(
-                    (figure.start, figure.end)
+                    ((figure.start, figure.end), figure)
                     for figure in figures
                     if figure.shape == "measured"
                     and span[0] <= figure.start
                     and figure.end <= span[1]
                 )
+            elif span in located:
+                cuts[span] = located[span]
             else:
-                cuts.add(span)
-        return self._apply_cuts(text, cuts)
+                return None, []
+        return self._apply_cuts(text, cuts.values())
 
     def _sweep_same_values(self, text: str, keys: set[str]) -> tuple[str, list[str]]:
-        """Cut every bare-integer restatement of a figure that was already cut.
+        """Cut every unchecked restatement of a figure that was already cut.
 
         After "回撤 37%" is cut, "回撤 37 个百分点" still carries an unchecked bare
-        "37". Measured survivors were checked and grounded, and exempt ones are
-        structure (dates, codes, fenced text), so only bare figures are swept.
+        "37", and a code fence can still print it. Figures compare by normalized
+        digits, so an escaped spelling is the same restatement. Measured prose
+        survivors were checked and grounded, and the figures block is not
+        answer text, so neither is swept.
 
         Args:
             text: The already-cut document.
-            keys: Digit keys of the figures that were cut.
+            keys: Normalized digits of the figures that were cut.
 
         Returns:
-            ``(rewritten text, figures swept as written)``.
+            ``(rewritten text, normalized digits of each figure swept)``.
         """
         if not keys:
             return text, []
-        block = parse_figures_block(text)
-        cuts = {
-            (figure.start, figure.end)
-            for figure in scan_figures(text, block)
-            if figure.shape == "bare" and _digit_key(figure.text) in keys
-        }
-        swept, cut_texts = self._apply_cuts(text, cuts)
-        return (text, []) if swept is None else (swept, cut_texts)
+        stale = [
+            figure
+            for figure in scan_figures(text, parse_figures_block(text))
+            if figure.digits in keys
+            and (
+                figure.shape == "bare"
+                or (figure.fence is not None and figure.fence != BLOCK_LANGUAGE)
+            )
+        ]
+        return self._apply_cuts(text, stale)
 
     def _apply_cuts(
         self,
         text: str,
-        cuts: set[tuple[int, int]],
-    ) -> tuple[str | None, list[str]]:
-        """Replace each span with the omission marker in the script it sits in.
+        figures: Iterable[Figure],
+    ) -> tuple[str, list[str]]:
+        """Replace each figure and its glued marks with the marker in its line's script.
 
         Args:
             text: The document to rewrite.
-            cuts: Spans of the figures to remove.
+            figures: The figures to remove.
 
         Returns:
-            ``(rewritten text, the figures removed as written)``.
+            ``(rewritten text, normalized digits of each figure removed)``.
         """
-        if not cuts:
-            return text, []
         pieces: list[str] = []
         removed: list[str] = []
         cursor = 0
-        for start, end in sorted(cuts):
-            if start < cursor:
+        for figure in sorted(figures, key=lambda item: (item.start, item.end)):
+            if figure.start < cursor:
                 continue
-            removed.append(text[start:end])
-            start = max(cursor, currency_prefix_start(text, start))
-            end = currency_suffix_end(text, magnitude_suffix(text, end)[1])
+            removed.append(figure.digits)
+            start, end = figure.extent or (figure.start, figure.end)
+            start = max(cursor, start)
             marker = self._marker_for(text, start)
             if marker is _REDACTION_MARKER_ZH:
                 # "建议买入价 0.95 元" → "建议买入价（略※）": flush against the word,
@@ -701,6 +713,13 @@ class _ReleaseMixin:
         """Explain the redaction to the user, with the observed range."""
         is_zh = self._user_writes_chinese()
         joined = self._observed_range_summary(is_zh, content)
+        if joined is None:
+            if is_zh:
+                return f"※ 略去 {removed} 处无法与本会话工具数据对上的数值。"
+            return (
+                f"※ {removed} figure(s) that could not be matched to this session's "
+                "tool data were omitted."
+            )
         if is_zh:
             return (
                 f"※ 略去 {removed} 处无法与本会话工具数据对上的数值。"

@@ -505,7 +505,8 @@ def test_cited_needs_a_source_and_may_not_pose_as_a_print(tmp_path: Path) -> Non
     ledger = _ledger(tmp_path)
 
     with_source = ledger.validate_final_answer(
-        HDR + " 论文报告夏普 1.8。" + _block(HDR_ROW, "1.8 | cited | Fama-French 2024 table 3")
+        HDR + " Fama-French（2024）论文报告夏普 1.8。"
+        + _block(HDR_ROW, "1.8 | cited | Fama-French 2024 table 3")
     )
     without_source = ledger.validate_final_answer(
         HDR + " 论文报告夏普 1.8。" + _block(HDR_ROW, "1.8 | cited | ")
@@ -521,13 +522,17 @@ def test_cited_needs_a_source_and_may_not_pose_as_a_print(tmp_path: Path) -> Non
 
 
 def test_count_is_not_checked_but_is_still_declared(tmp_path: Path) -> None:
-    """``count`` is the escape hatch, and using it is a statement on the record."""
-    ledger = _ledger(tmp_path)
+    """``count`` covers a plain integer, and using it is a statement on the record.
 
-    declared = ledger.validate_final_answer(
-        HDR + " 建议持有 3.5 个月。" + _block(HDR_ROW, "3.5 | count | 月")
-    )
-    undeclared = ledger.validate_final_answer(HDR + " 建议持有 3.5 个月。" + _block(HDR_ROW))
+    A plain integer is measurement-shaped only inside a table. A count with a
+    decimal point, percent or currency mark is checked as observed instead
+    (``test_grounding_role_hardening``).
+    """
+    ledger = _ledger(tmp_path)
+    table = "\n\n| 持有期（月） |\n|---|\n| 3 |\n"
+
+    declared = ledger.validate_final_answer(HDR + table + _block(HDR_ROW, "3 | count | 月"))
+    undeclared = ledger.validate_final_answer(HDR + table + _block(HDR_ROW))
 
     assert declared.valid is True, declared.issues
     assert [issue["code"] for issue in undeclared.issues] == ["figure_undeclared"]
@@ -580,7 +585,8 @@ def test_the_correction_prompt_names_each_figure_and_its_reason(
 
     assert "declared proposed" in line
     assert "0.567" in line and "1.053" in line
-    assert "nearest observed 1.053, 1.04, 1.02" in line
+    # The nearest values are the symbol's closes, not every field of every bar.
+    assert "nearest observed 1.04, 0.666" in line
     assert "figures" in prompt
     assert "DECLARE" in prompt and "REWRITE" in prompt and "REMOVE" in prompt
 

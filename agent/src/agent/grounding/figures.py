@@ -5,13 +5,21 @@ declarations, classifies every prose number by SHAPE (date, symbol, list
 marker, measurement, bare integer) and matches prose numbers to declarations.
 It reads no natural-language word; roles are declared by the model and shape
 is language-independent.
+
+Numbers are read as a renderer shows them: invisible characters, Markdown
+escapes, character references and look-alike separators are normalized first,
+and every offset is mapped back to the original text.
 """
 
 from __future__ import annotations
 
+import html
 import re
+import string
+import unicodedata
 from dataclasses import dataclass
-from typing import Sequence
+from decimal import Decimal, InvalidOperation
+from typing import Iterable, Sequence
 
 from src.agent.grounding.identity import _CANONICAL_SYMBOL_RE
 
@@ -28,27 +36,32 @@ _NUMBER_RE = re.compile(
     r"(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?!\d)"
 )
 
-# SHAPE 2 — a calendar date or a bare year: structure, never a measurement
-# (spec §3). A year-less "08-10" is two bare integers and needs no mask.
+# SHAPE 2 — dates, times and years: structure, never a measurement (spec §3).
+# A year-less "08-10" is two bare integers and needs no mask.
 _DATE_RE = re.compile(
-    r"(?P<full>(?:19|20)\d{2}\s*[-/年]\s*\d{1,2}\s*[-/月]\s*\d{1,2}\s*[日号]?)"
+    r"(?P<full>(?:19|20)\d{2}(?:\s*[-/年]\s*\d{1,2}\s*[-/月]\s*\d{1,2}\s*[日号]?"
+    # A dotted date has both dots and no spacing: "2001.5 - 2002.5" is a range.
+    r"|\.\d{1,2}\.\d{1,2}(?!\d|\.\d)))"
     # A year-less MM-DD / MM/DD; see _short_date_is_structural.
     r"|(?P<short>(?<![\d.])(?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01])(?!\d|\.\d))"
+    r"|(?<![\d.:])(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?![\d:]|\.\d)"
     r"|\d{1,2}\s*月\s*\d{1,2}\s*[日号]"
     r"|(?:19|20)\d{2}\s*年"
-    r"|(?:19|20)\d{2}"
+    # A bare year or compact YYYYMMDD loses to a measurement mark ("$2050").
+    r"|(?P<soft>(?<![\d.])(?:19|20)\d{2}(?:(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))?(?!\d|\.\d))"
 )
 
 # SHAPE 3 — a line-leading list marker or numbered heading. The punctuation is
 # required, so a line opening with a figure ("1.171 元是收盘价") is untouched.
-_ORDINAL_RE = re.compile(r"(?m)^[^\S\n]*(?:#{1,6}[^\S\n]*)?\d{1,3}[.)、．][^\S\n]+")
+_ORDINAL_RE = re.compile(r"(?m)^[^\S\n]*(?:#{1,6}[^\S\n]*)?\d{1,3}[.)、][^\S\n]+")
 
-# SHAPE 4 — a fenced block: code or the figures block, never prose.
-_FENCE_RE = re.compile(r"(?m)^[^\S\n]*(?:`{3,}|~{3,})[^\n]*$")
+# SHAPE 4 — a CommonMark fence line: at most three spaces of indent, a run of
+# backticks or tildes, and the info string.
+_FENCE_RE = re.compile(r"(?m)^ {0,3}(`{3,}|~{3,})(.*)$")
 
 # Currency is a symbol set, not a vocabulary: a money character or ISO code
 # touching a bare integer ("$100", "820 CNY") makes it measurement-shaped.
-_CURRENCY_CHARS = frozenset("$¥￥€£₩₹元币圆镑")
+_CURRENCY_CHARS = frozenset("$¥￥€£₩₹元币圆镑円원")
 
 _CURRENCY_CODES = frozenset(
     {
@@ -59,6 +72,9 @@ _CURRENCY_CODES = frozenset(
 
 _PERCENT_CHARS = "%％"
 
+# Glued percentage-point and basis-point marks, and the percent each one is.
+_POINT_MARKS = (("bps", 0.01), ("pp", 1.0), ("bp", 0.01))
+
 # Magnitude marks glued to a figure ("24.6M", "2.4万"): a symbol set like the
 # currency marks. They scale the comparison with evidence and never decide shape.
 _MAGNITUDES = {"K": 1e3, "M": 1e6, "B": 1e9, "千": 1e3, "万": 1e4, "亿": 1e8}
@@ -67,10 +83,26 @@ _MAGNITUDES = {"K": 1e3, "M": 1e6, "B": 1e9, "千": 1e3, "万": 1e4, "亿": 1e8}
 # keeps 元宵/元件, inside longer CJK runs, from reading as money.
 _MAX_CURRENCY_WORD = 3
 
+# What a renderer does not show, and look-alikes of a number's own separators.
+_INVISIBLE = frozenset("\u200b\u200c\u200d\u2060\ufeff\u00ad")
+
+_LOOKALIKES = {
+    "\uff0e": ".", "\u066b": ".", "\u066c": ",", "\u2212": "-",
+    "\u00a0": " ", "\u202f": " ", "\u2007": " ", "\u2009": " ",
+}
+
+_LINE_BREAKS = frozenset("\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029")
+
+_ESCAPABLE = frozenset(string.punctuation)
+
 
 @dataclass(frozen=True)
 class Declaration:
-    """One parsed line of the model's figures block."""
+    """One parsed line of the model's figures block.
+
+    ``value_text`` is the value's canonical spelling at its written precision,
+    in percent units when it is a percent ("5200bp" → "52.00%").
+    """
 
     index: int
     value_text: str
@@ -83,13 +115,18 @@ class Declaration:
 
 @dataclass(frozen=True)
 class FiguresBlock:
-    """The declaration block, or the absence of one."""
+    """The declaration blocks, or the absence of one.
+
+    ``span`` is the first block's (streaming holds back from it); ``spans``
+    covers every block, all of which are merged and stripped.
+    """
 
     present: bool
     span: tuple[int, int] | None
     raw: str
     declarations: tuple[Declaration, ...]
     malformed: tuple[tuple[int, str], ...]
+    spans: tuple[tuple[int, int], ...] = ()
 
     def match(self, value: float, percent: bool) -> Declaration | None:
         """Return the declaration covering ``value``, or None.
@@ -114,7 +151,13 @@ class FiguresBlock:
 
 @dataclass(frozen=True)
 class Figure:
-    """One number located in the prose, with the shape it was written in."""
+    """One number located in the prose, with the shape it was written in.
+
+    ``text``, ``start`` and ``end`` are the original spelling and offsets.
+    ``value`` is in percent units for a percent, pp or bp figure ("5200bp" is
+    52.0, ``scale`` 1.0). ``digits`` and ``sign`` are the normalized reading
+    ("0\\.888" → "0.888", "−5,13%" → "-", "5.13"), for precision and sign.
+    """
 
     text: str
     value: float
@@ -129,6 +172,13 @@ class Figure:
     scale: float = 1.0
     # A currency mark or ISO code touches the digits ("$2050", "0.95 元").
     currency: bool = False
+    digits: str = ""
+    sign: str = ""
+    # The span a redaction replaces: the figure plus its glued currency and
+    # magnitude marks ("HK$1.10", "0.95 元", "24.6M").
+    extent: tuple[int, int] | None = None
+    # The info string of the fenced block holding the figure, or None.
+    fence: str | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +190,35 @@ class TableRow:
     columns: dict[int, str]
     date_column: int | None
     symbol_column: int | None
+
+
+@dataclass(frozen=True)
+class _Normalized:
+    """A document as a renderer shows its numbers, with offsets into the source."""
+
+    text: str
+    starts: tuple[int, ...]
+    ends: tuple[int, ...]
+    size: int
+
+    def start(self, index: int) -> int:
+        """The source offset where normalized position ``index`` begins."""
+        return self.starts[index] if index < len(self.starts) else self.size
+
+    def end(self, index: int) -> int:
+        """The source offset where a normalized span ending at ``index`` ends."""
+        return self.ends[index - 1] if index > 0 else 0
+
+
+@dataclass(frozen=True)
+class _Token:
+    """One number in normalized text: its span, sign and digits as written."""
+
+    start: int
+    end: int
+    sign: str
+    digits: str
+
 
 # Header spellings binding a table column to an OHLC field: the table's own
 # schema, like a tool field name, not prose inference (spec §4).
@@ -182,51 +261,268 @@ def _lines_with_offsets(content: str) -> list[tuple[str, int]]:
     return positions
 
 
-def _fenced_blocks(content: str) -> list[tuple[int, int, str, tuple[int, int]]]:
-    """Return ``(start, end, info, body)`` for every fenced block.
+def _entity(content: str, index: int) -> tuple[str, int] | None:
+    """Decode the character reference (``&#46;``, ``&nbsp;``) at ``index``.
 
-    An unterminated fence runs to the end of the document, which is how a
-    truncated answer ends and must not silently un-fence the rest of it.
+    Returns:
+        ``(character, source width)``, or None when there is no reference or it
+        would decode to a line break or control character.
     """
-    fences = list(_FENCE_RE.finditer(content))
+    semicolon = content.find(";", index + 2, index + 12)
+    if semicolon < 0:
+        return None
+    piece = content[index : semicolon + 1]
+    name = piece[1:-1]
+    if name.startswith("#"):
+        digits, allowed, base = name[1:], string.digits, 10
+        if digits[:1] in ("x", "X"):
+            digits, allowed, base = digits[1:], string.hexdigits, 16
+        if not digits or any(char not in allowed for char in digits):
+            return None
+        code = int(digits, base)
+        if not 0 < code <= 0x10FFFF or 0xD800 <= code <= 0xDFFF:
+            return None
+        char = chr(code)
+    else:
+        char = html.unescape(piece) if name.isascii() and name.isalnum() else piece
+        if len(char) != 1:
+            return None
+    if char in _LINE_BREAKS or unicodedata.category(char) == "Cc":
+        return None
+    return char, len(piece)
+
+
+def _glued_code(chars: Sequence[str]) -> bool:
+    """Whether ``chars`` ends in an uppercase ISO code standing on its own ("CNY")."""
+    run = 0
+    while run < min(len(chars), 5) and chars[-1 - run].isascii() and chars[-1 - run].isupper():
+        run += 1
+    before = chars[-1 - run] if len(chars) > run else ""
+    return (
+        "".join(chars[len(chars) - run :]) in _CURRENCY_CODES
+        and not (before.isalnum() or before == "_")
+    )
+
+
+def _normalize(content: str) -> _Normalized:
+    """Read ``content`` as a renderer shows its numbers.
+
+    Invisible characters are dropped; a backslash before ASCII punctuation and a
+    character reference are resolved; "．" and "٫" read as a decimal point, "٬"
+    as a group separator, "−" as a minus, no-break and figure spaces as spaces;
+    an ISO code glued to digits ("CNY0.888") gets a space so the number is read
+    whole. Line breaks are never introduced or removed.
+    """
+    chars: list[str] = []
+    starts: list[int] = []
+    ends: list[int] = []
+    index = 0
+    while index < len(content):
+        char, width = content[index], 1
+        if char == "\\" and content[index + 1 : index + 2] in _ESCAPABLE:
+            char, width = content[index + 1], 2
+        elif char == "&":
+            char, width = _entity(content, index) or (char, width)
+        if char in _INVISIBLE:
+            index += width
+            continue
+        char = _LOOKALIKES.get(char, char)
+        if char.isdigit() and _glued_code(chars):
+            chars.append(" ")
+            starts.append(index)
+            ends.append(index)
+        chars.append(char)
+        starts.append(index)
+        ends.append(index + width)
+        index += width
+    return _Normalized("".join(chars), tuple(starts), tuple(ends), len(content))
+
+
+def _digit_run(text: str, index: int) -> str:
+    """The run of digits starting at ``index``."""
+    end = index
+    while end < len(text) and text[end].isdigit():
+        end += 1
+    return text[index:end]
+
+
+def _numbers(text: str) -> list[_Token]:
+    """Every number in normalized text, with a decimal comma read as one (#1418).
+
+    A comma is a decimal point when the integer part is exactly "0" ("0,666"),
+    or when a one- or two-digit fraction carries a percent, pp/bp or currency
+    mark ("12,5 %", "3,95 EUR", "€3,95"). A valid grouping stays grouped.
+    """
+    tokens: list[_Token] = []
+    cursor = 0
+    for match in _NUMBER_RE.finditer(text):
+        if match.start() < cursor:
+            continue
+        raw = match.group(0)
+        sign = raw[0] if raw[0] in "+-" else ""
+        body, end = raw[len(sign) :], match.end()
+        if body.startswith("0,") and body.count(",") == 1 and "." not in body:
+            body = body.replace(",", ".")
+        elif body.isdigit() and text[end : end + 1] == ",":
+            fraction = _digit_run(text, end + 1)
+            stop = end + 1 + len(fraction)
+            if fraction and (
+                body == "0"
+                or (
+                    len(fraction) <= 2
+                    and (
+                        _currency_before(text, match.start())
+                        or _currency_after(text, stop)
+                        or _percent_mark(text, stop)[0] > 0
+                    )
+                )
+            ):
+                body, end = f"{body}.{fraction}", stop
+        tokens.append(_Token(match.start(), end, sign, body.replace(",", "")))
+        cursor = end
+    return tokens
+
+
+def _percent_mark(text: str, end: int) -> tuple[float, int]:
+    """The percent a figure's trailing mark denotes, and where the mark ends.
+
+    A percent sign may follow a space; ``pp`` / ``bp`` / ``bps`` must be glued
+    and not run into a word ("3.6ppm" is not a percentage point).
+
+    Returns:
+        ``(1.0, end)`` for % and pp, ``(0.01, end)`` for bp, ``(0.0, end)``.
+    """
+    rest = text[end:]
+    spaced = rest.lstrip(" \t")
+    if spaced[:1] and spaced[0] in _PERCENT_CHARS:
+        return 1.0, end + len(rest) - len(spaced) + 1
+    for mark, unit in _POINT_MARKS:
+        after = rest[len(mark) : len(mark) + 1]
+        if rest[: len(mark)].casefold() == mark and not (after.isascii() and after.isalnum()):
+            return unit, end + len(mark)
+    return 0.0, end
+
+
+def _reading(sign: str, digits: str, unit: float) -> tuple[float, str] | None:
+    """A number's value and canonical spelling, in percent units for bp."""
+    try:
+        amount = Decimal(sign + digits)
+    except InvalidOperation:
+        return None
+    if unit == 0.01:
+        amount = amount.scaleb(-2)
+    return float(amount), format(amount, "f")
+
+
+def _fenced_blocks(content: str) -> list[tuple[int, int, str, tuple[int, int]]]:
+    """Return ``(start, end, info, body)`` for every fenced block (CommonMark).
+
+    A backtick opener's info string holds no backtick; a closer repeats the
+    opener's character, at least as long, with nothing after it. An unterminated
+    ``figures`` fence runs to the end, so a truncated answer keeps its
+    declarations; any other unterminated fence is prose and its numbers are
+    checked. A ``figures`` opener at least as long ends a search for a closer,
+    so a stray opener cannot pair with the declaration block's closing fence.
+    """
+    fences = []
+    for match in _FENCE_RE.finditer(content):
+        marker, info = match.group(1), match.group(2).strip()
+        if marker[0] == "`" and "`" in info:
+            continue
+        words = info.split()
+        fences.append((match, marker, words[0].casefold() if words else "", not info))
     blocks: list[tuple[int, int, str, tuple[int, int]]] = []
     index = 0
     while index < len(fences):
-        opener = fences[index]
-        info = opener.group(0).strip().lstrip("`~").strip().casefold()
-        if index + 1 < len(fences):
-            closer = fences[index + 1]
+        opener, marker, info, _ = fences[index]
+        cursor, closer = index + 1, None
+        while cursor < len(fences):
+            candidate, other, other_info, bare = fences[cursor]
+            if bare and other[0] == marker[0] and len(other) >= len(marker):
+                closer = candidate
+                break
+            if other_info == BLOCK_LANGUAGE and len(other) >= len(marker):
+                break
+            cursor += 1
+        if closer is not None:
             blocks.append((opener.start(), closer.end(), info, (opener.end(), closer.start())))
-            index += 2
+            index = cursor + 1
+        elif info == BLOCK_LANGUAGE:
+            stop = fences[cursor][0].start() if cursor < len(fences) else len(content)
+            blocks.append((opener.start(), stop, info, (opener.end(), stop)))
+            index = cursor
         else:
-            blocks.append((opener.start(), len(content), info, (opener.end(), len(content))))
             index += 1
     return blocks
 
 
-def _parse_value(text: str) -> tuple[float, bool] | None:
-    """Parse a declared value, tolerating currency marks and separators."""
-    raw = text.strip().replace(",", "").replace(" ", "").replace(" ", "")
-    percent = raw.endswith(tuple(_PERCENT_CHARS))
-    if percent:
-        raw = raw[:-1]
-    raw = raw.strip("".join(_CURRENCY_CHARS))
-    if raw and raw[-1] in _MAGNITUDES:
-        raw = raw[:-1]
-    if not raw:
+def _is_currency_word(run: str) -> bool:
+    """Whether a CJK run is short enough to be a currency word and holds a money mark."""
+    return len(run) <= _MAX_CURRENCY_WORD and any(char in _CURRENCY_CHARS for char in run)
+
+
+def _is_currency_mark(word: str) -> bool:
+    """Whether a declared value's decoration is empty or one currency mark.
+
+    Accepts an ISO code ("USD"), a CJK currency word ("港元"), or money
+    characters behind at most three letters ("$", "HK$", "NT$").
+    """
+    if not word or word.upper() in _CURRENCY_CODES:
+        return True
+    if all(_is_cjk(char) for char in word):
+        return _is_currency_word(word)
+    symbols = word.lstrip(string.ascii_letters)
+    return (
+        bool(symbols)
+        and len(word) - len(symbols) <= 3
+        and all(char in _CURRENCY_CHARS for char in symbols)
+    )
+
+
+def _parse_value(text: str) -> tuple[float, bool, str] | None:
+    """Read a declared value: one number with its currency, magnitude and percent marks.
+
+    Returns:
+        ``(value, percent, canonical spelling)``, or None when the field is not
+        exactly one number and its marks.
+    """
+    field = _normalize(text).text.strip()
+    tokens = _numbers(field)
+    if len(tokens) != 1:
         return None
-    try:
-        return float(raw), percent
-    except ValueError:
+    token = tokens[0]
+    rest = field[token.end :].strip()
+    if rest[:1] in _MAGNITUDES and not _is_currency_mark(rest):
+        rest = rest[1:].lstrip()
+    unit, consumed = _percent_mark(rest, 0)
+    if not (
+        _is_currency_mark(rest[consumed:].strip())
+        and _is_currency_mark(field[: token.start].strip())
+    ):
         return None
+    reading = _reading(token.sign, token.digits, unit)
+    if reading is None:
+        return None
+    value, canonical = reading
+    return value, unit > 0, canonical + ("%" if unit > 0 else "")
+
+
+def _is_header_or_rule(parts: Sequence[str]) -> bool:
+    """Whether a block line is a ``value | role`` header or a Markdown separator row."""
+    if len(parts) >= 2 and parts[0].casefold() == "value" and parts[1].casefold() == "role":
+        return True
+    cells = [part.replace(" ", "") for part in parts if part]
+    return bool(cells) and all(set(cell) <= {"-", ":"} and "-" in cell for cell in cells)
 
 
 def parse_figures_block(content: str) -> FiguresBlock:
-    """Parse the model's ``figures`` block out of a draft.
+    """Parse the model's ``figures`` blocks out of a draft.
 
-    Parsing is lenient (full-width pipe, run-on spacing, missing ``ref``), but a
-    line that cannot be read as ``value | role | note | ref`` is reported as
-    malformed: a skipped declaration is a figure the gate never checked.
+    Parsing is lenient (full-width pipe, run-on spacing, missing ``ref``, a
+    header or separator row, currency and unit marks on the value), but a line
+    that cannot be read as ``value | role | note | ref`` is reported as
+    malformed: a skipped declaration is a figure the gate never checked. Every
+    ``figures`` fence contributes; ``span`` is the first one.
 
     Args:
         content: The candidate answer.
@@ -234,32 +530,34 @@ def parse_figures_block(content: str) -> FiguresBlock:
     Returns:
         The parsed block, or an absent one when the draft has no block.
     """
-    target: tuple[int, int, str, tuple[int, int]] | None = None
-    for block in _fenced_blocks(content):
-        if block[2] == BLOCK_LANGUAGE:
-            target = block
-    if target is None:
+    blocks = [block for block in _fenced_blocks(content) if block[2] == BLOCK_LANGUAGE]
+    if not blocks:
         return FiguresBlock(False, None, "", (), ())
-    start, end, _, (body_start, body_end) = target
-    body = content[body_start:body_end]
+    raw = "".join(content[start:end] for _, _, _, (start, end) in blocks)
     declarations: list[Declaration] = []
     malformed: list[tuple[int, str]] = []
-    for offset, line in enumerate(body.splitlines()):
-        stripped = line.strip()
+    for number, line in enumerate(raw.splitlines(), start=1):
+        stripped = line.strip().replace("｜", "|")
         if not stripped:
             continue
-        parts = [part.strip() for part in stripped.replace("｜", "|").split("|")]
-        parts = [part for part in parts if part != ""] or [""]
+        parts = stripped.split("|")
+        if stripped.startswith("|"):
+            parts = parts[1:]
+        if len(parts) > 1 and stripped.endswith("|"):
+            parts = parts[:-1]
+        parts = [part.strip() for part in parts]
+        if _is_header_or_rule(parts):
+            continue
         parsed = _parse_value(parts[0]) if parts else None
         role = parts[1].casefold() if len(parts) > 1 else ""
         if parsed is None or role not in ROLES:
-            malformed.append((offset + 1, stripped[:120]))
+            malformed.append((number, line.strip()[:120]))
             continue
-        value, percent = parsed
+        value, percent, canonical = parsed
         declarations.append(
             Declaration(
-                index=offset + 1,
-                value_text=parts[0],
+                index=number,
+                value_text=canonical,
                 value=value,
                 percent=percent,
                 role=role,
@@ -267,15 +565,24 @@ def parse_figures_block(content: str) -> FiguresBlock:
                 ref=parts[3] if len(parts) > 3 else "",
             )
         )
-    return FiguresBlock(True, (start, end), body, tuple(declarations), tuple(malformed))
+    return FiguresBlock(
+        True,
+        (blocks[0][0], blocks[0][1]),
+        raw,
+        tuple(declarations),
+        tuple(malformed),
+        tuple((start, end) for start, end, _, _ in blocks),
+    )
 
 
 def strip_figures_block(content: str, block: FiguresBlock) -> str:
-    """Return the text to release: the draft without its declaration block."""
-    if block.span is None:
-        return content
-    start, end = block.span
-    return (content[:start].rstrip() + "\n" + content[end:].lstrip()).strip()
+    """Return the text to release: the draft without any declaration block."""
+    spans = block.spans or ((block.span,) if block.span else ())
+    text = content
+    for start, end in sorted(spans, reverse=True):
+        head, tail = text[:start].rstrip(), text[end:].lstrip()
+        text = head + ("\n\n" if head and tail else "") + tail
+    return text.strip() if spans else content
 
 
 def _table_cells(line: str, offset: int) -> list[tuple[str, int, int]]:
@@ -351,10 +658,27 @@ def table_rows(content: str) -> list[TableRow]:
     return rows
 
 
+def _code_before(head: str) -> str:
+    """The uppercase ISO code ending ``head`` as a word of its own, or ""."""
+    letters = head[len(head.rstrip(string.ascii_uppercase)) :]
+    before = head[-len(letters) - 1 : -len(letters)] if letters else ""
+    if letters in _CURRENCY_CODES and not (before.isalnum() or before == "_"):
+        return letters
+    return ""
+
+
 def _currency_before(text: str, start: int) -> bool:
-    """Whether a currency symbol touches the number on its left."""
+    """Whether a currency symbol or ISO code touches the number on its left."""
     head = text[:start].rstrip()
-    return bool(head) and head[-1] in _CURRENCY_CHARS
+    return bool(head) and (head[-1] in _CURRENCY_CHARS or bool(_code_before(head)))
+
+
+def _cjk_run(text: str) -> str:
+    """The run of CJK ideographs ``text`` opens with."""
+    end = 0
+    while end < len(text) and _is_cjk(text[end]):
+        end += 1
+    return text[:end]
 
 
 def _currency_after(text: str, end: int) -> bool:
@@ -369,14 +693,7 @@ def _currency_after(text: str, end: int) -> bool:
     if tail[0] in _CURRENCY_CHARS and not _is_cjk(tail[0]):
         return True
     if _is_cjk(tail[0]):
-        run = ""
-        for char in tail:
-            if not _is_cjk(char):
-                break
-            run += char
-        return len(run) <= _MAX_CURRENCY_WORD and any(
-            char in _CURRENCY_CHARS for char in run
-        )
+        return _is_currency_word(_cjk_run(tail))
     code = ""
     for char in tail:
         if not char.isascii() or not char.isalpha():
@@ -407,45 +724,35 @@ def magnitude_suffix(text: str, end: int) -> tuple[float, int]:
     return _MAGNITUDES[mark], end + 1
 
 
-def currency_prefix_start(text: str, start: int) -> int:
-    """Where a currency symbol attached to the left of a figure ("$1.10") begins."""
-    head = text[:start]
-    stripped = head.rstrip()
-    if stripped and stripped[-1] in _CURRENCY_CHARS and not _is_cjk(stripped[-1]):
-        return len(stripped) - 1
-    return start
+def _currency_prefix_start(text: str, start: int) -> int:
+    """Where a currency mark attached to the left of a figure begins ("HK$1.10", "USD 100")."""
+    head = text[:start].rstrip(" \t")
+    if head and head[-1] in _CURRENCY_CHARS and not _is_cjk(head[-1]):
+        letters = len(head) - 1 - len(head[:-1].rstrip(string.ascii_uppercase))
+        return len(head) - 1 - (letters if letters <= 3 else 0)
+    code = _code_before(head)
+    return len(head) - len(code) if code else start
 
 
-def currency_suffix_end(text: str, end: int) -> int:
+def _currency_suffix_end(text: str, end: int) -> int:
     """Where a currency unit attached to the right of a figure ("0.95 元") ends.
 
     A compound unit (元/股, USD/share) is left whole, or its denominator would be
     left with nothing above it.
     """
-    tail = text[end:]
-    lead = len(tail) - len(tail.lstrip(" \t"))
-    body = tail[lead:]
+    body = text[end:].lstrip(" \t")
+    lead = len(text) - end - len(body)
     if not body:
         return end
-    run = ""
     if _is_cjk(body[0]):
-        for char in body:
-            if not _is_cjk(char):
-                break
-            run += char
-        if len(run) > _MAX_CURRENCY_WORD or not any(
-            char in _CURRENCY_CHARS for char in run
-        ):
+        run = _cjk_run(body)
+        if not _is_currency_word(run):
             return end
     else:
-        for char in body:
-            if not char.isascii() or not char.isalpha():
-                break
-            run += char
+        run = body[: len(body) - len(body.lstrip(string.ascii_letters))]
         if run.upper() not in _CURRENCY_CODES:
             return end
-    following = body[len(run) : len(run) + 1]
-    if following in {"/", "／"}:
+    if body[len(run) : len(run) + 1] in {"/", "／"}:
         return end
     return end + lead + len(run)
 
@@ -491,7 +798,7 @@ def segment_bounds(content: str, start: int, end: int) -> tuple[int, int]:
     return left, right
 
 
-def _within(span: tuple[int, int], spans: Sequence[tuple[int, int]]) -> bool:
+def _within(span: tuple[int, int], spans: Iterable[tuple[int, int]]) -> bool:
     """Whether ``span`` sits inside any of ``spans``."""
     return any(start <= span[0] and span[1] <= end for start, end in spans)
 
@@ -521,94 +828,99 @@ def _short_date_is_structural(content: str, match: re.Match[str], full_dates: Se
 def scan_figures(content: str, block: FiguresBlock) -> list[Figure]:
     """Locate and classify every number in the prose of a draft (spec §3).
 
-    * ``exempt`` — a date, year, security-code digits, line-leading ordinal, a
-      table's date/symbol column, or anything fenced: structure.
-    * ``measured`` — a decimal point, percent sign, touching currency mark or
-      table cell: the shape a fabricated price or metric takes; must be declared.
+    * ``exempt`` — a date, time, security-code digits, line-leading ordinal or
+      anything fenced; a bare year, compact date or a table date/symbol cell
+      only while it carries no decimal point, percent or currency mark (and a
+      year not under a price column).
+    * ``measured`` — a decimal point, percent / pp / bp, touching currency mark
+      or table cell: the shape a fabricated price or metric takes.
     * ``bare`` — a plain integer (counts, horizons, window lengths): unchecked.
 
     Args:
         content: The candidate answer.
-        block: The parsed figures block (its span is exempt).
+        block: The parsed figures block (its spans are exempt).
 
     Returns:
-        Every number in document order, each with its span and shape.
+        Every number in document order, each with its original span and shape.
     """
-    positions = _lines_with_offsets(content)
+    view = _normalize(content)
+    text = view.text
     line_of: list[tuple[int, int, int]] = [
-        (start, start + len(line), index) for index, (line, start) in enumerate(positions)
+        (start, start + len(line), index)
+        for index, (line, start) in enumerate(_lines_with_offsets(content))
     ]
-    # Every fenced block is exempt, the figures block included.
-    exempt: list[tuple[int, int]] = [
-        (start, end) for start, end, _, _ in _fenced_blocks(content)
-    ]
-    dates = list(_DATE_RE.finditer(content))
+    fences = _fenced_blocks(content)
+    hard: list[tuple[int, int]] = [(start, end) for start, end, _, _ in fences]
+    soft: list[tuple[int, int]] = []
+    dates = list(_DATE_RE.finditer(text))
     full_dates = [match for match in dates if match.group("full")]
-    exempt.extend(
-        (match.start(), match.end())
-        for match in dates
-        if not match.group("short") or _short_date_is_structural(content, match, full_dates)
-    )
+    for match in dates:
+        if match.group("short") and not _short_date_is_structural(text, match, full_dates):
+            continue
+        span = (view.start(match.start()), view.end(match.end()))
+        (soft if match.group("soft") else hard).append(span)
     for pattern in (_CANONICAL_SYMBOL_RE, _ORDINAL_RE):
-        exempt.extend((match.start(), match.end()) for match in pattern.finditer(content))
-
-    cell_at: list[tuple[int, int, TableRow, int]] = []
-    for row in table_rows(content):
-        for position, (_, start, end) in enumerate(row.cells):
-            if position == row.date_column or position == row.symbol_column:
-                exempt.append((start, end))
-                continue
-            cell_at.append((start, end, row, position))
+        hard.extend(
+            (view.start(match.start()), view.end(match.end()))
+            for match in pattern.finditer(text)
+        )
+    cells = [
+        (start, end, row, position)
+        for row in table_rows(content)
+        for position, (_, start, end) in enumerate(row.cells)
+    ]
 
     figures: list[Figure] = []
-    for match in _NUMBER_RE.finditer(content):
-        start, end = match.start(), match.end()
-        percent = False
-        tail = content[end:]
-        stripped = len(tail) - len(tail.lstrip(" \t"))
-        if tail[stripped : stripped + 1] and tail[stripped] in _PERCENT_CHARS:
-            percent = True
-            end = end + stripped + 1
-        try:
-            value = float(match.group(0).replace(",", ""))
-        except ValueError:
+    for token in _numbers(text):
+        unit, unit_end = _percent_mark(text, token.end)
+        reading = _reading(token.sign, token.digits, unit)
+        if reading is None:
             continue
-        line = next(
-            (index for low, high, index in line_of if low <= start <= high), 0
-        )
-        cell = next(
-            (entry for entry in cell_at if entry[0] <= start and end <= entry[1]), None
-        )
-        currency = _currency_before(content, start) or _currency_after(content, match.end())
-        if _within((start, match.end()), exempt):
+        percent = unit > 0
+        start, digits_end, end = view.start(token.start), view.end(token.end), view.end(unit_end)
+        cell = next((entry for entry in cells if entry[0] <= start and end <= entry[1]), None)
+        row, position = (cell[2], cell[3]) if cell else (None, None)
+        structural = row is not None and position in (row.date_column, row.symbol_column)
+        currency = _currency_before(text, token.start) or _currency_after(text, token.end)
+        marked = percent or currency or "." in token.digits
+        if _within((start, digits_end), hard):
             shape = "exempt"
-        elif percent or currency or "." in match.group(0) or cell is not None:
+        elif structural or _within((start, digits_end), soft):
+            priced = row is not None and not structural and position in row.columns
+            shape = "measured" if marked or priced else "exempt"
+        elif marked or row is not None:
             shape = "measured"
         else:
             shape = "bare"
         column = date_value = symbol_value = None
-        if cell is not None:
-            row, position = cell[2], cell[3]
+        if row is not None and not structural:
             column = row.columns.get(position)
             if row.date_column is not None and row.date_column < len(row.cells):
                 date_value = row.cells[row.date_column][0] or None
             if row.symbol_column is not None and row.symbol_column < len(row.cells):
                 symbol_value = row.cells[row.symbol_column][0] or None
-        scale = 1.0 if percent else magnitude_suffix(content, match.end())[0]
+        mark_end = _currency_suffix_end(text, magnitude_suffix(text, unit_end)[1])
         figures.append(
             Figure(
                 text=content[start:end],
-                value=value,
+                value=reading[0],
                 percent=percent,
                 start=start,
                 end=end,
-                line=line,
+                line=next((index for low, high, index in line_of if low <= start <= high), 0),
                 shape=shape,
                 column=column,
                 date=date_value,
                 symbol=symbol_value,
-                scale=scale,
+                scale=1.0 if percent else magnitude_suffix(text, token.end)[0],
                 currency=currency,
+                digits=token.digits,
+                sign=token.sign,
+                extent=(view.start(_currency_prefix_start(text, token.start)), view.end(mark_end)),
+                fence=next(
+                    (info for low, high, info, _ in fences if low <= start and digits_end <= high),
+                    None,
+                ),
             )
         )
     return figures

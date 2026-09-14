@@ -21,18 +21,18 @@ from typing import Any, Callable
 
 import pytest
 
-from src.agent.grounding import (
+from src.agent.grounding import GroundingLedger, ValidationResult
+from src.agent.grounding.evidence import (
     _PRICE_INDICATOR_TOKENS,
-    _REDACTION_MARKER_EN,
-    _REDACTION_MARKER_ZH,
-    GroundingLedger,
-    ValidationResult,
+    _is_price_denominated_indicator,
+)
+from src.agent.grounding.figures import (
     _CLAUSE_SEPARATOR_RE,
     _THOUSANDS_SEPARATOR_RE,
     _clause_spans,
-    _is_price_denominated_indicator,
     _lines_with_offsets,
 )
+from src.agent.grounding.release import _REDACTION_MARKER_EN, _REDACTION_MARKER_ZH
 from src.agent.loop import AgentLoop
 from src.agent.tools import BaseTool, ToolRegistry
 from src.agent.trace import TraceWriter

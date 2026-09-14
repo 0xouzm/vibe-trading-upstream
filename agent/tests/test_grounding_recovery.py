@@ -18,11 +18,11 @@ from unittest.mock import patch
 
 import pytest
 
-from src.agent.grounding import (
+from src.agent.grounding import GroundingLedger
+from src.agent.grounding.release import (
     MAX_GROUNDING_RECOVERY_ROUNDS,
     MAX_PRICE_EVIDENCE_ATTEMPTS,
     MAX_SYMBOL_RESOLUTION_ATTEMPTS,
-    GroundingLedger,
 )
 from src.providers.chat import LLMResponse
 from tests.message_roles_helpers import assert_system_messages_only_lead
@@ -234,7 +234,7 @@ class TestRecoveryAction:
         validation = ledger.validate_final_answer("机器人ETF 现价 1.171。")
 
         with patch.multiple(
-            "src.agent.grounding",
+            "src.agent.grounding.release",
             MAX_SYMBOL_RESOLUTION_ATTEMPTS=10_000,
             MAX_PRICE_EVIDENCE_ATTEMPTS=10_000,
         ):

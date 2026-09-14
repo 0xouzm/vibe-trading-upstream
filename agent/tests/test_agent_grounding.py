@@ -10,14 +10,16 @@ from typing import Any, Callable
 import pytest
 
 from src.agent.context import ContextBuilder
-from src.agent.grounding import (
-    GroundingLedger,
+from src.agent.grounding import GroundingLedger
+from src.agent.grounding.identity import (
+    _JOINED_CRYPTO_RE,
     _infer_currency,
     _infer_instrument_type,
     _infer_venue,
-    _JOINED_CRYPTO_RE,
     _normalize_symbol,
     _scan_symbols,
+)
+from src.agent.grounding.evidence import (
     _symbol_from_csv_filename,
     _timestamp_matches_claim_date,
 )
@@ -2052,7 +2054,7 @@ def test_shanghai_lock_depends_on_symbol_canonicalization(
 ) -> None:
     """Mutation guard: drop canonicalization and Shanghai dead-ends again."""
     monkeypatch.setattr(
-        "src.agent.grounding._normalize_symbol",
+        "src.agent.grounding.identity._normalize_symbol",
         lambda value: str(value or "").strip().upper(),
     )
     ledger = GroundingLedger(run_dir=tmp_path, user_message="600519 现价多少")
@@ -2812,7 +2814,7 @@ def test_a_report_style_date_cell_still_matches_its_evidence_row() -> None:
     price in that row was reported numeric_claim_unavailable even though the
     run had fetched the bar.
     """
-    from src.agent.grounding import _timestamp_matches_claim_date
+    from src.agent.grounding.evidence import _timestamp_matches_claim_date
 
     stamp = "2026-08-10T15:00:00Z"
     for claim in ("08-10", "8-10", "08-10(一)", "08-10(周一)", "08-10(周一)盘中", "08-10盘中", "08-10收盘"):
@@ -2824,7 +2826,7 @@ def test_a_report_style_date_cell_still_matches_its_evidence_row() -> None:
 
 def test_a_us_csv_stem_resolves_to_its_venue_suffix() -> None:
     """``INTC_US.csv`` is ``INTC.US``; without the row it was no evidence at all."""
-    from src.agent.grounding import _symbol_from_csv_filename
+    from src.agent.grounding.evidence import _symbol_from_csv_filename
 
     assert _symbol_from_csv_filename("INTC_US") == "INTC.US"
     assert _symbol_from_csv_filename("BYN_V") == "BYN.V"
@@ -2837,7 +2839,7 @@ class TestFiatPairAndIndexNormalization:
     """Search, fetch and grounding agree on one FX spelling; ^ is a symbol."""
 
     def test_fiat_pair_spellings_normalize_to_yahoo_form(self) -> None:
-        from src.agent.grounding import _normalize_symbol
+        from src.agent.grounding.identity import _normalize_symbol
 
         assert _normalize_symbol("GBP/USD") == "GBPUSD=X"
         assert _normalize_symbol("GBPUSD") == "GBPUSD=X"
@@ -2848,12 +2850,12 @@ class TestFiatPairAndIndexNormalization:
 
     def test_scanned_slashed_pair_matches_resolver_answer(self) -> None:
         """The query-as-asserted scan must agree with the chosen candidate."""
-        from src.agent.grounding import _scan_symbols
+        from src.agent.grounding.identity import _scan_symbols
 
         assert _scan_symbols("use GBP/USD spot") == {"GBPUSD=X"}
 
     def test_index_symbols_are_scanned_and_typed(self) -> None:
-        from src.agent.grounding import (
+        from src.agent.grounding.identity import (
             _infer_currency,
             _infer_instrument_type,
             _scan_symbols,
@@ -2866,7 +2868,7 @@ class TestFiatPairAndIndexNormalization:
 
     def test_ingest_search_symbol_does_not_create_conflicting_identity(self) -> None:
         """The flagship regression: ingest('GBP/USD') must lock, never conflict."""
-        from src.agent.grounding import _normalize_symbol
+        from src.agent.grounding.identity import _normalize_symbol
 
         # Chosen (from search_symbol) and asserted (the query text) must be
         # the same canonical identity — the comparison in _ingest_resolution.
@@ -3427,7 +3429,7 @@ def test_research_paper_reported_metrics_are_grounded(tmp_path: Path) -> None:
 
 def test_compound_metric_leaf_kind_resolution() -> None:
     """Token-split kind resolution covers the compound-leaf family."""
-    from src.agent.grounding import _metric_kind_for_path
+    from src.agent.grounding.evidence import _metric_kind_for_path
 
     assert _metric_kind_for_path("results[0].reported_annualized_return") == "return"
     assert _metric_kind_for_path("strategy_max_drawdown") == "drawdown"
@@ -3742,7 +3744,7 @@ def test_crypto_pair_tables_match_the_resolver() -> None:
     identity, which outranks every later lock and blocks all market tools —
     so the duplication needs a guard, not a comment.
     """
-    from src.agent import grounding as g
+    from src.agent.grounding import identity as g
     from src.tools import symbol_search_tool as ss
 
     assert set(g._CRYPTO_USD_BASES) == set(ss._CRYPTO_USD_BASES)

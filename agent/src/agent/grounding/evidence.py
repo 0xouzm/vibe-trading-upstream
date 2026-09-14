@@ -350,6 +350,12 @@ def _is_registered_price_indicator(tool: str, path: str) -> bool:
 # as the whole leaf: "var_explained" and "sales_es" are not a VaR.
 _EXACT_ONLY_ALIASES = frozenset({"var", "es"})
 
+# Field-name qualifiers that follow a metric's head and do not change what it
+# measures ("hit_rate_daily", "vol_annualized"), like a numeric parameter.
+_QUALIFIER_SUFFIXES = frozenset(
+    {"daily", "weekly", "monthly", "annual", "annualized", "yearly", "pct", "percent", "bps"}
+)
+
 
 def _metric_kind_for_path(path: str) -> str | None:
     """Map an evidence JSON path to an analysis metric kind.
@@ -364,10 +370,19 @@ def _metric_kind_for_path(path: str) -> str | None:
         return kind
     # Compound leaves ("strategy_max_drawdown"): scan tokens from the right,
     # where English puts the head noun, so "return_vol" is vol, not return.
+    # Only the head of a compound leaf says what it measures (#1426):
+    # "strategy_max_drawdown" is a drawdown, while "sharpe_sample_size" and
+    # "drawdown_threshold" are a size and a threshold. A trailing numeric
+    # parameter or period qualifies the head ("cvar_95", "hit_rate_daily").
     tokens = [token for token in re.split(r"[_.]", leaf) if token]
-    for size in (2, 1):
-        for start in range(len(tokens) - size, -1, -1):
-            key = "_".join(tokens[start : start + size])
+    stripped = list(tokens)
+    while stripped and (stripped[-1].isdigit() or stripped[-1] in _QUALIFIER_SUFFIXES):
+        stripped.pop()
+    for candidate in (tokens, stripped):
+        for size in (2, 1):
+            if len(candidate) < size:
+                continue
+            key = "_".join(candidate[-size:])
             kind = None if key in _EXACT_ONLY_ALIASES else _ANALYSIS_KIND_ALIASES.get(key)
             if kind is not None:
                 return kind

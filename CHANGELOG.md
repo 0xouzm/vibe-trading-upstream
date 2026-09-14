@@ -87,7 +87,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   `*_lookback` / `*_obs` / `n_*` / `*_count` / `*_days` / `*_duration` families
   no longer ground a percentage ("年化收益 81%" from 81 observations); `var`,
   `var_95`, `var_99`, `cvar`, `es` and `expected_shortfall` leaves are tail-risk
-  evidence, so a correct VaR is no longer refused.
+  evidence, so a correct VaR is no longer refused. A field's metric comes from
+  the head of its name, so `sharpe_sample_size` and `drawdown_threshold` are
+  no longer a Sharpe ratio or a drawdown.
 - **A correction names the prints of the figure's own instrument** (#1433). The
   "nearest observed" values come from that symbol (and its table column or
   `ref`), not from every field of every symbol in the run.
@@ -96,7 +98,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   "%", the U+2212 minus sign, a backslash escape ("0\\.888"), an HTML entity
   and an ISO code glued to the digits ("CNY0.888") no longer split a price into
   unchecked integers; a decimal comma ("0,666 CNY", "12,5 %") is a decimal
-  while a valid grouping ("-1,250.00") stays grouped. Fences follow CommonMark,
+  while a valid grouping ("-1,250.00") stays grouped, and an answer that writes
+  a marked decimal comma reads "2,237" and "−5,132%" beside it as decimals too. Fences follow CommonMark,
   and an unterminated code fence no longer exempts the rest of the answer.
 - **A year is not a price shield.** "$2050", "1999 元" and a 2031 under a close
   column are checked; a price placed in a date or code column is checked; a

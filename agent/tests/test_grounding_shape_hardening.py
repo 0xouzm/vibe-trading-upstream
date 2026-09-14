@@ -663,3 +663,27 @@ def test_an_ordinal_needs_the_space_after_its_punctuation() -> None:
     assert _shapes(table.format("| 1 | 0.666 |"))["1"] == "measured"
     assert _shapes(table.format("1.| 0.666 |"))["1"] == "measured"
     assert _shapes("1. 第一条")["1"] == "exempt"
+
+
+def _measured_values(text: str) -> list[float]:
+    return [f.value for f in scan_figures(text, parse_figures_block(text)) if f.shape != "exempt"]
+
+
+def test_a_decimal_comma_document_reads_three_digit_fractions_as_decimals() -> None:
+    """#1418: "−5,132%" beside "1,57%" is −5.132%, and "2,237" is 2.237."""
+    values = _measured_values("VaR 95%: 1,57%. Drawdown máximo −5,132%. Ratio 2,237 EUR.")
+
+    assert -5.132 in values and 2.237 in values and 1.57 in values
+    assert -5132.0 not in values and 2237.0 not in values
+
+
+@pytest.mark.parametrize(
+    ("text", "grouped"),
+    [
+        ("Revenue 2,237 million, down 1,5% on 1,234,567 units.", 2237.0),  # a grouping anywhere wins
+        ("Close 2,237.50 USD, volume 1,500 USD.", 1500.0),                 # comma-and-dot is grouping
+        ("Revenue 2,237 million.", 2237.0),                                 # no decimal-comma evidence
+    ],
+)
+def test_a_grouping_document_keeps_its_thousands(text: str, grouped: float) -> None:
+    assert grouped in _measured_values(text)

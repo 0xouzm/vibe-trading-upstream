@@ -352,8 +352,12 @@ def _numbers(text: str) -> list[_Token]:
 
     A comma is a decimal point when the integer part is exactly "0" ("0,666"),
     or when a one- or two-digit fraction carries a percent, pp/bp or currency
-    mark ("12,5 %", "3,95 EUR", "€3,95"). A valid grouping stays grouped.
+    mark ("12,5 %", "3,95 EUR", "€3,95"). A document that writes an unambiguous
+    decimal comma anywhere and no unambiguous grouping ("1,234,567",
+    "1,234.56") reads every single-comma number as a decimal, so "2,237" and
+    "−5,132%" beside "1,57%" are 2.237 and −5.132%, not 2237 and −5132%.
     """
+    comma_decimals = _writes_decimal_commas(text)
     tokens: list[_Token] = []
     cursor = 0
     for match in _NUMBER_RE.finditer(text):
@@ -362,13 +366,14 @@ def _numbers(text: str) -> list[_Token]:
         raw = match.group(0)
         sign = raw[0] if raw[0] in "+-" else ""
         body, end = raw[len(sign) :], match.end()
-        if body.startswith("0,") and body.count(",") == 1 and "." not in body:
+        if body.count(",") == 1 and "." not in body and (body.startswith("0,") or comma_decimals):
             body = body.replace(",", ".")
         elif body.isdigit() and text[end : end + 1] == ",":
             fraction = _digit_run(text, end + 1)
             stop = end + 1 + len(fraction)
             if fraction and (
                 body == "0"
+                or comma_decimals
                 or (
                     len(fraction) <= 2
                     and (
@@ -382,6 +387,34 @@ def _numbers(text: str) -> list[_Token]:
         tokens.append(_Token(match.start(), end, sign, body.replace(",", "")))
         cursor = end
     return tokens
+
+
+def _writes_decimal_commas(text: str) -> bool:
+    """Whether a document writes decimal commas and never a thousands grouping.
+
+    Evidence for a decimal comma is unambiguous on its own: a "0," integer part,
+    or a one- or two-digit fraction carrying a percent, pp/bp or currency mark
+    ("1,57%", "3,95 EUR"). An unmarked "1,50" could be a list and proves nothing.
+    Evidence for grouping is two or more comma groups or a grouped number with a
+    dot fraction.
+    """
+    decimal, grouped = False, False
+    for match in _NUMBER_RE.finditer(text):
+        body = match.group(0).lstrip("+-")
+        if body.count(",") >= 2 or ("," in body and "." in body):
+            grouped = True
+        elif body.startswith("0,"):
+            decimal = True
+        elif body.isdigit() and text[match.end() : match.end() + 1] == ",":
+            fraction = _digit_run(text, match.end() + 1)
+            stop = match.end() + 1 + len(fraction)
+            if 1 <= len(fraction) <= 2 and (
+                _currency_before(text, match.start())
+                or _currency_after(text, stop)
+                or _percent_mark(text, stop)[0] > 0
+            ):
+                decimal = True
+    return decimal and not grouped
 
 
 def _percent_mark(text: str, end: int) -> tuple[float, int]:

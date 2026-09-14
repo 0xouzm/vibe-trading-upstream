@@ -722,3 +722,45 @@ def test_a_count_inside_the_price_range_needs_a_derivation(tmp_path: Path) -> No
     assert "observed price range" in posing.issues[0]["message"]
     assert factor.valid is True, factor.issues
     assert weight.valid is True, weight.issues
+
+
+@pytest.mark.parametrize(
+    ("leaf", "kind"),
+    [
+        ("strategy_max_drawdown", "drawdown"),
+        ("cvar_95", "tail_risk"),
+        ("portfolio_var_95", "tail_risk"),
+        ("hit_rate_daily", "win_rate"),
+        ("rolling_vol_60", "vol"),
+        ("sharpe_sample_size", None),
+        ("drawdown_threshold", None),
+        ("sharpe_ci_upper", None),
+        ("return_var", None),
+    ],
+)
+def test_only_the_head_of_a_compound_leaf_names_its_metric(leaf: str, kind: str | None) -> None:
+    """#1426: a metric word that qualifies another noun does not make the field that metric."""
+    assert _metric_kind_for_path(leaf) == kind
+
+
+def test_the_spanish_var_report_from_1418_grounds_once_its_confidence_is_declared(tmp_path: Path) -> None:
+    ledger = _ledger(
+        tmp_path,
+        (
+            "portfolio_risk_xray",
+            {},
+            {"ok": True, "var_95": -0.0157, "max_drawdown": -0.05132},
+            "risk",
+        ),
+        message="Analiza el riesgo de la cartera",
+    )
+
+    declared = ledger.validate_final_answer(
+        "VaR 95%: 1,57%. Drawdown máximo −5,132%." + _block("95% | count | nivel de confianza")
+    )
+    invented = ledger.validate_final_answer(
+        "VaR 95%: 2,57%. Drawdown máximo −5,132%." + _block("95% | count | nivel de confianza")
+    )
+
+    assert declared.valid is True, declared.issues
+    assert invented.valid is False

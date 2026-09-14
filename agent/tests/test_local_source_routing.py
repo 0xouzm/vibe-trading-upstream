@@ -15,6 +15,7 @@ import pandas as pd
 import pytest
 
 from backtest.benchmark import resolve_benchmark
+from backtest.engines.china_a import ChinaAEngine
 from backtest.engines.crypto import CryptoEngine
 from backtest.engines.global_equity import GlobalEquityEngine
 from backtest.runner import _create_market_engine
@@ -37,6 +38,39 @@ class TestLocalSourceEngineRouting:
     def test_local_crypto_still_routes_to_crypto_engine(self) -> None:
         engine = _create_market_engine("local", {"initial_cash": 100_000}, ["BTC-USDT"])
         assert isinstance(engine, CryptoEngine)
+
+    def test_local_a_share_routes_to_china_a_engine(self) -> None:
+        engine = _create_market_engine("local", {"initial_cash": 100_000}, ["000001.SZ"])
+        assert isinstance(engine, ChinaAEngine)
+
+    # Sources with no Wave-1 branch in ``_create_market_engine``. Each is a
+    # registered A-share source that a caller can name explicitly -- the
+    # data-routing skill lists baostock/tencent/mootdx/eastmoney as A-share
+    # sources, and ``skills/mootdx/SKILL.md`` documents
+    # ``run(strategy=..., source="mootdx")``. Naming any of them used to route
+    # A-shares to CryptoEngine: no stamp tax, no T+1, no price limits, no
+    # 100-share lots, and an 8-hourly perpetual funding fee charged against
+    # the position. ``"auto"`` is branchless here too -- the runner resolves it
+    # through ``_detect_primary_source`` before calling, but this function must
+    # not depend on that.
+    @pytest.mark.parametrize(
+        "source",
+        ["local", "tencent", "eastmoney", "baostock", "mootdx", "sina", "stooq",
+         "yahoo", "auto"],
+    )
+    def test_branchless_sources_route_a_share_to_china_a_engine(
+        self, source: str,
+    ) -> None:
+        engine = _create_market_engine(source, {"initial_cash": 100_000}, ["600519.SH"])
+        assert isinstance(engine, ChinaAEngine)
+
+    @pytest.mark.parametrize("source", ["tushare", "akshare"])
+    def test_branching_sources_keep_routing_a_share_to_china_a_engine(
+        self, source: str,
+    ) -> None:
+        """The sources that already worked must keep working."""
+        engine = _create_market_engine(source, {"initial_cash": 100_000}, ["600519.SH"])
+        assert isinstance(engine, ChinaAEngine)
 
 
 class _FakeLoader:

@@ -1389,13 +1389,22 @@ def _create_market_engine(source: str, config: dict, codes: List[str]):
         market = _detect_submarket(codes)
         return GlobalEquityEngine(config, market=market)
     else:
-        # Sources without a dedicated branch (local, stooq, ...): follow the
-        # instrument market rather than the loader name, so e.g. a local
-        # AAPL.US dataset gets US-equity execution rules instead of crypto.
+        # Sources without a dedicated branch (local, stooq, tencent, ...):
+        # follow the instrument market rather than the loader name, so e.g. a
+        # local AAPL.US dataset gets US-equity execution rules instead of crypto.
         if markets & {"us_equity", "hk_equity", "ca_equity", "uk_equity"}:
             from backtest.engines.global_equity import GlobalEquityEngine
             market = _detect_submarket(codes)
             return GlobalEquityEngine(config, market=market)
+        # A-shares need the same treatment. Every branchless source that serves
+        # them -- local, tencent, eastmoney, baostock, mootdx, sina -- used to
+        # land here and fall through to the crypto default, which applies none
+        # of the A-share rules (stamp tax, T+1, price limits, 100-share lots)
+        # and does charge an 8-hourly perpetual funding fee against the
+        # position. The run still succeeds, which is what makes it dangerous.
+        if "a_share" in markets:
+            from backtest.engines.china_a import ChinaAEngine
+            return ChinaAEngine(config)
         from backtest.engines.crypto import CryptoEngine
         return CryptoEngine(config)
 

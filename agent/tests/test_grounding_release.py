@@ -712,8 +712,13 @@ def test_loop_releases_the_redacted_draft_instead_of_the_canned_refusal(tmp_path
     reported = re.search(r"after (\d+) rejected drafts", end["reason"])
     assert reported is not None, end["reason"]
     assert int(reported.group(1)) == agent._grounding.validation_count
-    assert int(reported.group(1)) == 4
-    assert llm.calls >= 5
+    # Revision cap 2: the first draft is corrected, the second is released cut.
+    assert int(reported.group(1)) == 2
+    assert llm.calls == len(_SCRIPT_HEAD) + 2
+    statuses = [data for event, data in events if event == "grounding_status"]
+    assert [status["stage"] for status in statuses] == ["revising", "released_redacted"]
+    assert statuses[0]["round"] == 1 and statuses[0]["issues"] >= 1
+    assert statuses[1]["removed"] == 1
     assert_system_messages_only_lead(llm.messages_history)
 
 
@@ -1805,3 +1810,84 @@ def test_line_offsets_are_a_monotone_scan() -> None:
     assert all(
         content[offset : offset + len(line)] == line for line, offset in positions
     )
+
+
+# ---------------------------------------------------------------------------
+# Revision cap 2 plumbing: the released text, the status events, the sweep
+# ---------------------------------------------------------------------------
+
+
+def test_loop_releases_a_valid_draft_without_its_figures_block(tmp_path: Path) -> None:
+    """The block is the model's declaration to the gate, never answer text."""
+    prose = "562500.SS（Yahoo，CNY）在 2026-06-23 的已观测收盘价为 1.137。"
+    draft = prose + "\n\n```figures\n1.137 | observed | 562500.SS close 2026-06-23 | prices\n```"
+    llm = _ScriptedLLM(_SCRIPT_HEAD + [_Response(content=draft)])
+
+    result, events, agent = _run(tmp_path, llm, max_iterations=8)
+
+    assert result["status"] == "success"
+    assert result.get("degraded") is None
+    assert result["content"] == prose
+    streamed = "".join(data.get("delta", "") for event, data in events if event == "text_delta")
+    assert streamed == prose
+    assert llm.calls == len(_SCRIPT_HEAD) + 1
+    assert not [event for event, _ in events if event == "grounding_status"]
+    artifact = json.loads(
+        (tmp_path / "run" / "artifacts" / "grounding_evidence.json").read_text(encoding="utf-8")
+    )
+    assert "1.137 | observed" in artifact["validations"][-1]["figures_block"]
+
+
+def test_the_sweep_cuts_a_bare_restatement_of_a_cut_figure(tmp_path: Path) -> None:
+    """The footnote's count is where the figure no longer appears.
+
+    "37%" is a measurement and is cut at its span; "37 个百分点" is a bare
+    integer the shape rules never check, so without the sweep the number the
+    footnote says was removed would still be on the page.
+    """
+    ledger = _ledger(tmp_path)
+    draft = HDR + " 较高点回撤 37%，即回撤 37 个百分点；20 日均线走平。"
+    validation = ledger.validate_final_answer(draft)
+
+    released = ledger.redacted_release(draft, validation)
+
+    assert released is not None
+    assert "37" not in released
+    assert "20 日均线" in released and "1.171" in released
+    assert "※ 略去 2 处" in released
+    assert ledger.figures_removed == 2
+
+
+def test_the_sweep_leaves_a_bare_integer_with_different_digits(tmp_path: Path) -> None:
+    """Cutting "0.95" must not take the "95" of an unrelated count with it."""
+    ledger = _ledger(tmp_path)
+    draft = HDR + " 建议买入价 0.95 元，计划持有 95 天。"
+    validation = ledger.validate_final_answer(draft)
+
+    released = ledger.redacted_release(draft, validation)
+
+    assert released is not None
+    assert "0.95" not in released
+    assert "持有 95 天" in released
+    assert "※ 略去 1 处" in released
+    assert ledger.figures_removed == 1
+
+
+def test_the_sweep_never_cuts_a_figure_the_gate_checked(tmp_path: Path) -> None:
+    """Only bare integers are swept; a decimal sharing the cut figure's digits stays.
+
+    "1.171%" is cut, and the observed close "1.171 元" carries the same digits.
+    The close is a measurement the gate checked and grounded, so sweeping it
+    would delete a figure the evidence supports.
+    """
+    ledger = _ledger(tmp_path)
+    draft = HDR + " 日内振幅 1.171%。"
+    validation = ledger.validate_final_answer(draft)
+    assert [issue for issue in validation.issues if issue.get("value") is not None]
+
+    released = ledger.redacted_release(draft, validation)
+
+    assert released is not None
+    assert "最新收盘价 1.171 元" in released
+    assert "1.171%" not in released
+    assert "※ 略去 1 处" in released

@@ -120,6 +120,25 @@ def _close_any(value: float, targets: Iterable[float]) -> bool:
     return any(_close(value, target) for target in targets)
 
 
+def _nearest(value: float, targets: Iterable[float], limit: int = 3) -> list[float]:
+    """The observed values closest to a rejected figure.
+
+    A range ("0.567-1.053") tells the model the figure is outside the window;
+    the nearest prints tell it what to write instead, which is what spec 6 asks
+    the correction prompt to say.
+
+    Args:
+        value: The rejected figure's value.
+        targets: Every value the relevant evidence pool holds.
+        limit: How many to name.
+
+    Returns:
+        Up to ``limit`` distinct observed values, closest first.
+    """
+    unique = sorted({float(target) for target in targets}, key=lambda item: (abs(item - value), item))
+    return unique[:limit]
+
+
 def _written_half_unit(text: str) -> float:
     """Half a unit of the last digit a figure was WRITTEN with.
 
@@ -602,6 +621,7 @@ class _PolicyMixin:
                     f"is declared observed from {declaration.ref}, whose results do "
                     "not contain it",
                     source_tool_call_ids=[declaration.ref],
+                    observed_nearest=_nearest(figure.value, referenced),
                 )
             ]
         prices = self._price_pool(
@@ -647,6 +667,7 @@ class _PolicyMixin:
                 date=figure.date,
                 observed_min=observed[0],
                 observed_max=observed[-1],
+                observed_nearest=_nearest(figure.value, observed),
             )
         ]
 
@@ -743,6 +764,12 @@ class _PolicyMixin:
         result, _ = derivation
         if declaration is not None and self._result_matches(declaration, result):
             return []
+        # Reported in the figure's OWN units. ``_result_matches`` compares a
+        # percent-written figure against ``result * 100``, so telling a model
+        # that wrote "12%" that its formula "evaluates to -0.3675" names a
+        # number that appears nowhere in the comparison it just failed.
+        scaled = result * 100.0 if figure.percent else result
+        shown = f"{scaled:.6g}%" if figure.percent else f"{scaled:.6g}"
         return [
             self._figure_issue(
                 "numeric_claim_conflict",
@@ -750,7 +777,8 @@ class _PolicyMixin:
                 "derived",
                 symbol,
                 "derivation_result_mismatch",
-                f"is declared derived, but its own formula evaluates to {result:g}",
+                f"is declared derived, but its own formula evaluates to {shown}",
+                derived_result=shown,
             )
         ]
 
@@ -803,6 +831,7 @@ class _PolicyMixin:
                 f"{min(prices):g}–{max(prices):g} and its note derives no value",
                 observed_min=min(prices),
                 observed_max=max(prices),
+                observed_nearest=_nearest(figure.value, prices),
             )
         ]
 

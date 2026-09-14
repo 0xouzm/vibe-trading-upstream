@@ -29,6 +29,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from src.agent.context import ContextBuilder
 from src.agent.grounding import GroundingLedger
+from src.agent.grounding.release import MAX_GROUNDING_REVISIONS
 from src.agent.memory import WorkspaceMemory
 from src.agent.progress import HeartbeatTimer, ProgressEvent, _set_emitter
 from src.agent.tool_progress import RECOVERY_MESSAGE, ToolProgress
@@ -1272,6 +1273,7 @@ class AgentLoop:
         content_filter_circuit_breaker = False
         empty_model_response_iter: int | None = None
         consecutive_empty_responses = 0
+        grounding_revisions = 0
         llm_usage_summary = _new_llm_usage_summary(self.llm)
         last_response_model: str | None = None
         goal_continuations = 0
@@ -1697,6 +1699,10 @@ class AgentLoop:
                                     )
                                     final_content = repaired
                                     validation = recheck
+                        if validation.valid:
+                            # The figures block is the model's declaration to
+                            # the gate, not answer text.
+                            final_content = validation.released_text
                         if not validation.valid:
                             trace.write_text_entry(
                                 {
@@ -1736,6 +1742,14 @@ class AgentLoop:
                                         "content": f"<system>{self._grounding.recovery_prompt(recovery, validation)}</system>",
                                     }
                                 )
+                                self._emit(
+                                    "grounding_status",
+                                    {
+                                        "stage": "revising",
+                                        "round": self._grounding.validation_count,
+                                        "issues": len(validation.issues),
+                                    },
+                                )
                                 final_content = ""
                                 continue
                             messages.append(
@@ -1746,14 +1760,26 @@ class AgentLoop:
                             )
                             rejected_draft = final_content
                             final_content = ""
-                            # One extra revision when real iteration budget remains;
-                            # each revision costs one iteration, so without budget the
-                            # run must stop revising and release the safe fallback.
-                            revision_cap = 4 if self.max_iterations - iteration >= 3 else 3
+                            # The budget counts drafts rejected on this
+                            # correction path; the last one is released with
+                            # its figures cut. A draft that triggered bounded
+                            # recovery is not counted (it re-fetches evidence
+                            # rather than rewording), so a run that had to
+                            # resolve its symbol first still gets a corrected
+                            # draft.
+                            grounding_revisions += 1
                             if (
                                 iteration < self.max_iterations
-                                and self._grounding.validation_count < revision_cap
+                                and grounding_revisions < MAX_GROUNDING_REVISIONS
                             ):
+                                self._emit(
+                                    "grounding_status",
+                                    {
+                                        "stage": "revising",
+                                        "round": self._grounding.validation_count,
+                                        "issues": len(validation.issues),
+                                    },
+                                )
                                 continue
                             # Out of revisions. The last draft is still the
                             # analysis the user waited minutes for; release it
@@ -1781,6 +1807,13 @@ class AgentLoop:
                                     }
                                 )
                                 final_content = released
+                                self._emit(
+                                    "grounding_status",
+                                    {
+                                        "stage": "released_redacted",
+                                        "removed": self._grounding.figures_removed,
+                                    },
+                                )
                                 self._released_fallback_reason = (
                                     "final answer released with unverified figures "
                                     f"redacted after {rejected_drafts} rejected drafts"

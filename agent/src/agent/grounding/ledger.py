@@ -161,6 +161,11 @@ class GroundingLedger(
         """Return the number of final drafts checked so far."""
         return len(self._validations)
 
+    @property
+    def figures_removed(self) -> int:
+        """Return how many figures the discounted release cut, or 0."""
+        return int((self._released or {}).get("figures_removed", 0))
+
     def identity_summary(self) -> dict[str, Any]:
         """Return compact identity state for traces and tool errors."""
         return {

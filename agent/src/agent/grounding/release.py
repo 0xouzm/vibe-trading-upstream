@@ -31,6 +31,16 @@ from src.agent.grounding.policies import ValidationResult
 MAX_GROUNDING_RECOVERY_ROUNDS = 6
 
 
+# Drafts the gate may reject on the correction path before the run stops
+# revising: the first is handed back with a correction prompt, the second is
+# released with its rejected figures cut (spec §0). Two, because a revision
+# costs a full model round on a report the user is already waiting for, and
+# the third and fourth rounds bought nothing measurable: the release
+# path now cuts the figures the gate objected to and ships the rest, so the
+# alternative to another round is a discounted answer, not a refusal.
+MAX_GROUNDING_REVISIONS = 2
+
+
 # Issue codes whose figure can be cut out of its clause and the draft released
 # (see ``redacted_release``), and the provenance codes a data note repairs.
 _REDACTABLE_CODES = frozenset(
@@ -83,6 +93,79 @@ def _format_price(value: float) -> str:
     return format(value, ".10g")
 
 
+#: What the evidence says about a figure, keyed on the validator's reason. The
+#: reason is a state of the CHECK, never a word read out of the answer, so this
+#: table is language-independent the way the roles it reports on are.
+_CORRECTION_REASONS = {
+    "undeclared": "it is not declared at all",
+    "no_evidence": "this session holds no evidence of that kind to check it against",
+    "value_mismatch": "the observed evidence is {range}",
+    "not_in_referenced_call": "call {ref} returned no such value",
+    "no_formula": "its note states no arithmetic",
+    "formula_not_evaluable": "its note is not an arithmetic expression over two or more operands",
+    "formula_not_anchored": "no operand of its note is a value this session observed",
+    "no_symbol": "the run holds evidence for more than one instrument and the note names none",
+    "derivation_result_mismatch": "its own note evaluates to {result}",
+    "outside_observed_range": "it is outside the observed range {range} and its note derives no value",
+    "citation_without_source": "its note names no source",
+    "cited_as_observed": "it is presented as an observed value of this instrument",
+    "unparseable_declaration": "the declaration line could not be read as `value | role | note | ref`",
+    "symbol_never_handled": "no tool call in this session passed in or returned that symbol",
+}
+
+
+def _correction_line(issue: dict[str, Any]) -> str:
+    """Render one rejected figure as `written | declared role | evidence`.
+
+    Args:
+        issue: One figure-scoped validation issue.
+
+    Returns:
+        The line the correction prompt shows for that figure.
+    """
+    role = issue.get("role")
+    declared = f"declared {role}" if role else "not declared"
+    if issue.get("code") == "figure_undeclared":
+        declared = "not declared"
+    reason = str(issue.get("reason") or "")
+    template = _CORRECTION_REASONS.get(reason, reason or "it could not be verified")
+    low, high = issue.get("observed_min"), issue.get("observed_max")
+    span = (
+        f"{_format_price(float(low))}\u2013{_format_price(float(high))}"
+        if isinstance(low, (int, float)) and isinstance(high, (int, float))
+        else "empty"
+    )
+    result = issue.get("derived_result")  # already rendered in the figure's own units
+    evidence = template.format(
+        range=span,
+        ref=issue.get("source_tool_call_ids", [""])[0] if issue.get("source_tool_call_ids") else "",
+        result=result if result else "a different value",
+    )
+    nearest = issue.get("observed_nearest") or []
+    if nearest:
+        evidence += "; nearest observed " + ", ".join(_format_price(float(item)) for item in nearest)
+    symbol = issue.get("symbol")
+    subject = f"{issue.get('value')} ({symbol})" if symbol else str(issue.get("value"))
+    return f"{subject} | {declared} | {evidence}"
+
+
+def _digit_key(text: str) -> str:
+    """The digits a figure was written with, ignoring how it was decorated.
+
+    ``37%``, ``37 %`` and a bare ``37`` share one key; ``3`` and ``3.0`` do
+    not, because they are not the same number as written and sweeping one for
+    the other would cut an unrelated count.
+
+    Args:
+        text: The figure exactly as it appears in the answer.
+
+    Returns:
+        The comparable digit string, or "" when there is none.
+    """
+    body = text.strip().rstrip("%\uff05").strip().lstrip("+-")
+    return body.replace(",", "").strip()
+
+
 def _strip_release_markers(content: str) -> str:
     """Remove any redaction marker or release note the MODEL wrote.
 
@@ -109,60 +192,48 @@ class _ReleaseMixin:
     """Release behaviour of :class:`GroundingLedger`."""
 
     def correction_prompt(self, validation: ValidationResult) -> str:
-        """Build bounded feedback for one rejected model draft.
+        """Build bounded per-figure feedback for one rejected model draft.
 
-        The feedback is per NUMBER, not per rule: every figure issue carries
-        the value as it was written, the role it was declared under and the
-        reason that role failed, so the message says "0.95 is a proposed level
-        outside the observed range 0.567–1.053 and its note derives no value"
-        instead of restating the policy. Each figure then has exactly three
-        ways out, and they are spelled out once at the end.
+        The feedback is per NUMBER, not per rule (spec 6). Each rejected figure
+        gets one line naming three things: the figure exactly as it was
+        written, the role it was DECLARED under, and what the EVIDENCE says
+        about it — the range that was observed, the values nearest to it, or
+        the value its own note evaluates to. The three ways out are then stated
+        once, because they are the same three for every figure.
+
+        Args:
+            validation: The rejected draft's validation result.
+
+        Returns:
+            The system message handed back to the model.
         """
         lines = [
             "[GROUNDING GATE] The previous draft was rejected and was not released to the user.",
-            "Correct every issue using the existing structured identity and tool evidence:",
+            "Every figure below, exactly as you wrote it, with what you declared and what the evidence says:",
         ]
-        for issue in validation.issues[:12]:
-            lines.append(f"- {issue.get('message', issue.get('code', 'grounding error'))}")
-        # Name the exact values that must be REMOVED, not rephrased. The model
-        # tends to restate a rejected figure in a new format; the gate then
-        # rejects it again and the run burns iterations until the fallback.
-        banned: list[str] = []
-        for issue in validation.issues:
-            if issue.get("code") not in _REDACTABLE_CODES:
-                continue
-            value = issue.get("value")
-            if value is None:
-                continue
-            symbol = issue.get("symbol") or ""
-            label = f"{value:g}" if isinstance(value, (int, float)) else str(value)
-            banned.append(f"{label} ({symbol})" if symbol else label)
-        if banned:
-            deduped = list(dict.fromkeys(banned))
-            lines.append(
-                "Every figure above must be either DECLARED with the role it really "
-                "has, REWRITTEN to a value the tools returned, or REMOVED. Do not "
-                "restate a rejected value in another format: " + ", ".join(deduped) + "."
+        figures, others = [], []
+        for issue in validation.issues[:24]:
+            (figures if issue.get("value") is not None else others).append(issue)
+        lines.extend(f"- {_correction_line(issue)}" for issue in figures)
+        lines.extend(
+            f"- {issue.get('message', issue.get('code', 'grounding error'))}" for issue in others
+        )
+        if figures:
+            lines.extend(
+                [
+                    "Fix EVERY figure above in one of exactly three ways:",
+                    "  (1) DECLARE it with the role it really has, in the figures block;",
+                    "  (2) REWRITE it to a value this session's tools actually returned;",
+                    "  (3) REMOVE it from the answer.",
+                    "Restating a rejected value in another format is none of the three and fails again.",
+                ]
             )
-            repeated: list[str] = []
-            for prior in self._validations:
-                for prior_issue in prior.get("issues", []):
-                    prior_value = prior_issue.get("value")
-                    if prior_value is None:
-                        continue
-                    mark = (
-                        f"{prior_value:g}"
-                        if isinstance(prior_value, (int, float))
-                        else str(prior_value)
-                    )
-                    if any(entry.startswith(mark) for entry in deduped):
-                        repeated.append(mark)
+            repeated = self._repeatedly_rejected(figures)
             if repeated:
                 lines.append(
-                    "These value(s) have now been rejected repeatedly across drafts: "
-                    + ", ".join(dict.fromkeys(repeated))
-                    + ". Repeating them in any form keeps failing; drop them, or show "
-                    "the full derivation from the observed inputs."
+                    "These value(s) have now been rejected across more than one draft: "
+                    + ", ".join(repeated)
+                    + ". Take option (2) or (3) for them."
                 )
         lines.extend(
             [
@@ -206,6 +277,28 @@ class _ReleaseMixin:
                 "exhausted, say so and ask for clarification; do not guess."
             )
         return "\n".join(lines)
+
+    def _repeatedly_rejected(self, issues: Sequence[dict[str, Any]]) -> list[str]:
+        """Figures this draft repeats that an earlier draft was already refused for.
+
+        The model tends to restate a rejected figure in a new format rather
+        than drop it; the gate refuses it again and the run burns its whole
+        revision budget on one number.
+
+        Args:
+            issues: The current draft's figure issues.
+
+        Returns:
+            The repeated figures as written, in order, without duplicates.
+        """
+        current = {str(issue.get("value")) for issue in issues}
+        repeated = [
+            str(prior_issue.get("value"))
+            for prior in self._validations[:-1]
+            for prior_issue in prior.get("issues", [])
+            if str(prior_issue.get("value")) in current
+        ]
+        return list(dict.fromkeys(repeated))
 
     def recovery_action(self, validation: ValidationResult) -> str | None:
         """Decide the next safe read-only recovery step for a rejected draft.
@@ -454,14 +547,10 @@ class _ReleaseMixin:
         appended if that is all that remains, and the cut document is
         re-validated by the same gate: only text that passes is returned.
 
-        The document-wide "sweep every other copy of the figure" second stage
-        is gone. It existed because the old validators only ever looked at
-        clauses carrying a price word, so the same rejected number could stand
-        untouched in a bullet or under a non-OHLC table header while the
-        footnote claimed it had been removed. Every measurement-shaped number
-        is now located and checked individually, so an occurrence that was not
-        flagged is one this gate grounded, and cutting it would remove a
-        figure the evidence supports.
+        A document-wide sweep then removes any UNCHECKED restatement of a
+        figure that was cut (see :meth:`_sweep_same_values`), so the footnote's
+        count is the number of places the figure no longer appears, not the
+        number of spans the validator happened to flag.
 
         Fail-closed by construction. None — leave the canned fallback in place
         — whenever the run never observed a price at all, an issue is not a
@@ -484,30 +573,39 @@ class _ReleaseMixin:
         # cuts will actually be made in.
         check = validation if text == content else self._validate(text, record=False)
         removed = 0
+        keys: set[str] = set()
         for _ in range(_MAX_REDACTION_PASSES):
             if check.valid:
                 break
             codes = {issue.get("code") for issue in check.issues}
             if not codes <= (_REDACTABLE_CODES | _REPAIRABLE_PROVENANCE_CODES):
                 return None
-            cut, count = self._cut_flagged(text, check.issues)
+            cut, cut_texts = self._cut_flagged(text, check.issues)
             if cut is None:
                 return None
-            if count:
+            if cut_texts:
                 text = cut
-                removed += count
+                removed += len(cut_texts)
+                keys.update(_digit_key(item) for item in cut_texts)
                 check = self._validate(text, record=False)
                 if check.valid:
                     break
             repaired = self.repair_provenance(text, check)
             if repaired is None:
-                if count == 0:
+                if not cut_texts:
                     return None
                 continue
             text = repaired
             check = self._validate(text, record=False)
         if not check.valid or removed == 0:
             return None
+        # A cut figure can still be standing where the shape rules never look.
+        swept, swept_texts = self._sweep_same_values(text, keys - {""})
+        if swept_texts:
+            recheck = self._validate(swept, record=False)
+            if not recheck.valid:
+                return None
+            text, check, removed = swept, recheck, removed + len(swept_texts)
         body = check.released_text
         note = self._release_note(removed, body)
         # The note carries the observed range and the canonical symbols, so it
@@ -559,7 +657,7 @@ class _ReleaseMixin:
         self,
         text: str,
         issues: Sequence[dict[str, Any]],
-    ) -> tuple[str | None, int]:
+    ) -> tuple[str | None, list[str]]:
         """Replace every flagged figure with the omission marker.
 
         An issue naming one figure cuts that figure. An issue with no value —
@@ -572,8 +670,9 @@ class _ReleaseMixin:
             issues: The issues raised against it.
 
         Returns:
-            ``(rewritten text, figures replaced)``, or ``(None, 0)`` when a
-            flagged issue could not be located and the release must fail closed.
+            ``(rewritten text, figures replaced as written)``, or
+            ``(None, [])`` when a flagged issue could not be located and the
+            release must fail closed.
         """
         block = parse_figures_block(text)
         figures = scan_figures(text, block)
@@ -583,7 +682,7 @@ class _ReleaseMixin:
                 continue
             span = self._issue_span(text, issue)
             if span is None:
-                return None, 0
+                return None, []
             if issue.get("value") is None:
                 cuts.update(
                     (figure.start, figure.end)
@@ -594,14 +693,65 @@ class _ReleaseMixin:
                 )
             else:
                 cuts.add(span)
+        return self._apply_cuts(text, cuts)
+
+    def _sweep_same_values(self, text: str, keys: set[str]) -> tuple[str, list[str]]:
+        """Cut every UNCHECKED restatement of a figure that was already cut.
+
+        Cutting a figure at its own span leaves the same claim standing
+        wherever the shape rules do not check it. A bare integer is the one
+        such place: "回撤 37%" is a measurement and is verified, while the
+        "37" of "回撤 37 个百分点" is a bare integer that spec 3 deliberately
+        does not check, so the number the footnote says was removed would
+        still be on the page.
+
+        Only bare figures are swept. A measurement-shaped occurrence that
+        survived the cuts is one this gate CHECKED and grounded, and removing
+        it would delete a figure the evidence supports; an exempt occurrence
+        is a date, a security code or fenced text, and cutting those corrupts
+        the structure they belong to.
+
+        Args:
+            text: The already-cut document.
+            keys: Digit keys of the figures that were cut.
+
+        Returns:
+            ``(rewritten text, figures swept as written)``.
+        """
+        if not keys:
+            return text, []
+        block = parse_figures_block(text)
+        cuts = {
+            (figure.start, figure.end)
+            for figure in scan_figures(text, block)
+            if figure.shape == "bare" and _digit_key(figure.text) in keys
+        }
+        swept, cut_texts = self._apply_cuts(text, cuts)
+        return (text, []) if swept is None else (swept, cut_texts)
+
+    def _apply_cuts(
+        self,
+        text: str,
+        cuts: set[tuple[int, int]],
+    ) -> tuple[str | None, list[str]]:
+        """Replace each span with the omission marker in the script it sits in.
+
+        Args:
+            text: The document to rewrite.
+            cuts: Spans of the figures to remove.
+
+        Returns:
+            ``(rewritten text, the figures removed as written)``.
+        """
         if not cuts:
-            return text, 0
+            return text, []
         pieces: list[str] = []
+        removed: list[str] = []
         cursor = 0
-        count = 0
         for start, end in sorted(cuts):
             if start < cursor:
                 continue
+            removed.append(text[start:end])
             start = max(cursor, currency_prefix_start(text, start))
             end = currency_suffix_end(text, end)
             marker = self._marker_for(text, start)
@@ -619,9 +769,8 @@ class _ReleaseMixin:
             pieces.append(text[cursor:start])
             pieces.append(marker)
             cursor = end
-            count += 1
         pieces.append(text[cursor:])
-        return "".join(pieces), count
+        return "".join(pieces), removed
 
     def _marker_for(self, text: str, position: int) -> str:
         """Pick the omission marker in the script of the line being cut.

@@ -557,18 +557,60 @@ def test_undeclared_mode_does_not_guess_proposed_or_derived(tmp_path: Path) -> N
 def test_the_correction_prompt_names_each_figure_and_its_reason(
     tmp_path: Path,
 ) -> None:
-    """§6: the feedback is per number, not a restatement of the policy."""
+    """§6: the feedback is per number, not a restatement of the policy.
+
+    Three things per figure — what was written, what was declared, what the
+    evidence says — plus the three fixes stated once.
+    """
     ledger = _ledger(tmp_path)
     validation = ledger.validate_final_answer(
         HDR + " 建议买入价 2.50 元。" + _block(HDR_ROW, "2.50 | proposed | entry")
     )
 
     prompt = ledger.correction_prompt(validation)
+    line = next(row for row in prompt.splitlines() if row.startswith("- 2.50"))
 
-    assert "2.50" in prompt
-    assert "0.567" in prompt and "1.053" in prompt
+    assert "declared proposed" in line
+    assert "0.567" in line and "1.053" in line
+    assert "nearest observed 1.053, 1.04, 1.02" in line
     assert "figures" in prompt
-    assert "DECLARED" in prompt and "REWRITTEN" in prompt and "REMOVED" in prompt
+    assert "DECLARE" in prompt and "REWRITE" in prompt and "REMOVE" in prompt
+
+
+def test_a_value_is_called_repeated_only_from_its_second_rejection(
+    tmp_path: Path,
+) -> None:
+    """The current draft is not its own predecessor.
+
+    Comparing against every recorded validation, the current one included,
+    told the model on its FIRST rejection that the figure had been refused
+    "repeatedly", which is false and trains it to ignore the line.
+    """
+    ledger = _ledger(tmp_path)
+    draft = HDR + " 建议买入价 2.50 元。" + _block(HDR_ROW, "2.50 | proposed | entry")
+
+    first = ledger.correction_prompt(ledger.validate_final_answer(draft))
+    second = ledger.correction_prompt(ledger.validate_final_answer(draft))
+
+    assert "more than one draft" not in first
+    assert "more than one draft: 2.50." in second
+
+
+def test_a_derived_percent_is_corrected_in_its_own_units(tmp_path: Path) -> None:
+    """A model that wrote "12%" is told what its formula gives in percent."""
+    ledger = _ledger(tmp_path)
+    validation = ledger.validate_final_answer(
+        HDR
+        + " 较 5 月高点回撤 12%。"
+        + _block(HDR_ROW, "12% | derived | (0.666 − 1.053) / 1.053 | c1")
+    )
+
+    prompt = ledger.correction_prompt(validation)
+    line = next(row for row in prompt.splitlines() if row.startswith("- 12"))
+
+    assert "declared derived" in line
+    assert "evaluates to -36.7521%" in line
+    assert "-0.36" not in prompt
 
 
 # ---------------------------------------------------------------------------

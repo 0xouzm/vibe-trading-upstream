@@ -350,7 +350,12 @@ class _FailingDraftLLM:
         return LLMResponse(content="")
 
 
-def _run_direct_loop(tmp_path: Path, llm: Any, max_iterations: int = 8) -> dict[str, Any]:
+def _run_direct_loop(
+    tmp_path: Path,
+    llm: Any,
+    max_iterations: int = 8,
+    events: list[tuple[str, dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
     from src.agent.loop import AgentLoop
     from src.memory.persistent import PersistentMemory
     from src.tools import build_registry
@@ -361,6 +366,9 @@ def _run_direct_loop(tmp_path: Path, llm: Any, max_iterations: int = 8) -> dict[
         llm=llm,
         max_iterations=max_iterations,
         persistent_memory=pm,
+        event_callback=(lambda event, data: events.append((event, data)))
+        if events is not None
+        else None,
     )
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -375,14 +383,24 @@ def test_loop_runs_recovery_before_fallback(
     from src.agent.trace import TraceWriter
 
     llm = _FailingDraftLLM()
+    events: list[tuple[str, dict[str, Any]]] = []
 
-    result = _run_direct_loop(tmp_path, llm, max_iterations=6)
+    result = _run_direct_loop(tmp_path, llm, max_iterations=6, events=events)
 
     trace = TraceWriter.read(tmp_path / "run")
     recovery_entries = [e for e in trace if e.get("type") == "grounding_recovery"]
     # Symbol resolution budget is two: two recovery turns, then fallback.
     assert [e.get("action") for e in recovery_entries] == ["search_symbol", "search_symbol"]
-    assert llm.calls >= 3
+    # Two recovery drafts, then the correction path: one draft handed back
+    # and the one that ends revising. Recovery does not spend the revision
+    # cap, and every rejection that leads to another draft is announced.
+    assert llm.calls == 4
+    statuses = [data for event, data in events if event == "grounding_status"]
+    assert [(status["stage"], status["round"]) for status in statuses] == [
+        ("revising", 1),
+        ("revising", 2),
+        ("revising", 3),
+    ]
     # Recovery and correction steering must never be mid-conversation system
     # messages: Anthropic only accepts a single leading system block.
     assert_system_messages_only_lead(llm.messages_history)

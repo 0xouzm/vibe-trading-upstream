@@ -94,6 +94,21 @@ _BUILTIN: dict[str, ConnectorOnboarding] = {
         install_command="pip install futu-api",
         setup_hint="Start and sign in to Futu OpenD on this computer before testing.",
     ),
+    "kis": ConnectorOnboarding(
+        auth_type="api_key",
+        credential_fields=(
+            _field("app_key", "App Key"),
+            _field("app_secret", "App Secret"),
+            _field("account_no", "Account Number (CANO)", secret=False),
+            _field("account_product_code", "Account Product Code", secret=False, required=False),
+        ),
+        dependency="requests",
+        install_command="pip install keyring",
+        setup_hint=(
+            "Apply for an app key/secret at apiportal.koreainvestment.com; test "
+            "against a 모의투자 (paper) account before ever using live-readonly."
+        ),
+    ),
     "longbridge": ConnectorOnboarding(
         auth_type="api_key",
         credential_fields=(
@@ -160,6 +175,30 @@ _BUILTIN: dict[str, ConnectorOnboarding] = {
         ),
         dependency="requests",
         install_command="pip install keyring",
+    ),
+    "upbit": ConnectorOnboarding(
+        auth_type="api_key",
+        credential_fields=(
+            _field("access_key", "Access Key"),
+            _field("secret_key", "Secret Key"),
+        ),
+        dependency="PyJWT",
+        install_command='pip install "vibe-trading-ai[upbit]" keyring',
+        setup_hint="Create a read-only key; do not grant withdrawal permission.",
+    ),
+    "toss": ConnectorOnboarding(
+        auth_type="api_key",
+        credential_fields=(
+            _field("client_id", "Client ID"),
+            _field("client_secret", "Client Secret"),
+            _field("account_seq", "Account Sequence", secret=False),
+        ),
+        dependency="requests",
+        install_command="pip install keyring",
+        setup_hint=(
+            "Apply via the Toss Securities app (더보기 > Open API), then fetch "
+            "account_seq from GET /api/v1/accounts."
+        ),
     ),
 }
 

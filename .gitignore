@@ -79,12 +79,17 @@ agent/uploads/
 /etoro.json
 /futu.json
 /ibkr-local.json
+/kis.json
+/kis-token-*.json
 /longbridge.json
 /mt5.json
 /okx.json
 /shoonya.json
 /tiger.json
+/toss.json
+/toss-token.json
 /trading212.json
+/upbit.json
 /zerodha.json
 agent/tests/*_result.json
 .ruff_cache/

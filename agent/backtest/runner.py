@@ -25,8 +25,8 @@ from backtest.loaders.registry import (
     FALLBACK_CHAINS,
     LOADER_REGISTRY,
     VALID_SOURCES,
-    _NO_NETWORK_FALLBACK_SOURCES,
     get_loader_cls_with_fallback,
+    is_no_network_fallback_source,
     mixed_caliber_warning,
     price_caliber,
     resolve_loader,
@@ -1584,11 +1584,14 @@ def fetch_data_map(config: dict) -> DataFetchResult:
                 len(codes),
                 missing,
             )
-        # ``_NO_NETWORK_FALLBACK_SOURCES`` 的语义是「显式点名这些源时不得静默
-        # 降级」。此前它只在 loader 整体不可用时被查，按标的的缺口仍然会被
-        # 网络源补上——一次 source="local" 的请求可以一半来自快照、一半来自
-        # Tencent，只在日志里留两行。调用方要的是快照的溯源，不是补齐的行数。
-        if missing and primary_source not in _NO_NETWORK_FALLBACK_SOURCES:
+        # ``is_no_network_fallback_source`` means "an explicit request for this
+        # source must never silently degrade." It used to be checked only when
+        # a loader was unavailable as a whole; per-symbol gaps still got filled
+        # from a network source — a source="local" request could return half
+        # its rows from a snapshot and half from Tencent, leaving only two log
+        # lines as a trace. Callers want snapshot provenance, not a padded row
+        # count.
+        if missing and not is_no_network_fallback_source(primary_source):
             market = _detect_market(codes[0])
             for fallback_source in FALLBACK_CHAINS.get(market, []):
                 if not missing:

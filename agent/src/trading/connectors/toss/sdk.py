@@ -273,7 +273,13 @@ def _fetch_closed_orders(cfg: TossConfig) -> list[Any]:
             return rows
         cursor = page.get("nextCursor")
         if not cursor:
-            return rows  # hasNext claimed true with nothing to continue from
+            # The spec makes both fields required: hasNext=true with no cursor
+            # is a broken page, and returning what we have would be the same
+            # silently truncated history the cap above refuses.
+            raise TossAPIError(
+                "Toss reported hasNext=true without a nextCursor; refusing to "
+                "return a silently truncated closed-order list"
+            )
     raise TossAPIError(
         f"Toss closed-order history has more than {_MAX_ORDER_HISTORY_PAGES} pages "
         f"of {_ORDER_HISTORY_PAGE_SIZE}; refusing to return a silently truncated list"

@@ -268,6 +268,25 @@ def test_toss_closed_orders_pagination_cap_errors_instead_of_truncating(monkeypa
     assert "executions" not in result
 
 
+def test_toss_closed_orders_has_next_without_cursor_is_an_error(monkeypatch) -> None:
+    """``hasNext`` with no ``nextCursor`` is a broken page, not the last one:
+    stopping there would hand back the same silently truncated history the
+    page cap refuses."""
+
+    def fake_get(cfg, path, *, authed, account_scoped, params=None):
+        if params.get("status") == "OPEN":
+            return _closed_page([], has_next=False)
+        return _closed_page([{"orderId": "1"}], has_next=True, next_cursor=None)
+
+    monkeypatch.setattr(toss, "_get", fake_get)
+    cfg = toss.TossConfig(client_id="c", client_secret="s", account_seq="1")
+    result = toss.get_open_orders(cfg, include_executions=True)
+
+    assert result["status"] == "error"
+    assert "nextCursor" in result["error"]
+    assert "executions" not in result
+
+
 def test_toss_get_quote_unwraps_result_list(monkeypatch) -> None:
     def fake_get(cfg, path, *, authed, account_scoped, params=None):
         assert path == "/api/v1/prices"

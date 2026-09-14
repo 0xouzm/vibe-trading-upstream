@@ -1303,18 +1303,60 @@ def main(run_dir: Path) -> None:
         market_engine.run_backtest(config, loader, signal_engine, run_dir, bars_per_year=bars_per_year)
 
 
-#: How far the declared interval's bar count may sit from the count actually
-#: observed before the declaration is treated as wrong. Neighbouring intervals
-#: differ by at least 2x (``30m`` -> ``1H``), while the calendar-vs-trading-day
-#: spread inside one interval is a few percent (a business-daily series measures
-#: ~261 against a declared 252), so 1.5 separates the two cases cleanly.
-_ANNUALISATION_MISMATCH_RATIO = 1.5
+#: Bar spacing, in seconds, of every interval the runner accepts
+#: (:data:`_VALID_INTERVALS`). Seconds rather than ``Timedelta`` so the
+#: comparison below is a ratio of two numbers.
+_INTERVAL_SECONDS: dict[str, float] = {
+    "1m": 60.0,
+    "5m": 300.0,
+    "15m": 900.0,
+    "30m": 1_800.0,
+    "1H": 3_600.0,
+    "4H": 14_400.0,
+    "1D": 86_400.0,
+}
+
+#: How far the served bar spacing may sit from the declared interval's spacing
+#: before the declaration is treated as wrong. The closest pair of intervals
+#: differs by 2x (``30m`` -> ``1H``), while a correctly served series measures
+#: its own spacing exactly, so 1.5 separates the two cases with room to spare.
+_SPACING_MISMATCH_RATIO = 1.5
+
+#: Fewest bars whose median spacing is trustworthy. Sessions leave gaps -- a
+#: daily series jumps three days over a weekend -- and the median only absorbs
+#: them once they are outnumbered. Three differences survive one gap
+#: (``[1, 1, 3]`` -> 1 day); two do not (``[1, 3]`` -> 2 days).
+_MIN_BARS_FOR_SPACING = 4
+
+
+def _observed_spacing(data_map: dict, codes: List[str]) -> float | None:
+    """Median spacing of the served price bars in seconds, or None when
+    unmeasurable.
+
+    The median, not the span: a session index is mostly regular with occasional
+    gaps (weekends, overnight, a trading halt), and the median reports the
+    regular part. Only the instrument codes are measured, so an injected
+    fundamental panel cannot decide the annualisation.
+    """
+    indexes = [
+        data_map[code].index
+        for code in codes
+        if code in data_map and len(data_map[code]) >= _MIN_BARS_FOR_SPACING
+    ]
+    if not indexes:
+        return None
+    index = max(indexes, key=len)
+    spacing = pd.Series(index).diff().dropna().median()
+    if pd.isna(spacing):
+        return None
+    seconds = spacing.total_seconds()
+    return seconds if seconds > 0 else None
 
 
 def _annualisation_bars(
     interval: str, source: str, data_map: dict, codes: List[str]
 ) -> int:
-    """Bars per year for a single-market run, checked against the served data.
+    """Bars per year for a single-market run, checked against the served bars.
 
     ``interval`` is what the caller asked for, not a fact about what arrived. A
     loader may legitimately serve coarser bars than requested -- the local
@@ -1322,49 +1364,68 @@ def _annualisation_bars(
     warning -- and annualising at the declared rate then scales CAGR, Sharpe and
     the annualised volatility by the ratio between the two.
 
-    Measuring the served index is the convention
-    :func:`~backtest.metrics.effective_bars_per_year` already applies to
-    cross-market runs. Here it is used as a *check* rather than a replacement,
-    so a correctly served single-market run keeps the per-source trading-day
-    table it has always had and no existing run card moves.
+    The comparison is on bar **spacing**, not on bars per calendar year. A
+    calendar-year count is a property of the window as much as of the data:
+    weekends and overnight gaps dominate a short span, so five daily bars
+    starting on a Monday measure 456 against a declared 252 while the same five
+    bars starting on a Tuesday measure 304 -- one trips a 1.5 gate and the other
+    does not, for the same correctly served series. Median spacing is one day
+    for a daily series whether the window holds five bars or five years, and one
+    hour for hourly bars regardless of session length or 24x7 trading.
+
+    On a mismatch the count still comes from
+    :func:`~backtest.metrics.calc_bars_per_year` -- looked up with the interval
+    the spacing actually matches -- so the per-source trading-day table keeps
+    producing the number and a run card never picks up a window-dependent one.
 
     Args:
         interval: Bar size the caller declared.
         source: Primary source name, for the per-source trading-day table.
         data_map: Fetched ``code -> frame`` map.
-        codes: The instrument codes, so injected fundamental panels stay out
-            of the measurement.
+        codes: The instrument codes.
 
     Returns:
-        The declared count, or the observed one when the two disagree by at
-        least :data:`_ANNUALISATION_MISMATCH_RATIO`.
+        Bars per year for the declared interval, or for the interval the served
+        spacing matches when the two disagree.
     """
-    from backtest.metrics import calc_bars_per_year, effective_bars_per_year
+    from backtest.metrics import _normalize_interval, calc_bars_per_year
 
     declared = calc_bars_per_year(interval, source)
-    indexes = [
-        data_map[code].index
-        for code in codes
-        if code in data_map and len(data_map[code]) >= 2
-    ]
-    if not indexes:
+    declared_spacing = _INTERVAL_SECONDS.get(_normalize_interval(interval))
+    observed = _observed_spacing(data_map, codes)
+    if declared_spacing is None or observed is None:
         return declared
-    index = max(indexes, key=len)
-    observed = effective_bars_per_year(index, default=declared)
-    if observed <= 0:
+    if max(declared_spacing, observed) / min(declared_spacing, observed) < _SPACING_MISMATCH_RATIO:
         return declared
-    ratio = max(declared, observed) / min(declared, observed)
-    if ratio < _ANNUALISATION_MISMATCH_RATIO:
-        return declared
-    logger.warning(
-        "interval=%s declares %d bars/year but the served data measures %d "
-        "(%d bars over %d days); annualising on the served data. The loader "
-        "returned bars coarser or finer than requested -- check the earlier "
-        "loader warning, and set interval to the granularity the source "
-        "actually has.",
-        interval, declared, observed, len(index), (index[-1] - index[0]).days,
+
+    matched = min(
+        _INTERVAL_SECONDS,
+        key=lambda name: max(_INTERVAL_SECONDS[name], observed)
+        / min(_INTERVAL_SECONDS[name], observed),
     )
-    return observed
+    matched_spacing = _INTERVAL_SECONDS[matched]
+    if max(matched_spacing, observed) / min(matched_spacing, observed) >= _SPACING_MISMATCH_RATIO:
+        # Spacing that is no supported interval (a weekly file, say). Naming a
+        # bar count for it would be a guess, so the declaration stands and the
+        # mismatch is reported instead.
+        logger.warning(
+            "interval=%s declares bars spaced %.0fs but the served data is "
+            "spaced %.0fs, which matches no supported interval; annualising at "
+            "the declared rate. Check the earlier loader warning and re-run at "
+            "the granularity the source actually has.",
+            interval, declared_spacing, observed,
+        )
+        return declared
+
+    logger.warning(
+        "interval=%s declares bars spaced %.0fs but the served data is spaced "
+        "%.0fs; annualising as %s (%d bars/year) instead of %d. The loader returned "
+        "bars coarser or finer than requested -- check the earlier loader "
+        "warning, and set interval to the granularity the source actually has.",
+        interval, declared_spacing, observed, matched,
+        calc_bars_per_year(matched, source), declared,
+    )
+    return calc_bars_per_year(matched, source)
 
 
 def _create_market_engine(source: str, config: dict, codes: List[str]):

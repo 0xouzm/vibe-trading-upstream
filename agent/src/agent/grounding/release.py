@@ -13,17 +13,14 @@ from src.agent.grounding.identity import (
     _utc_now,
 )
 from src.agent.grounding.evidence import EvidenceRecord
-from src.agent.grounding.figures import _NUMBER_RE, _clause_spans, _lines_with_offsets
-from src.agent.grounding.policies import (
-    ValidationResult,
-    _ANALYSIS_METRIC_RE,
-    _CURRENCY_BEFORE_RE,
-    _CURRENCY_UNIT_WORDS,
-    _MEASURE_NUMBER_RE,
-    _PolicyMixin,
-    _TABLE_FIELD_ALIASES,
-    _matches_any,
+from src.agent.grounding.figures import (
+    _lines_with_offsets,
+    currency_prefix_start,
+    currency_suffix_end,
+    parse_figures_block,
+    scan_figures,
 )
+from src.agent.grounding.policies import ValidationResult
 
 # Bounded read-only recovery (#1081): a missing instrument identity or price
 # evidence is often recoverable deterministically, so the loop should keep
@@ -41,7 +38,7 @@ _REDACTABLE_CODES = frozenset(
         "numeric_claim_conflict",
         "numeric_claim_unavailable",
         "unsourced_symbol_figures",
-        "analysis_claim_unavailable",
+        "figure_undeclared",
     }
 )
 
@@ -71,23 +68,10 @@ _REDACTION_MARKER_ZH = "（略※）"
 _REDACTION_MARKER_EN = "(omitted※)"
 
 
-_UNIT_AFTER_RE = re.compile(
-    r"\s*(?:(?:" + _CURRENCY_UNIT_WORDS + r")(?![A-Za-z/／])"
-    r"|元(?![A-Za-z/／\u3400-\u9fff]))"
-)
-
-
 MAX_SYMBOL_RESOLUTION_ATTEMPTS = 2
 
 
 MAX_PRICE_EVIDENCE_ATTEMPTS = 3
-
-
-# A table column whose header names a price. Wider than the OHLC aliases on
-# purpose: 挂单价 / 目标价 / Entry Price are price columns that
-# ``_validate_price_tables`` does not key on and the prose scan skips, so
-# their cells are figures no validator ever reads.
-_PRICE_HEADER_RE = re.compile(r"(?:价格?|价位|price)\s*$", re.IGNORECASE)
 
 
 def _format_price(value: float) -> str:
@@ -97,42 +81,6 @@ def _format_price(value: float) -> str:
     index level printed in the release footnote read "1.23457e+06".
     """
     return format(value, ".10g")
-
-
-def _redaction_targets(values: Sequence[Any]) -> tuple[bool, list[float], list[str]]:
-    """Split issue values into cut-everything / numeric / percent-literal cuts.
-
-    Args:
-        values: The ``value`` field of each issue flagged on one clause.
-
-    Returns:
-        ``(cut_all, numeric targets, percent literals)``. ``cut_all`` is set by
-        a ``None`` value, which is how ``unsourced_symbol_figures`` says "every
-        figure in this clause belongs to an instrument no tool handled".
-    """
-    cut_all = False
-    targets: list[float] = []
-    literals: list[str] = []
-    for value in values:
-        if value is None:
-            cut_all = True
-        elif isinstance(value, bool):
-            continue
-        elif isinstance(value, (int, float)):
-            targets.append(float(value))
-        elif isinstance(value, str) and value.strip():
-            literal = value.strip().replace(" ", "").replace(",", "")
-            if literal.endswith(("%", "％")):
-                literals.append(literal)
-            else:
-                try:
-                    targets.append(float(literal))
-                except ValueError:
-                    continue
-    return cut_all, targets, literals
-
-
-_RELEASE_NOTE_LINE_RE = re.compile(r"^[^\S\n]*※[^\n]*\n?", re.MULTILINE)
 
 
 def _strip_release_markers(content: str) -> str:
@@ -152,14 +100,24 @@ def _strip_release_markers(content: str) -> str:
     stripped = content.replace(_REDACTION_MARKER_ZH, "").replace(
         _REDACTION_MARKER_EN, ""
     )
-    return _RELEASE_NOTE_LINE_RE.sub("", stripped)
+    return "\n".join(
+        line for line in stripped.splitlines() if not line.lstrip().startswith("※")
+    )
 
 
 class _ReleaseMixin:
     """Release behaviour of :class:`GroundingLedger`."""
 
     def correction_prompt(self, validation: ValidationResult) -> str:
-        """Build bounded feedback for one rejected model draft."""
+        """Build bounded feedback for one rejected model draft.
+
+        The feedback is per NUMBER, not per rule: every figure issue carries
+        the value as it was written, the role it was declared under and the
+        reason that role failed, so the message says "0.95 is a proposed level
+        outside the observed range 0.567–1.053 and its note derives no value"
+        instead of restating the policy. Each figure then has exactly three
+        ways out, and they are spelled out once at the end.
+        """
         lines = [
             "[GROUNDING GATE] The previous draft was rejected and was not released to the user.",
             "Correct every issue using the existing structured identity and tool evidence:",
@@ -171,26 +129,34 @@ class _ReleaseMixin:
         # rejects it again and the run burns iterations until the fallback.
         banned: list[str] = []
         for issue in validation.issues:
-            code = issue.get("code")
+            if issue.get("code") not in _REDACTABLE_CODES:
+                continue
             value = issue.get("value")
-            if code in {"numeric_claim_conflict", "numeric_claim_unavailable", "unsourced_symbol_figures", "analysis_claim_unavailable"} and value is not None:
-                symbol = issue.get("symbol") or ""
-                label = f"{value:g}" if isinstance(value, (int, float)) else str(value)
-                banned.append(f"{label} ({symbol})" if symbol else label)
+            if value is None:
+                continue
+            symbol = issue.get("symbol") or ""
+            label = f"{value:g}" if isinstance(value, (int, float)) else str(value)
+            banned.append(f"{label} ({symbol})" if symbol else label)
         if banned:
             deduped = list(dict.fromkeys(banned))
             lines.append(
-                "REMOVE these rejected value(s) entirely - do NOT restate, rephrase, "
-                "or recompute them in any other format: " + ", ".join(deduped) + "."
+                "Every figure above must be either DECLARED with the role it really "
+                "has, REWRITTEN to a value the tools returned, or REMOVED. Do not "
+                "restate a rejected value in another format: " + ", ".join(deduped) + "."
             )
             repeated: list[str] = []
             for prior in self._validations:
                 for prior_issue in prior.get("issues", []):
                     prior_value = prior_issue.get("value")
-                    if isinstance(prior_value, (int, float)):
-                        mark = f"{prior_value:g}"
-                        if any(entry.startswith(mark) for entry in deduped):
-                            repeated.append(mark)
+                    if prior_value is None:
+                        continue
+                    mark = (
+                        f"{prior_value:g}"
+                        if isinstance(prior_value, (int, float))
+                        else str(prior_value)
+                    )
+                    if any(entry.startswith(mark) for entry in deduped):
+                        repeated.append(mark)
             if repeated:
                 lines.append(
                     "These value(s) have now been rejected repeatedly across drafts: "
@@ -200,9 +166,14 @@ class _ReleaseMixin:
                 )
         lines.extend(
             [
-                "If a value is a derived or prospective level (stop, target, entry, etc.), "
-                "you must EITHER show the full derivation with the observed inputs and the "
-                "formula, OR omit it from the draft.",
+                "End the answer with a ```figures``` block declaring every number that "
+                "carries a decimal point, a percent sign, a currency mark or a table "
+                "cell, one per line as `value | role | note | ref`, where role is one "
+                "of observed / derived / proposed / cited / count.",
+                "observed must appear in the tool results; derived needs a note that is "
+                "the arithmetic itself, with one operand this session observed; "
+                "proposed must be derived or lie inside the observed price range; "
+                "cited needs a source in its note; count is not checked.",
                 "Reuse the exact locked symbol and venue.",
                 "Do not attach figures to a symbol no tool call in this session handled; "
                 "report it as not retrieved instead.",
@@ -318,9 +289,7 @@ class _ReleaseMixin:
             for validation in self._validations
             for code in (issue.get("code") for issue in validation.get("issues", []))
         }
-        if issue_codes & {
-            "numeric_claim_unavailable", "numeric_claim_conflict", "unsourced_symbol_figures"
-        }:
+        if issue_codes & _REDACTABLE_CODES:
             if is_zh:
                 return (
                     "我的回答被安全门槛拒绝:草稿引用了本会话未通过工具获取的价格数字,无法核验。"
@@ -433,8 +402,6 @@ class _ReleaseMixin:
         self,
         content: str,
         validation: ValidationResult,
-        *,
-        require_checked_figures: bool = True,
     ) -> str | None:
         """Append a data note when the only defects are missing provenance words.
 
@@ -451,152 +418,105 @@ class _ReleaseMixin:
         appending "562500.SH: price source yahoo" under a draft that reads
         "贵州茅台 最新收盘价 1.171 元" turns a misattribution into a released
         answer with a footnote naming a different instrument. It keeps its
-        model round (base rate: 1 of 27 rejections in the local traces, so
-        nearly all of the saving survives).
+        model round.
 
-        The repair is also declined when the draft carries a price COLUMN the
-        table validator does not key on ("| 档位 | 挂单价 |"): those cells are
-        outside every validator's reach, and the note says where this run's
-        prices came from. Attaching it to a draft holding an unchecked ladder
-        price attests to a figure the gate never saw, in zero model rounds —
-        the round it used to cost was the last chance to drop that figure.
+        The "unchecked price column" veto this used to carry is gone with the
+        surface it guarded. It declined the repair whenever a table held a
+        price column no validator read (``| 档位 | 挂单价 |``), because the
+        note would attest to figures the gate never saw. Every cell of every
+        table is now a measurement-shaped figure the gate checks, so no such
+        column exists.
 
         Args:
             content: The rejected draft.
             validation: Its validation result.
-            require_checked_figures: Decline when an unchecked price column is
-                present. ``redacted_release`` passes False: there the choice
-                is not "repair or one more model round" but "repair or the
-                canned refusal", the revision budget is already spent, and the
-                document it repairs carries the redaction footnote.
 
         Returns:
             The draft with a provenance note appended, or None when the issues
-            are not provenance-only, an unchecked price column is present, or
-            there is no price evidence to cite.
+            are not provenance-only or there is no price evidence to cite.
         """
         codes = {issue.get("code") for issue in validation.issues}
         if not codes or not codes <= _REPAIRABLE_PROVENANCE_CODES:
-            return None
-        if require_checked_figures and self._has_unchecked_price_column(content):
             return None
         note = self._provenance_note(content)
         if note is None:
             return None
         return content.rstrip() + "\n\n" + note
 
-    @staticmethod
-    def _has_unchecked_price_column(content: str) -> bool:
-        """Whether a Markdown table holds a price column no validator reads.
-
-        ``_validate_price_tables`` keys on ``_TABLE_FIELD_ALIASES`` — the OHLC
-        headers — and the prose scan skips every line containing "|". A column
-        headed 挂单价 / 目标价 / Entry price is read by neither.
-
-        Args:
-            content: The draft to inspect.
-
-        Returns:
-            True when such a column carries at least one numeric cell.
-        """
-        lines = content.splitlines()
-        for header, rows, _ in _PolicyMixin._pipe_tables(lines):
-            unchecked = [
-                position
-                for position, cell in enumerate(header)
-                if _PRICE_HEADER_RE.search(cell)
-                and cell.strip().casefold() not in _TABLE_FIELD_ALIASES
-            ]
-            if not unchecked:
-                continue
-            for row in rows:
-                for position in unchecked:
-                    if position < len(row) and _NUMBER_RE.search(row[position]):
-                        return True
-        return False
-
     def redacted_release(self, content: str, validation: ValidationResult) -> str | None:
         """Release the last rejected draft with its unverified figures cut out.
 
         Once the revision budget is spent, the draft is still the analysis the
         user waited through every revision for, and the gate objected to
-        specific figures in specific clauses — not to the trend read, the
-        indicator commentary, or the risk notes around them. Each rejected
-        figure is replaced by a visible marker AT THE SPAN the validator
-        flagged, every other occurrence of the same figure elsewhere in the
-        document is cut with it, the missing provenance words are appended if
-        that is all that remains, and the whole released document — footnote
-        included — is re-validated by the same gate: only text that passes is
-        returned, so nothing the gate rejected reaches the user.
+        specific figures — not to the trend read, the indicator commentary, or
+        the risk notes around them. Each rejected figure is replaced by a
+        visible marker AT ITS OWN SPAN, the missing provenance words are
+        appended if that is all that remains, and the cut document is
+        re-validated by the same gate: only text that passes is returned.
 
-        Fail-closed by construction. None — leave the canned fallback in place —
-        whenever the run never observed a price at all (the draft's numbers then
-        have no basis to stand next to), carries an issue that is not a
-        cut-out-able figure (an identity finding is one), has a flagged clause
-        that cannot be located, or still fails after the cut.
+        The document-wide "sweep every other copy of the figure" second stage
+        is gone. It existed because the old validators only ever looked at
+        clauses carrying a price word, so the same rejected number could stand
+        untouched in a bullet or under a non-OHLC table header while the
+        footnote claimed it had been removed. Every measurement-shaped number
+        is now located and checked individually, so an occurrence that was not
+        flagged is one this gate grounded, and cutting it would remove a
+        figure the evidence supports.
+
+        Fail-closed by construction. None — leave the canned fallback in place
+        — whenever the run never observed a price at all, an issue is not a
+        cut-out-able figure (an identity finding is one), a flagged figure
+        cannot be located, or the document still fails after the cut.
 
         Args:
             content: The rejected draft.
             validation: Its validation result.
 
         Returns:
-            The redacted, re-validated draft followed by a note stating how many
-            figures were removed and the observed range, or None.
+            The redacted, re-validated answer with its declaration block
+            stripped and a note stating how many figures were removed, or None.
         """
         if not self._price_records():
             return None
         text = _strip_release_markers(content)
-        removed = 0
         # Stripping moves every offset after it, and the issue spans are the
         # only anchor the cuts have, so the verdict is retaken on the text the
         # cuts will actually be made in.
-        pending = list(
-            validation.issues
-            if text == content
-            else self._validate(text, record=False).issues
-        )
-        # A validator reports one figure per clause, so cutting it can reveal
-        # the next one on the recheck. Cut, recheck, repeat — bounded, and
-        # every cut is a figure the gate itself flagged.
+        check = validation if text == content else self._validate(text, record=False)
+        removed = 0
         for _ in range(_MAX_REDACTION_PASSES):
-            codes = {issue.get("code") for issue in pending}
-            if not codes or not codes <= (_REDACTABLE_CODES | _REPAIRABLE_PROVENANCE_CODES):
-                return None
-            # Two issues can point at one clause ("unsourced symbol" and the
-            # conflict on the same figure), so cuts are grouped per span:
-            # each clause is rewritten once with every value flagged for it.
-            by_span: dict[tuple[int, int], list[Any]] = {}
-            for issue in pending:
-                if issue.get("code") not in _REDACTABLE_CODES:
-                    continue
-                span = self._issue_span(text, issue)
-                if span is None:
-                    return None
-                by_span.setdefault(span, []).append(issue.get("value"))
-            text, count = self._redact_spans(text, by_span)
-            if count == 0:
-                return None
-            removed += count
-            check = self._validate(text, record=False)
-            if not check.valid:
-                repaired = self.repair_provenance(
-                    text, check, require_checked_figures=False
-                )
-                if repaired is not None:
-                    text = repaired
-                    check = self._validate(text, record=False)
             if check.valid:
                 break
-            pending = list(check.issues)
-        else:
+            codes = {issue.get("code") for issue in check.issues}
+            if not codes <= (_REDACTABLE_CODES | _REPAIRABLE_PROVENANCE_CODES):
+                return None
+            cut, count = self._cut_flagged(text, check.issues)
+            if cut is None:
+                return None
+            if count:
+                text = cut
+                removed += count
+                check = self._validate(text, record=False)
+                if check.valid:
+                    break
+            repaired = self.repair_provenance(text, check)
+            if repaired is None:
+                if count == 0:
+                    return None
+                continue
+            text = repaired
+            check = self._validate(text, record=False)
+        if not check.valid or removed == 0:
             return None
-        released = text.rstrip() + "\n\n" + self._release_note(removed, text)
+        body = check.released_text
+        note = self._release_note(removed, body)
         # The note carries the observed range and the canonical symbols, so it
-        # is answer text too. Validating the body and shipping body+note left
-        # the released document as a whole unchecked, which contradicted the
-        # fail-closed promise in this docstring.
-        if not self._validate(released, record=False).valid:
+        # is answer text too, and it goes through the same gate — in undeclared
+        # mode, since it has no block of its own. Shipping it unchecked would
+        # contradict the fail-closed promise above.
+        if not self._validate(note, record=False).valid:
             return None
+        released = body.rstrip() + "\n\n" + note
         # Recorded beside the drafts but NOT as one: the artifact otherwise
         # held no evidence for the fail-closed promise above, because every
         # recheck on this path is deliberately unrecorded.
@@ -611,21 +531,11 @@ class _ReleaseMixin:
 
     @staticmethod
     def _issue_span(text: str, issue: dict[str, Any]) -> tuple[int, int] | None:
-        """Locate the flagged clause in ``text``.
+        """Locate the flagged figure in ``text``.
 
-        The validators record the clause's character span, which is the only
-        reliable anchor: the stored ``claim`` is normalised (thousands
-        separators stripped, table cells rendered as "label: value"), so
-        ``text.find(claim)`` missed every price above 999 and every metric
-        table outright, and for a bare numeric cell it matched INSIDE a longer
-        number — "1.10" found in "21.10 亿元", rewriting an untouched turnover
-        figure into "2（略※）".
-
-        The substring fallback that used to sit here is gone. Every one of the
-        six redactable-issue construction sites carries a span, so it was
-        reachable only from a hand-built issue, and it carried a documented
-        digit-boundary rationale for a hazard the span had already settled —
-        which is worse than no code, because a reader trusts it.
+        The validators record the character span of the figure itself, which
+        is the only reliable anchor: a stored claim string is normalised and
+        a bare numeric cell ("1.10") matches inside a longer number ("21.10").
 
         Args:
             text: The document the issue was raised against.
@@ -644,6 +554,98 @@ class _ReleaseMixin:
         if 0 <= start <= end <= len(text):
             return start, end
         return None
+
+    def _cut_flagged(
+        self,
+        text: str,
+        issues: Sequence[dict[str, Any]],
+    ) -> tuple[str | None, int]:
+        """Replace every flagged figure with the omission marker.
+
+        An issue naming one figure cuts that figure. An issue with no value —
+        ``unsourced_symbol_figures``, which says "every figure on this line
+        belongs to an instrument no tool handled" — cuts every
+        measurement-shaped figure inside its span.
+
+        Args:
+            text: The document to rewrite.
+            issues: The issues raised against it.
+
+        Returns:
+            ``(rewritten text, figures replaced)``, or ``(None, 0)`` when a
+            flagged issue could not be located and the release must fail closed.
+        """
+        block = parse_figures_block(text)
+        figures = scan_figures(text, block)
+        cuts: set[tuple[int, int]] = set()
+        for issue in issues:
+            if issue.get("code") not in _REDACTABLE_CODES:
+                continue
+            span = self._issue_span(text, issue)
+            if span is None:
+                return None, 0
+            if issue.get("value") is None:
+                cuts.update(
+                    (figure.start, figure.end)
+                    for figure in figures
+                    if figure.shape == "measured"
+                    and span[0] <= figure.start
+                    and figure.end <= span[1]
+                )
+            else:
+                cuts.add(span)
+        if not cuts:
+            return text, 0
+        pieces: list[str] = []
+        cursor = 0
+        count = 0
+        for start, end in sorted(cuts):
+            if start < cursor:
+                continue
+            start = max(cursor, currency_prefix_start(text, start))
+            end = currency_suffix_end(text, end)
+            marker = self._marker_for(text, start)
+            if marker is _REDACTION_MARKER_ZH:
+                # "建议买入价 0.95 元" → "建议买入价（略※）": a full-width
+                # bracket sits flush against the preceding word. Not against a
+                # table pipe, though — "| 第一档 |（略※） |" loses the column's
+                # padding and reads as a broken row.
+                while (
+                    start > cursor
+                    and text[start - 1] == " "
+                    and text[:start - 1].rstrip(" ")[-1:] not in {"|", ""}
+                ):
+                    start -= 1
+            pieces.append(text[cursor:start])
+            pieces.append(marker)
+            cursor = end
+            count += 1
+        pieces.append(text[cursor:])
+        return "".join(pieces), count
+
+    def _marker_for(self, text: str, position: int) -> str:
+        """Pick the omission marker in the script of the line being cut.
+
+        A Chinese user asking about a US name gets English tables, and running
+        one marker over the whole document released
+        "Suggested entry price（略※） per share." A stretch with neither script
+        — a numeric table row — falls back to the user's language, which is
+        what the footnote is written in.
+        """
+        line = ""
+        for candidate, start in _lines_with_offsets(text):
+            if start <= position <= start + len(candidate):
+                line = candidate
+                break
+        if any("\u3400" <= char <= "\u9fff" for char in line):
+            return _REDACTION_MARKER_ZH
+        if any(char.isascii() and char.isalpha() for char in line):
+            return _REDACTION_MARKER_EN
+        return (
+            _REDACTION_MARKER_ZH
+            if self._user_writes_chinese()
+            else _REDACTION_MARKER_EN
+        )
 
     def _release_note(self, removed: int, content: str | None = None) -> str:
         """Explain the redaction to the user, with the observed range.
@@ -667,258 +669,3 @@ class _ReleaseMixin:
             "For an entry price, ask me to derive one with a visible formula from an "
             "observed close or moving average."
         )
-
-    def _redact_spans(
-        self,
-        text: str,
-        by_span: dict[tuple[int, int], list[Any]],
-    ) -> tuple[str, int]:
-        """Cut the flagged figures at their spans, then everywhere else.
-
-        Numbers are located on the masked clause (symbols, dates, prospective
-        levels blanked) so a ticker's digits are never cut. A numeric value is
-        matched numerically, a percent-shaped analysis value textually, and a
-        ``None`` value (a clause attributing figures to an unhandled symbol)
-        cuts every number in that clause.
-
-        The second stage is why the footnote can be believed. Cutting only the
-        flagged clause left the same rejected figure standing in a Markdown
-        table under a non-OHLC header or in a bullet with no price word —
-        neither surface is scanned by the validators — while the footnote
-        asserted it had been removed.
-
-        Two kinds of occurrence are never swept, because the gate has already
-        accepted them where they stand: a figure the ledger observed, and a
-        figure sitting inside a valid formula elsewhere in the document.
-        Without the second, the rejected entry price 0.95 was cut out of
-        "基于 MA20 0.7158 × 0.95 = 0.680", mangling the one derivation the
-        correction prompt asks the model to write (159516.SZ replay,
-        2026-09-09).
-
-        The formula protection is scoped to the formula's own character SPANS.
-        Scoped to the VALUE it protected the rejected figure document-wide:
-        with "基于收盘价 1.171 × 0.95 = 1.112" anywhere in the draft, the same
-        0.95 survived in "| 第一档 | 0.95 |" under a footnote saying one figure
-        had been cut — the exact restatement this second stage exists to
-        remove, protected by the derivation the model wrote beside it.
-
-        A percent literal is protected the same way. Cutting every occurrence
-        of a flagged literal took the accepted one with it: "从 1.110 涨到
-        1.171，区间收益率约 5.5%" is endpoint arithmetic this gate validated,
-        and it was cut and footnoted as unmatched because an unrelated
-        "策略年化波动率 5.5%" was flagged in the next clause.
-
-        Args:
-            text: The document to rewrite.
-            by_span: ``(start, end)`` → the values flagged inside that span.
-
-        Returns:
-            The rewritten text and the number of figures replaced.
-        """
-        swept: list[float] = []
-        swept_literals: list[str] = []
-        pieces: list[str] = []
-        cursor = 0
-        total = 0
-        for (start, end), values in sorted(by_span.items()):
-            if start < cursor:
-                continue
-            cut_all, targets, literals = _redaction_targets(values)
-            swept.extend(targets)
-            swept_literals.extend(literals)
-            replaced, count = self._rewrite_segment(
-                text[start:end], cut_all, targets, literals
-            )
-            pieces.append(text[cursor:start])
-            pieces.append(replaced)
-            total += count
-            cursor = end
-        pieces.append(text[cursor:])
-        text = "".join(pieces)
-        if total == 0 or not (swept or swept_literals):
-            return text, total
-        observed = self._observed_price_values()
-        survivors = [
-            target for target in swept if not _matches_any(target, observed, rel=1e-9)
-        ]
-        if not survivors and not swept_literals:
-            return text, total
-        protected = self._derivation_spans(text)
-        if swept_literals:
-            protected += self._accepted_metric_spans(text)
-        # Line by line, so each replacement takes the marker from the script of
-        # its OWN line. Run over the whole document the second stage picked one
-        # marker for everything, and a Chinese report containing an English
-        # table released "| Entry |（略※） |".
-        extra = 0
-        out: list[str] = []
-        cursor = 0
-        for line, start in _lines_with_offsets(text):
-            out.append(text[cursor:start])
-            local = [
-                (span_start - start, span_end - start)
-                for span_start, span_end in protected
-                if span_start >= start and span_end <= start + len(line)
-            ]
-            rewritten, count = self._rewrite_segment(
-                line, False, survivors, swept_literals, protected=local
-            )
-            out.append(rewritten)
-            extra += count
-            cursor = start + len(line)
-        out.append(text[cursor:])
-        return "".join(out), total + extra
-
-    def _derivation_spans(self, text: str) -> list[tuple[int, int]]:
-        """Where a valid derivation sits in ``text``, in document offsets.
-
-        Args:
-            text: The document about to be swept.
-
-        Returns:
-            The character span of every arithmetically valid,
-            observation-anchored formula in it.
-        """
-        records = self._comparable_price_records()
-        document_symbol = self._symbol_for_claim(text, records)
-        spans: list[tuple[int, int]] = []
-        for line, offset in _lines_with_offsets(text):
-            if not _NUMBER_RE.search(line):
-                continue
-            symbol = self._symbol_for_claim(line, records) or document_symbol
-            for start, end, _, _ in self._derivation_formulas(line, records, symbol):
-                spans.append((offset + start, offset + end))
-        return spans
-
-    def _accepted_metric_spans(self, text: str) -> list[tuple[int, int]]:
-        """Where this gate ACCEPTED a metric figure in ``text``.
-
-        A clause the analysis validator examined — it carries a metric word
-        and a measurement-shaped number — and did not flag is a clause whose
-        figures this gate grounded. Sweeping such a figure out because an
-        unrelated clause states the same percentage cut a validated derivation
-        and footnoted it as unmatched.
-
-        The verdict comes from the validator itself rather than from a second
-        copy of its exemption rules: a clause with no metric word was never
-        examined (a bullet, an unclaimed table column) and is deliberately not
-        protected — that unscanned surface is what the sweep exists for.
-
-        Args:
-            text: The document about to be swept.
-
-        Returns:
-            The character span of every examined-and-accepted metric clause.
-        """
-        flagged = {
-            (int(issue["span"][0]), int(issue["span"][1]))
-            for issue in self._validate(text, record=False).issues
-            if isinstance(issue.get("span"), (list, tuple))
-            and len(issue["span"]) == 2
-        }
-        spans: list[tuple[int, int]] = []
-        for line, offset in _lines_with_offsets(text):
-            for segment, start, end in _clause_spans(line, offset):
-                if not _ANALYSIS_METRIC_RE.search(segment):
-                    continue
-                if not self._measure_numbers(segment):
-                    continue
-                if any(
-                    span_start <= start and end <= span_end
-                    for span_start, span_end in flagged
-                ):
-                    continue
-                spans.append((start, end))
-        return spans
-
-    def _rewrite_segment(
-        self,
-        segment: str,
-        cut_all: bool,
-        targets: Sequence[float],
-        literals: Sequence[str],
-        *,
-        protected: Sequence[tuple[int, int]] = (),
-    ) -> tuple[str, int]:
-        """Replace the wanted figures in one stretch of text with the marker.
-
-        Args:
-            segment: The stretch of the answer to rewrite.
-            cut_all: Cut every number, not only the listed targets.
-            targets: Numeric values to cut.
-            literals: Percent-shaped figures to cut by their written text.
-            protected: Character ranges inside ``segment`` that must survive
-                whatever they contain — a valid formula, or a metric clause
-                this gate accepted. Protection is by POSITION, not by value:
-                the rejected entry price is usually also the multiplier of the
-                correct derivation, and protecting the value protected every
-                restatement of the rejected figure along with it.
-
-        Returns:
-            The rewritten stretch and the number of figures replaced.
-        """
-        if not cut_all and not targets and not literals:
-            return segment, 0
-        # The marker follows the SCRIPT OF THE TEXT BEING CUT, not the user's
-        # message: a Chinese user asking about a US name gets English tables,
-        # and "Suggested entry price（略※） per share." was the result. A
-        # stretch with neither script — a numeric table row — falls back to
-        # the user's language, which is what the footnote is written in.
-        if re.search(r"[\u3400-\u9fff]", segment):
-            marker = _REDACTION_MARKER_ZH
-        elif re.search(r"[A-Za-z]", segment):
-            marker = _REDACTION_MARKER_EN
-        else:
-            marker = (
-                _REDACTION_MARKER_ZH
-                if self._user_writes_chinese()
-                else _REDACTION_MARKER_EN
-            )
-        spans: list[tuple[int, int]] = []
-        if literals:
-            for match in _MEASURE_NUMBER_RE.finditer(segment):
-                normalized = match.group(0).replace(" ", "").replace(",", "")
-                if normalized in literals:
-                    spans.append((match.start(), match.end()))
-        masked = self._masked_candidate_text(segment)
-        for match in _NUMBER_RE.finditer(masked):
-            try:
-                number = float(match.group(0).replace(",", ""))
-            except ValueError:
-                continue
-            if cut_all or _matches_any(number, targets, rel=1e-9):
-                spans.append((match.start(), match.end()))
-        pieces: list[str] = []
-        cursor = 0
-        count = 0
-        for start, end in sorted(set(spans)):
-            if start < cursor:
-                continue
-            if any(
-                keep_start <= start and end <= keep_end
-                for keep_start, keep_end in protected
-            ):
-                continue
-            unit = _UNIT_AFTER_RE.match(segment, end)
-            if unit:
-                end = unit.end()
-            symbol = _CURRENCY_BEFORE_RE.search(segment[cursor:start])
-            if symbol:
-                start = cursor + symbol.start()
-            if marker is _REDACTION_MARKER_ZH:
-                # "建议买入价 0.95 元" → "建议买入价（略※）": a full-width
-                # bracket sits flush against the preceding word. Not against a
-                # table pipe, though — "| 第一档 |（略※） |" loses the column's
-                # padding and reads as a broken row.
-                while (
-                    start > cursor
-                    and segment[start - 1] == " "
-                    and segment[: start - 1].rstrip(" ")[-1:] != "|"
-                ):
-                    start -= 1
-            pieces.append(segment[cursor:start])
-            pieces.append(marker)
-            cursor = end
-            count += 1
-        pieces.append(segment[cursor:])
-        return "".join(pieces), count

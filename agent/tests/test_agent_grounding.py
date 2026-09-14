@@ -1340,7 +1340,9 @@ def test_price_validation_ignores_symbol_date_and_quantity_digits(tmp_path: Path
 
     for draft in (
         "000543.SZ 截至 8 月 3 日收盘价 8.20 CNY（source: tencent）",
-        "000543.SZ 买入价 8.20 CNY（100 股成本 820 CNY；source: tencent）",
+        "000543.SZ 买入价 8.20 CNY（100 股成本 820 CNY；source: tencent）\n\n"
+        "```figures\n8.20 | observed | close | prices\n"
+        "820 | derived | 100 × 8.20 | prices\n```",
         "000543.SZ 建议持有 1–4 周，买入价 8.20 CNY（source: tencent）",
     ):
         result = ledger.validate_final_answer(draft)
@@ -1362,11 +1364,13 @@ def test_price_validation_still_rejects_a_quote_outside_observed_range(
 def test_price_validation_ignores_score_indicator_and_window_digits(
     tmp_path: Path,
 ) -> None:
-    """Confidence scores, indicator readings, and lookback windows are not prices (#1001).
+    """A conviction score, a window length and a lookback are bare integers.
 
     A well-formed verdict line carries a conviction score, the moving-average
-    windows it cites, and an oscillator reading. Compared against an OHLC range
-    every one of them contradicts it, which rejected drafts that were correct.
+    windows it cites and a horizon. Every one of them used to be compared
+    against the OHLC range unless a mask named it — a labelled-score mask, a
+    quantity-with-unit mask, an indicator-name mask. None of them is
+    measurement-shaped, so none of them is checked now and no mask is needed.
     """
     ledger = _screened_ledger(tmp_path)
 
@@ -1377,143 +1381,92 @@ def test_price_validation_ignores_score_indicator_and_window_digits(
         # The hyphenated English compound the quantity mask used to stall on.
         "000543.SZ 现价 8.20 CNY 距 52-week high 有距离（source: tencent）",
         "000543.SZ 收盘价 8.20 CNY 低于其 20/50/200-day 均线（source: tencent）",
-        # An indicator reading sharing a clause with a genuine quote.
-        "000543.SZ 现价 8.20 CNY 而 RSI 46.7（source: tencent）",
     ):
         result = ledger.validate_final_answer(draft)
         assert result.valid is True, (draft, result.issues)
 
 
-def test_price_validation_ignores_formula_variable_digits(tmp_path: Path) -> None:
-    """A price word used as a formula variable is not an asserted price (#1354).
+def test_an_indicator_reading_is_checked_against_the_call_it_names(
+    tmp_path: Path,
+) -> None:
+    """An RSI reading is a number like any other: declared, and then verified.
 
-    The gate uses one structural rule, not a catalogue of phrasings: a number
-    after a price word is a claimed value only when nothing formula-like sits
-    between them. A closed marker set — comparison/division operators or an
-    indicator identifier followed by digits — marks the number an operand; an
-    observation binder ("was", "at", 报收/收于/…) after that marker re-attaches it
-    to the price word, so "close above SMA50 and was 2500" stays a claim while
-    "close/SMA50 > 1" claims nothing. An ASCII sentence boundary (" . ") ends
-    the price word's reach, so a bare year two sentences later is not claimed.
+    It used to be masked by NAME — "RSI 46.7" was exempt because "rsi" was in
+    a list — so a fabricated oscillator reading was never checked at all. It is
+    measurement-shaped, so it must be declared; a ``ref`` naming the call that
+    produced it scopes the check to that call's own results.
     """
     ledger = _screened_ledger(tmp_path)
+    ledger.ingest_tool_result(
+        tool_name="technical_indicators",
+        arguments={"symbol": "000543.SZ"},
+        result=json.dumps(
+            {"ok": True, "symbol": "000543.SZ", "indicators": {"rsi_14": 46.7}}
+        ),
+        call_id="ti1",
+        success=True,
+    )
 
-    for draft in (
-        # Division + comparison: window and threshold, not a price.
-        "000543.SZ close/SMA50 > 1 时买入（source: tencent）",
-        # Signal value after a signal word / arrow / 触发.
-        "000543.SZ close acima da EMA30 dispara sinal +1（source: tencent）",
-        "000543.SZ close above EMA20 -> +1（source: tencent）",
-        "000543.SZ 收盘价上穿MA20 触发 +1 信号（source: tencent）",
-        # Plain comparison against a level, not a quote.
-        "000543.SZ close > 1 时买入（source: tencent）",
-        # Indicator reading with a directional connective.
-        "000543.SZ close/SMA50 > 1 and RSI below 30（source: tencent）",
-        # Colon after the signal word (ASCII '.' is not a clause separator,
-        # so "Sinal: +1" can share a clause with the price word).
-        "000543.SZ close acima da EMA30. Sinal: +1（source: tencent）",
-        # Indicator identifier + digits between the price word and the number,
-        # even when the operator is spelled out in prose.
-        "000543.SZ close vs SMA20 maior que 1（source: tencent）",
-        "000543.SZ close minus SMA20 fallen below 0（source: tencent）",
-    ):
-        result = ledger.validate_final_answer(draft)
-        assert result.valid is True, (draft, result.issues)
+    grounded = ledger.validate_final_answer(
+        "000543.SZ 现价 8.20 CNY 而 RSI 46.7（source: tencent）\n\n"
+        "```figures\n"
+        "8.20 | observed | close | prices\n"
+        "46.7 | observed | rsi_14 | ti1\n"
+        "```"
+    )
+    assert grounded.valid is True, grounded.issues
 
-    # Strict-narrowing bar: the formula language must not launder an observed
-    # value. Verified adversarially; each shape stays a claim.
-    for launder in (
-        # no operator, no indicator digits: the plain claim
-        "000543.SZ close was 2500（source: tencent）",
-        # digit-carrying connector bridging to an indicator
-        "000543.SZ close was 2500 and SMA50 2450（source: tencent）",
-        # observation verb trailing the formula in the same clause
-        "000543.SZ close above SMA50 and was 2500 yesterday（source: tencent）",
-        # at-attached level trailing the formula
-        "000543.SZ close above SMA50 at 2450（source: tencent）",
-        # equality claim, not a formula
-        "000543.SZ close = 2500（source: tencent）",
-        # second price word after a comma stays gated
-        "000543.SZ close above SMA50, and closed at 2500 yesterday（source: tencent）",
-        # Chinese observation syntax
-        "000543.SZ 收盘价报收 2500（source: tencent）",
-        # multi-digit value after a signal word is a price, not a signal
-        "000543.SZ close signal 2500（source: tencent）",
-        # "above" with a price word is a claim, not an indicator reading
-        "000543.SZ close above 2500（source: tencent）",
-    ):
-        result = ledger.validate_final_answer(launder)
-        assert result.valid is False, launder
-        assert "numeric_claim_conflict" in {issue["code"] for issue in result.issues}
-
-
-def test_direct_price_values_structural_rule() -> None:
-    """The structural rule decides operand vs. claim at the number level (#1354)."""
-    def extract(text: str) -> list[float]:
-        """Values only; the production path also reads each figure's offset."""
-        return [value for value, _, _ in GroundingLedger._direct_price_values(text)]
-
-    # Formula operands — a marker between the price word and the number.
-    for text in (
-        "close/SMA50 > 1.0",
-        "close acima da EMA30 dispara sinal +1",
-        "收盘价上穿MA20 触发 +1 信号",
-        "close/SMA50 > 1 and RSI below 30",
-        "close vs SMA20 maior que 1",
-        "close minus SMA20 fallen below 0",
-        # CJK-adjacent indicator (no ASCII space): the marker's \b must not
-        # treat a CJK letter as a word character, or 上穿MA20 is invisible.
-        "收盘价上穿SMA20 2500",
-    ):
-        assert extract(text) == [], text
-    # Observed values — no marker, or an observation binder after the marker.
-    assert extract("close was 2500") == [2500.0]
-    assert extract("close above 2500") == [2500.0]
-    assert extract("close = 2500") == [2500.0]
-    assert extract("close above SMA50 and was 2500 yesterday") == [2500.0]
-    assert extract("close above SMA50 at 2450") == [2450.0]
-    assert extract("收盘价报收 2500") == [2500.0]
-    # Sentence boundary: the price word cannot reach a later sentence.
-    assert extract("close was 210. In 2024 the market rallied") == [210.0]
-    assert extract("close. Sinal: 2500") == []
+    invented = ledger.validate_final_answer(
+        "000543.SZ 现价 8.20 CNY 而 RSI 71.2（source: tencent）\n\n"
+        "```figures\n"
+        "8.20 | observed | close | prices\n"
+        "71.2 | observed | rsi_14 | ti1\n"
+        "```"
+    )
+    assert invented.valid is False
+    assert [issue["value"] for issue in invented.issues] == ["71.2"]
 
 
 def test_price_validation_ignores_short_dates_and_percent_ranges(
     tmp_path: Path,
 ) -> None:
-    """A year-less date and a percentage range are not prices (#983).
+    """A year-less date is a pair of bare integers; a percentage is declared.
 
-    Taken from the trace attached to #983: "8/5 收盘 5.97" contributed 8 and 5,
-    and "1–2%" contributed its lower bound, because the percent tail check only
-    masks the number the sign touches.
+    Taken from the trace attached to #983: "8/5 收盘 5.97" contributed 8 and 5
+    as candidate prices. Neither is measurement-shaped, so neither is checked
+    and the short-date mask is gone. The percentage beside it IS
+    measurement-shaped and states a distance the run did not observe, so it is
+    declared rather than masked.
     """
     ledger = _screened_ledger(tmp_path)
 
     for draft in (
         "000543.SZ 8/5 收盘价 8.20 CNY（source: tencent）",
-        "000543.SZ 现价 8.20 CNY，距阻力位仅 1–2%（source: tencent）",
-        "000543.SZ 现价 8.20 CNY，距阻力位仅 1-2%（source: tencent）",
+        "000543.SZ 现价 8.20 CNY，距阻力位仅 1–2%（source: tencent）\n\n"
+        "```figures\n8.20 | observed | close | prices\n"
+        "1% | count | 区间下界\n2% | count | 区间上界\n```",
     ):
         result = ledger.validate_final_answer(draft)
         assert result.valid is True, (draft, result.issues)
 
 
-def test_numbers_without_dates_or_percent_masks_cjk_glued_iso_dates() -> None:
-    """An ISO date running into CJK text is one date, not three prices (#1122).
+def test_an_undeclared_percentage_is_reported_not_masked(tmp_path: Path) -> None:
+    """The lower side: a percentage with no declaration is named, not ignored.
 
-    ``\b`` is Unicode-aware, so CJK letters count as word characters and
-    ``(2026-07-14最低)`` had no boundary after ``14`` -- the date survived and
-    contributed 2026/7/14 as candidate prices. ``re.ASCII`` restores the byte
-    boundary so the whole date masks while a genuine quote beside it stays.
+    A percentage-range mask made "距阻力位仅 1–2%" invisible, and with it every
+    other percentage written the same way. The figure is now reported by value
+    so the correction prompt can ask for the one declaration that settles it.
     """
-    assert (
-        GroundingLedger._numbers_without_dates_or_percent("若跌破观测支撑位0.980 CNY (2026-07-14最低)")
-        == []
+    ledger = _screened_ledger(tmp_path)
+
+    result = ledger.validate_final_answer(
+        "000543.SZ 现价 8.20 CNY，年化波动率 41%（source: tencent）\n\n"
+        "```figures\n8.20 | observed | close | prices\n```"
     )
-    assert (
-        GroundingLedger._numbers_without_dates_or_percent("收盘价 8.20 CNY 自2026-07-14以来最低")
-        == [8.2]
-    )
+
+    assert result.valid is False
+    assert [issue["code"] for issue in result.issues] == ["figure_undeclared"]
+    assert [issue["value"] for issue in result.issues] == ["41%"]
 
 
 def test_iso_date_running_into_cjk_text_is_still_masked(tmp_path: Path) -> None:
@@ -1540,17 +1493,17 @@ def test_short_date_mask_does_not_swallow_a_plain_ratio(tmp_path: Path) -> None:
 
     assert result.valid is False
     assert [issue["code"] for issue in result.issues] == ["numeric_claim_conflict"]
-    assert [issue["value"] for issue in result.issues] == [42.0]
+    assert [issue["value"] for issue in result.issues] == ["42.00"]
 
 
-def test_masked_window_does_not_shield_a_wrong_quote_in_the_same_clause(
+def test_a_bare_integer_beside_a_wrong_quote_does_not_shield_it(
     tmp_path: Path,
 ) -> None:
-    """The new masks are span-local: a bad quote beside one is still caught (#1001).
+    """The lower side of the shape rule (#1001).
 
-    This is the lower side of the guard. Masking ``52-week`` must remove only
-    the window length; a contradicted price in the same clause has to survive
-    the mask and reject the draft, or the fix would have bought precision by
+    Leaving a window length or a conviction score unchecked must remove only
+    that number; a contradicted price in the same sentence has to survive and
+    reject the draft, or the relaxation would have bought precision by
     silencing the check it exists to run.
     """
     ledger = _screened_ledger(tmp_path)
@@ -1558,11 +1511,11 @@ def test_masked_window_does_not_shield_a_wrong_quote_in_the_same_clause(
     for draft in (
         "000543.SZ 52-week high 之下，收盘价 42.00 CNY（source: tencent）",
         "000543.SZ CONFIDENCE: 6 REASON: 收盘价 42.00 CNY（source: tencent）",
-        "000543.SZ RSI 46.7，收盘价 42.00 CNY（source: tencent）",
     ):
         result = ledger.validate_final_answer(draft)
         assert result.valid is False, draft
         assert [issue["code"] for issue in result.issues] == ["numeric_claim_conflict"], draft
+        assert [issue["value"] for issue in result.issues] == ["42.00"], draft
 
 
 def test_screening_run_reaches_a_final_answer_through_the_agent_loop(
@@ -1594,7 +1547,9 @@ def test_screening_run_reaches_a_final_answer_through_the_agent_loop(
 
     assert market.calls == 1
     validation = agent._grounding.validate_final_answer(
-        "000543.SZ 买入价 8.20 CNY（100 股成本 820 CNY；source: tencent）"
+        "000543.SZ 买入价 8.20 CNY（100 股成本 820 CNY；source: tencent）\n\n"
+        "```figures\n8.20 | observed | close | prices\n"
+        "820 | derived | 100 × 8.20 | prices\n```"
     )
     assert validation.valid is True, validation.issues
 
@@ -1657,229 +1612,6 @@ def test_a_date_that_names_a_different_day_is_still_unavailable(tmp_path: Path) 
     assert "numeric_claim_unavailable" in {issue["code"] for issue in result.issues}
 
 
-# ---------------------------------------------------------------------------
-# #983: a trading plan quotes levels it does not claim to have observed.
-#
-# The committee report attached to that issue was refused for its own entry
-# triggers and target zones. With no price evidence yet in the parent session
-# they came back as numeric_claim_unavailable; once the run fetched prices the
-# same numbers came back as numeric_claim_conflict. One false positive, two
-# codes.
-# ---------------------------------------------------------------------------
-
-_PLAN_LEVELS_FROM_983 = [
-    "- **转多信号：** 收盘 ≥6.45 且量 ≥35M手",
-    "- **转空强化：** 收盘 <5.36 且 3 日不收复 → 年线 4.63 成目标区",
-    "| B 破位空 | 任意收盘 <5.36 | 收盘 ≥5.75 且量 ≥20M手 |",
-    "目标位 6.80，止损 5.20",
-    "若收盘 5.36 则减仓",
-    "target price 6.80 with stop-loss 5.20",
-]
-
-
-@pytest.mark.parametrize("segment", _PLAN_LEVELS_FROM_983, ids=range(len(_PLAN_LEVELS_FROM_983)))
-def test_plan_levels_are_not_read_as_observed_price_claims(segment: str) -> None:
-    """A trigger, a target and a hypothesis assert nothing about observed data."""
-    assert GroundingLedger._numbers_without_dates_or_percent(segment) == []
-
-
-# The other side of the same guard. Every entry here is an assertion about what
-# the instrument did, and each must survive the mask above — otherwise the
-# relaxation is a way to state a price without being checked.
-_ASSERTIONS_THAT_MUST_STAY_CHECKED = [
-    ("8/5 收盘 5.97", [5.97]),
-    ("现价 5.97", [5.97]),
-    ("收盘价为 6.03", [6.03]),
-    ("the close was 6.03", [6.03]),
-    # Span-local: the target is masked, the quote beside it is not.
-    ("现价 5.97，目标位 6.45", [5.97]),
-    # A conditional opener must not reach back over a quote already made.
-    ("收盘 6.03，若跌破 5.36 减仓", [6.03]),
-    ("开盘 6.80 最高 7.18 最低 6.68", [6.80, 7.18, 6.68]),
-]
-
-
-@pytest.mark.parametrize(
-    "segment,expected",
-    _ASSERTIONS_THAT_MUST_STAY_CHECKED,
-    ids=[c[0][:24] for c in _ASSERTIONS_THAT_MUST_STAY_CHECKED],
-)
-def test_plan_level_mask_leaves_observed_quotes_checked(
-    segment: str, expected: list[float],
-) -> None:
-    assert GroundingLedger._numbers_without_dates_or_percent(segment) == expected
-
-
-# A currency token between the anchor and the number used to break every
-# prospective branch: "收盘 <$2.86" left 2.86 to be compared against observed
-# OHLC, "目标位 $6.80" left 6.8, and "trigger at $119.68" left 119.68. These
-# are levels, not observed quotes, so each must mask entirely.
-_CURRENCY_PREFIXED_PLAN_LEVELS = [
-    "收盘 <$2.86",
-    "目标位 $6.80，止损位 C$5.20",
-    "trigger at $119.68",
-    "支撑位 $190.12",
-    "target price of $6.80",
-    "收盘 ≥ $135 且低点 > $119.68",
-]
-
-
-@pytest.mark.parametrize(
-    "segment", _CURRENCY_PREFIXED_PLAN_LEVELS, ids=range(len(_CURRENCY_PREFIXED_PLAN_LEVELS))
-)
-def test_currency_prefixed_plan_levels_are_not_read_as_observed_prices(segment: str) -> None:
-    """A currency-prefixed trigger or target is prospective, not observed."""
-    assert GroundingLedger._numbers_without_dates_or_percent(segment) == []
-
-
-# A historical reference names a price the instrument once traded at. The
-# SPCX.US weekly plan quoted "6/16 ATH 225.64" next to the 8/12 high 149.60;
-# 225.64 fell outside the session's observed OHLC range (105.11–149.6) and was
-# rejected as a conflict even though it is a reference, not a current quote.
-_REFERENCE_LEVEL_SEGMENTS = [
-    ("8/12 高 149.60 为 6/16 ATH 225.64 以来最高", [149.60]),
-    ("8/12 高 149.60 为 6/16 历史高点 225.64 以来最高", [149.60]),
-    ("8/12 高 149.60 为 6/16 all-time high 225.64 以来最高", [149.60]),
-    ("52W 高 543.14", []),
-    ("52-week low of $190.12", []),
-    ("52W low (C$7.27)", []),
-    ("历史最低 $60.82", []),
-    ("ATH (C$7.31)", []),
-]
-
-
-@pytest.mark.parametrize(
-    "segment,expected",
-    _REFERENCE_LEVEL_SEGMENTS,
-    ids=[c[0][:28] for c in _REFERENCE_LEVEL_SEGMENTS],
-)
-def test_reference_levels_are_not_read_as_observed_price_claims(
-    segment: str, expected: list[float],
-) -> None:
-    """An ATH/52-week/historical extreme is a reference, not a current quote."""
-    assert GroundingLedger._numbers_without_dates_or_percent(segment) == expected
-
-
-# A validation report cites a plan file by line number ("~line 206",
-# "第 206 行"). The number is a document location, not a price, and was
-# compared against observed OHLC as a claim before this mask existed.
-_LINE_REFERENCE_SEGMENTS = [
-    "**文档 ~line 206「8/12 高 149.60 为 6/16 ATH 225.64 以来最高」不成立",
-    "line 206",
-    "lines 206-208",
-    "第 206 行",
-    "第 206–208 行",
-    "行 206",
-]
-
-
-@pytest.mark.parametrize(
-    "segment", _LINE_REFERENCE_SEGMENTS, ids=range(len(_LINE_REFERENCE_SEGMENTS))
-)
-def test_line_number_references_are_not_read_as_price_claims(segment: str) -> None:
-    """A line citation is a document location, not an observed price."""
-    if segment.startswith("**文档"):
-        # The quoted 149.60 beside the line citation stays checked.
-        assert GroundingLedger._numbers_without_dates_or_percent(segment) == [149.6]
-    else:
-        assert GroundingLedger._numbers_without_dates_or_percent(segment) == []
-
-
-# Validation summaries count findings: "1 项事实错误", "2 项不一致", and
-# "16 个交易日" are count nouns, not prices. The count survived extraction
-# and was rejected against the observed OHLC range before 项/个交易日 joined
-# the quantity units.
-_COUNT_NOUN_SEGMENTS = [
-    ("- ❌ **1 项事实错误**:", []),
-    ("⚠️ **2 项不一致**", []),
-    ("3 项", []),
-    ("16 个交易日", []),
-    # 149.60 is masked here too: "高点高于 149.60" is a comparison level.
-    ("6/17–7/10 有 16 个交易日高点高于 149.60", []),
-]
-
-
-@pytest.mark.parametrize(
-    "segment,expected",
-    _COUNT_NOUN_SEGMENTS,
-    ids=[c[0][:22] for c in _COUNT_NOUN_SEGMENTS],
-)
-def test_count_nouns_are_not_read_as_price_claims(
-    segment: str, expected: list[float],
-) -> None:
-    """项/个交易日 counts are quantities, not prices."""
-    assert GroundingLedger._numbers_without_dates_or_percent(segment) == expected
-
-
-_SINCE_REFERENCE_SEGMENTS = [
-    ("正确为 7/10(150.57)以来最高", []),
-    ("收 146.15 为 7/9(收 152.16)以来最高", [146.15]),
-    ("highest since 7/10 (150.57)", []),
-    # The current bar's own high is not a since-reference and stays checked.
-    ("8/12 高 149.60 为 6/16 ATH 225.64 以来最高", [149.6]),
-]
-
-
-@pytest.mark.parametrize(
-    "segment,expected",
-    _SINCE_REFERENCE_SEGMENTS,
-    ids=[c[0][:24] for c in _SINCE_REFERENCE_SEGMENTS],
-)
-def test_since_references_are_not_read_as_observed_price_claims(
-    segment: str, expected: list[float],
-) -> None:
-    """A date-anchored "highest since" value is a reference, not a quote."""
-    assert GroundingLedger._numbers_without_dates_or_percent(segment) == expected
-
-
-_NUMBERED_HEADING_SEGMENTS = [
-    "### 6. 关键价位/旁证核验",
-    "## 12. 结论",
-    "# 3. 身份与数据源",
-    "### 8/13 周中判定",
-    # The section number masks; the observed quote beside it stays checked.
-    ("### 6. 8/12 高 149.60 为 6/16 ATH 以来最高", [149.6]),
-]
-
-
-@pytest.mark.parametrize(
-    "segment", _NUMBERED_HEADING_SEGMENTS, ids=range(len(_NUMBERED_HEADING_SEGMENTS))
-)
-def test_numbered_headings_are_not_read_as_price_claims(segment: str) -> None:
-    """A markdown heading number is a section index, not a price."""
-    if isinstance(segment, tuple):
-        segment, expected = segment
-        assert GroundingLedger._numbers_without_dates_or_percent(segment) == expected
-    else:
-        assert GroundingLedger._numbers_without_dates_or_percent(segment) == []
-
-
-_RATIO_AND_FX_SEGMENTS = [
-    ("TO 报价实际是按 6:1 平价锚定的", []),
-    ("25/25 行 OHLCV、25/25 项派生百分比、7/7 日 CDR 6:1 折算", []),
-    ("远小于当前 USD/CAD≈1.36 的量级", []),
-    ("汇率 1.36", []),
-    # `EUR/USD` is this project's canonical forex symbol, so an asserted pair
-    # rate is a quote and stays checked; only an approximated conversion basis
-    # is masked. Masking both would let an invented FX rate through the gate.
-    ("usd/cad=1.36", [1.36]),
-    ("USD/CAD 1.36", [1.36]),
-    ("USD/CAD ≈ 1.36", []),
-]
-
-
-@pytest.mark.parametrize(
-    "segment,expected",
-    _RATIO_AND_FX_SEGMENTS,
-    ids=[c[0][:24] for c in _RATIO_AND_FX_SEGMENTS],
-)
-def test_ratios_and_fx_rates_are_not_read_as_price_claims(
-    segment: str, expected: list[float],
-) -> None:
-    """A conversion ratio or forex rate is not an instrument quote."""
-    assert GroundingLedger._numbers_without_dates_or_percent(segment) == expected
-
-
 def test_plan_level_mask_does_not_shield_a_wrong_quote_end_to_end(tmp_path: Path) -> None:
     """The end-to-end gate still rejects a fabricated quote beside a plan level."""
     ledger = _screened_ledger(tmp_path)
@@ -1893,15 +1625,37 @@ def test_plan_level_mask_does_not_shield_a_wrong_quote_end_to_end(tmp_path: Path
 
 
 def test_plan_level_alone_reaches_a_valid_answer(tmp_path: Path) -> None:
-    """A plan stated without quoting an observed price passes the numeric gate."""
+    """A proposed level passes inside the observed range, or with a derivation.
+
+    This replaces the prospective-level mask, which exempted any number a
+    target/stop/trigger word introduced and therefore exempted any number at
+    all once the model used the right word. A proposed level is now checked:
+    it is anchored either by the range this session actually observed, or by
+    arithmetic on it.
+    """
     ledger = _screened_ledger(tmp_path)
 
-    result = ledger.validate_final_answer(
-        "000543.SZ 收盘价 8.20 CNY（source: tencent）。"
-        "转多信号：收盘 ≥9.10；转空强化：收盘 <7.40 且 3 日不收复 → 目标位 6.90。"
+    inside_range = ledger.validate_final_answer(
+        "000543.SZ 收盘价 8.20 CNY（source: tencent）。转多信号：收盘 ≥8.40。\n\n"
+        "```figures\n8.20 | observed | close | prices\n"
+        "8.40 | proposed | 转多触发\n```"
     )
+    assert inside_range.valid is True, inside_range.issues
 
-    assert result.valid is True, result.issues
+    derived_outside = ledger.validate_final_answer(
+        "000543.SZ 收盘价 8.20 CNY（source: tencent）。目标位 9.02。\n\n"
+        "```figures\n8.20 | observed | close | prices\n"
+        "9.02 | proposed | 8.20 × 1.10 | prices\n```"
+    )
+    assert derived_outside.valid is True, derived_outside.issues
+
+    unanchored = ledger.validate_final_answer(
+        "000543.SZ 收盘价 8.20 CNY（source: tencent）。目标位 42.00。\n\n"
+        "```figures\n8.20 | observed | close | prices\n"
+        "42.00 | proposed | 目标\n```"
+    )
+    assert unanchored.valid is False
+    assert [issue["reason"] for issue in unanchored.issues] == ["outside_observed_range"]
 
 
 def _spcx_us_ledger(tmp_path: Path) -> GroundingLedger:
@@ -1983,28 +1737,75 @@ def _spcx_us_ledger(tmp_path: Path) -> GroundingLedger:
 
 
 def test_reference_level_and_currency_thresholds_pass_end_to_end(tmp_path: Path) -> None:
-    """The SPCX.US verdict prose passes once references and thresholds mask."""
+    """The SPCX.US verdict prose passes once its figures are declared.
+
+    Every number here used to need a mask of its own: an ATH mask for 225.64,
+    a currency-prefixed-threshold mask for $135 and $119.68, a since-reference
+    mask for the whole clause. The historical extreme is now a cited figure —
+    the run never observed June — and the thresholds are bare integers or
+    proposed levels.
+    """
     ledger = _spcx_us_ledger(tmp_path)
 
     result = ledger.validate_final_answer(
         "SPCX.US 8/10 收 138.74 USD、8/12 高 149.60 USD（source: yahoo）。"
         "8/12 高 149.60 为 6/16 ATH 225.64 以来最高；"
-        "8/10 收盘 138.74 ≥ $135 且 ≥ $119.68 触发成立。"
+        "8/10 收盘 138.74 高于 $135.00 且高于 $119.68。\n\n"
+        "```figures\n"
+        "138.74 | observed | close 2026-08-10 | prices\n"
+        "149.60 | observed | high 2026-08-12 | prices\n"
+        "225.64 | cited | 6/16 盘中历史高点，本会话未取\n"
+        "135.00 | proposed | 阈值\n"
+        "119.68 | proposed | 阈值\n"
+        "```"
     )
 
     assert result.valid is True, result.issues
 
 
+def test_a_historical_extreme_may_not_pose_as_an_observed_print(
+    tmp_path: Path,
+) -> None:
+    """The lower side: 225.64 is admissible as a citation, never as a quote.
+
+    The reference-level mask exempted it from the price comparison entirely,
+    which also exempted anything else an "ATH"/"52W" spelling introduced. The
+    same number declared observed is now compared against the run's own bars
+    and rejected.
+    """
+    ledger = _spcx_us_ledger(tmp_path)
+
+    result = ledger.validate_final_answer(
+        "SPCX.US 8/12 高 149.60 USD（source: yahoo），历史高点 225.64 USD。\n\n"
+        "```figures\n"
+        "149.60 | observed | high | prices\n"
+        "225.64 | observed | ATH | prices\n"
+        "```"
+    )
+
+    assert result.valid is False
+    assert [issue["value"] for issue in result.issues] == ["225.64"]
+    assert [issue["reason"] for issue in result.issues] == ["not_in_referenced_call"]
+
+
 def test_validation_summary_with_counts_and_line_cites_passes_end_to_end(
     tmp_path: Path,
 ) -> None:
-    """A validation verdict naming counts and line citations passes the gate."""
+    """A verdict naming counts and line citations passes with no mask at all.
+
+    "1 项事实错误", "~line 206" and "16 个交易日" each had a mask written for
+    them. All three are bare integers, so all three are simply not checked.
+    """
     ledger = _spcx_us_ledger(tmp_path)
 
     result = ledger.validate_final_answer(
         "SPCX.US 核验(USD, source: yahoo):❌ 1 项事实错误 — "
         "文档 ~line 206「8/12 高 149.60 为 6/16 ATH 以来最高」不成立,"
-        "6/17–7/10 有 16 个交易日高点高于 149.60,正确为 7/10(150.57)以来最高。"
+        "6/17–7/10 有 16 个交易日高点高于 149.60,正确为 7/10(150.57)以来最高。\n\n"
+        "```figures\n"
+        "149.60 | observed | high 2026-08-12 | prices\n"
+        "150.57 | cited | 7/10 盘中高点，本会话未取\n"
+        "```"
     )
 
     assert result.valid is True, result.issues
@@ -2371,10 +2172,10 @@ def test_fullwidth_parentheses_do_not_split_symbol_from_figure(
 def test_unsourced_symbol_without_a_figure_stays_silent(tmp_path: Path) -> None:
     """#1260 guard arm: figure co-presence is what the gate checks.
 
-    The regression test above pins that the gate fires when symbol and figure
-    share a clause. This arm pins the inverse: an unsourced symbol with NO
-    nearby figure must not fire unsourced_symbol_figures, so the gate's
-    figure-presence guard (_numbers_without_dates_or_percent) cannot be
+    The regression test above pins that the gate fires when a symbol and a
+    figure share a line. This arm pins the inverse: an unsourced symbol with
+    NO measurement-shaped figure beside it must not fire
+    unsourced_symbol_figures, so the check's figure-presence guard cannot be
     dropped without this test failing.
     """
     ledger = GroundingLedger(
@@ -2629,182 +2430,38 @@ def test_markdown_list_marker_mask_does_not_weaken_contradiction_check(
 
     codes = [issue["code"] for issue in result.issues]
     assert "numeric_claim_conflict" in codes
-    assert [issue["value"] for issue in result.issues if issue["code"] == "numeric_claim_conflict"] == [42.0]
+    assert [
+        issue["value"] for issue in result.issues
+        if issue["code"] == "numeric_claim_conflict"
+    ] == ["42.00"]
 
 
-@pytest.mark.parametrize(
-    "segment",
-    [
-        "买入股数 = 初始资金 × (1 - 单边成本率) / 期初收盘价",
-        "期末市值 = 买入股数 × 期末收盘价 × (1 - fee_rate)",
-        "net proceeds = shares * closing price * (1 - transaction_rate)",
-    ],
-)
-def test_rate_formula_identity_is_not_read_as_a_price(segment: str) -> None:
-    """The identity in ``1 - rate`` is arithmetic, not a one-unit quote."""
-    assert GroundingLedger._numbers_without_dates_or_percent(segment) == []
-
-
-def test_rate_formula_mask_does_not_hide_an_observed_one_unit_quote() -> None:
-    """A genuine price of 1 remains checked outside a rate expression."""
-    assert GroundingLedger._numbers_without_dates_or_percent("closing price = 1 CNY") == [1.0]
-
-
-def test_in_text_decimal_survives_list_marker_mask(
+def test_in_text_decimal_is_never_read_as_a_list_marker(
     tmp_path: Path,
 ) -> None:
-    """An ordinary decimal like 1.5 (digit after the dot) is never a list marker (#BUGS-1).
+    """An ordinary decimal like 1.5 (digit after the dot) is not an ordinal.
 
-    The mask only matches a digit run at line start followed by "." or ")" and
-    whitespace, so a genuine in-text decimal must remain a candidate price.
+    The line-leading ordinal exemption requires punctuation followed by
+    whitespace, so a genuine in-text decimal stays a figure the gate checks —
+    and a proposed level far under the observed range is rejected rather than
+    swallowed by the exemption.
     """
     ledger = _screened_ledger(tmp_path)
-    symbol = "000543.SZ"
 
-    for draft in (
-        f"{symbol} 目标价 1.5 CNY，收盘价 8.20 CNY（source: tencent）",
-        f"{symbol} 变动 0.03 CNY，收盘价 8.20 CNY（source: tencent）",
-    ):
-        result = ledger.validate_final_answer(draft)
-        assert result.valid is True, (draft, result.issues)
-
-
-def test_order_level_prices_are_not_observed_quotes(tmp_path: Path) -> None:
-    """GTC order limits (100 @ $3.50) are prospective, not observed prices.
-
-    Regression for the RXRX run: the draft "两档 GTC (100 @ $3.50 / 100 @ $4.00)
-    均未触发 (周高 $3.42 < $3.50)" was rejected with numeric_claim_conflict for
-    100, 3.5 and 4.0 against the observed OHLC range. Order levels are levels,
-    like targets/stops, and share counts are quantities - neither is a claim
-    about an observed quote.
-    """
-    raw = tmp_path / "data" / "raw"
-    raw.mkdir(parents=True)
-    (raw / "RXRX_US.csv").write_text(
-        "Date,Open,High,Low,Close\n"
-        "2026-08-07,3.25,3.26,3.18,3.20\n"
-        "2026-08-08,3.10,3.42,3.05,3.35\n",
-        encoding="utf-8",
-    )
-    ledger = GroundingLedger(
-        run_dir=tmp_path,
-        user_message="请分析 RXRX.US 并更新周报",
-    )
-    ledger.ingest_tool_result(
-        tool_name="search_symbol",
-        arguments={"query": "RXRX"},
-        result=json.dumps({
-            "ok": True,
-            "data": {
-                "candidates": [
-                    {"symbol": "RXRX.US", "name": "Recursion Pharmaceuticals", "market": "us",
-                     "type": "equity", "exchange": "NMS", "source": "yahoo"},
-                ]
-            },
-        }),
-        call_id="lock1",
-        success=True,
-    )
-
-    answer = (
-        "RXRX.US（yahoo，USD）本周高 $3.42。订单: 两档 GTC (100 @ $3.50 / 100 @ $4.00) "
-        "均未触发 (周高 $3.42 < $3.50) — 价格推断未成交。"
-    )
-    result = ledger.validate_final_answer(answer)
-    assert result.valid is True, result.issues
-
-    # A genuinely fabricated close is still rejected.
-    fabricated = ledger.validate_final_answer(
-        "RXRX.US（yahoo，USD）本周高 $3.42。另: 收盘 2.50 已确认。"
-    )
-    assert fabricated.valid is False
-    assert any(
-        issue["code"] == "numeric_claim_conflict" for issue in fabricated.issues
-    )
-
-
-def test_dash_form_trading_day_is_a_date_but_a_price_range_is_not() -> None:
-    """A report writes the day as "08-10(一)"; a target still writes "10-20 元".
-
-    The dash carries both meanings, so the mask splits them: a zero-padded
-    month reads as a date on its own, October through December need a weekday
-    or session marker, and a range with neither stays checkable.
-    """
-    extract = GroundingLedger._numbers_without_dates_or_percent
-
-    assert extract("08-10(一) 收盘 8.20 CNY") == [8.2]
-    assert extract("08-10盘中最低 8.20 CNY") == [8.2]
-    assert extract("08-10 close 8.20 USD") == [8.2]
-    assert extract("10-20(周一)盘中 8.20 CNY") == [8.2]
-
-    # No date marker and no zero-padded month: an ordinary quoted range, and
-    # masking it would stop checking a claim the ledger exists to check.
-    assert extract("区间 8-10 元") == [8.0, 10.0]
-    assert extract("跌 12-25 元") == [12.0, 25.0]
-
-
-def test_a_level_stated_as_a_range_masks_both_bounds(tmp_path: Path) -> None:
-    """Masking only the lower bound left a negative upper bound behind.
-
-    The separator touches the second number, so "目标价 10-20 元" used to
-    reduce to "-20" — and a negative price is outside every OHLC window, which
-    made a correct draft impossible to pass rather than merely unchecked.
-    """
-    extract = GroundingLedger._numbers_without_dates_or_percent
-
-    for draft in ("目标价 10-20 元", "支撑位 8-10 元", "阻力位 12.0~13.5", "52周高 15.0-16.0"):
-        assert extract(draft) == [], draft
-
-    # A single-value level is unchanged, and an observed quote beside a ranged
-    # level is still extracted and checked.
-    assert extract("止损位 7.5 元") == []
-    assert extract("目标价 10-20 元，现价 8.20 CNY") == [8.2]
-
-    ledger = _screened_ledger(tmp_path)
     result = ledger.validate_final_answer(
-        "000543.SZ 收盘价 8.20 CNY，目标价 10-20 元（source: tencent）"
+        "000543.SZ 目标价 1.5 CNY，收盘价 8.20 CNY（source: tencent）\n\n"
+        "```figures\n8.20 | observed | close | prices\n"
+        "1.5 | proposed | 目标\n```"
     )
-    assert result.valid is True, result.issues
+    assert result.valid is False
+    assert [issue["value"] for issue in result.issues] == ["1.5"]
 
-
-def test_an_order_line_is_an_instruction_not_an_observation(tmp_path: Path) -> None:
-    """"100 @ $3.50" states where a limit sits; 100 was never a price at all.
-
-    A GTC summary in a weekly update was read as two observed quotes and
-    rejected against the session's range, which is the same category error the
-    target/stop masks already prevent.
-    """
-    extract = GroundingLedger._numbers_without_dates_or_percent
-
-    for draft in (
-        "GTC 100 @ $3.50",
-        "buy 100 @ $3.50 GTC",
-        "挂单 100 股 @ 4.00",
-        "限价单 100 @ 3.50",
-        "委托价 3.50",
-    ):
-        assert extract(draft) == [], draft
-
-    # 买入价/卖出价 stay OUT of the label set: in running prose they name the
-    # price a report says it observed, and masking them let an ungrounded
-    # quote through the gate.
-    assert extract("买入价 0.881") == [0.881]
-
-    # There is no bare "@ <price>" branch either. Dates are masked before this
-    # runs, so an observed close written "2026-08-10 @ 8.20" would reach the
-    # order mask as "@ 8.20" and stop being checked at all.
-    assert extract("收盘 2026-08-10 @ 8.20") == [8.2]
-
-    # An observed quote standing beside an order line is still checked, and a
-    # bare handle carries no price to mask.
-    assert extract("现价 8.20 CNY，挂单 100 @ 8.50") == [8.2]
-    assert extract("联系 @user 获取") == []
-
-    ledger = _screened_ledger(tmp_path)
-    result = ledger.validate_final_answer(
-        "000543.SZ 收盘价 8.20 CNY，挂单 100 股 @ 12.00（source: tencent）"
+    in_range = ledger.validate_final_answer(
+        "000543.SZ 变动 0.03 CNY，收盘价 8.20 CNY（source: tencent）\n\n"
+        "```figures\n8.20 | observed | close | prices\n"
+        "0.03 | derived | 8.50 - 8.47 | prices\n```"
     )
-    assert result.valid is True, result.issues
+    assert in_range.valid is True, in_range.issues
 
 
 def test_a_report_style_date_cell_still_matches_its_evidence_row() -> None:
@@ -2962,9 +2619,7 @@ def test_backtest_metrics_rejected_when_analysis_tool_failed(
     )
 
     assert bad.valid is False, bad.issues
-    assert any(
-        issue["code"] == "analysis_claim_unavailable" for issue in bad.issues
-    )
+    assert {issue["code"] for issue in bad.issues} == {"numeric_claim_unavailable"}
 
 
 def test_backtest_metrics_rejected_when_no_analysis_result(
@@ -2982,9 +2637,10 @@ def test_backtest_metrics_rejected_when_no_analysis_result(
     )
 
     assert bad.valid is False, bad.issues
-    assert any(
-        issue["code"] == "analysis_claim_unavailable" for issue in bad.issues
-    )
+    assert {issue["code"] for issue in bad.issues} == {"numeric_claim_unavailable"}
+    assert [issue["value"] for issue in bad.issues] == [
+        "18.2%", "-9.4%", "1.21", "58%",
+    ]
 
 
 def test_backtest_metrics_accepted_after_successful_backtest(
@@ -3103,23 +2759,31 @@ def test_partially_unsupported_analysis_metrics_are_rejected(
     )
 
     assert bad.valid is False, bad.issues
-    assert any(
-        issue["code"] == "analysis_claim_unavailable" for issue in bad.issues
-    )
+    assert [issue["value"] for issue in bad.issues] == ["-9.4%"]
 
 
-def test_forecast_probability_is_not_a_measured_claim(tmp_path: Path) -> None:
-    """#1336 gates measured facts, not forward-looking forecasts."""
+def test_forecast_probability_is_declared_not_phrased(tmp_path: Path) -> None:
+    """A forecast is a role the model declares, not a word it writes.
+
+    "预计" used to buy a clause-wide exemption for free, so any measured
+    metric written after it went unchecked. The figure must now be declared
+    ``count`` — the role for a number this run does not claim to have measured
+    — and an undeclared one is reported.
+    """
     ledger = GroundingLedger(
         run_dir=tmp_path,
         user_message="明天市场会怎么样",
     )
 
-    good = ledger.validate_final_answer(
-        "预计明日上涨概率 70%，波动率可能放大。"
+    declared = ledger.validate_final_answer(
+        "预计明日上涨概率 70%，波动率可能放大。\n\n"
+        "```figures\n70% | count | 主观判断，非本会话测得\n```"
     )
+    assert declared.valid is True, declared.issues
 
-    assert good.valid is True, good.issues
+    undeclared = ledger.validate_final_answer("预计明日上涨概率 70%，波动率可能放大。")
+    assert undeclared.valid is False
+    assert [issue["value"] for issue in undeclared.issues] == ["70%"]
 
 
 def test_valid_price_does_not_launder_unsupported_analysis_metric(
@@ -3145,7 +2809,7 @@ def test_valid_price_does_not_launder_unsupported_analysis_metric(
     )
 
     assert result.valid is False, result.issues
-    assert any(issue["code"] == "analysis_claim_unavailable" for issue in result.issues)
+    assert [issue["value"] for issue in result.issues] == ["18.2%"]
 
 
 def test_successful_backtest_only_supports_metrics_in_its_artifact(
@@ -3197,23 +2861,24 @@ def test_skipped_analysis_result_does_not_authorize_metrics(tmp_path: Path) -> N
     assert result.valid is False, result.issues
 
 
-def test_integer_historical_window_claim_is_rejected(tmp_path: Path) -> None:
-    """Categorical claims about all historical windows need evidence too."""
-    ledger = GroundingLedger(run_dir=tmp_path, user_message="分析策略")
+def test_analysis_definition_is_declared_not_phrased(tmp_path: Path) -> None:
+    """A threshold convention is a citation, not a measurement of this session.
 
-    result = ledger.validate_final_answer("所有历史 12 个月窗口均实现正收益。")
-
-    assert result.valid is False, result.issues
-    assert any(issue["code"] == "analysis_claim_unavailable" for issue in result.issues)
-
-
-def test_analysis_definition_is_not_rejected(tmp_path: Path) -> None:
-    """A threshold definition is not a measured result from this session."""
+    "通常被认为" used to exempt the clause outright. The convention is now
+    stated as what it is — a figure taken from outside this run — and an
+    undeclared one is reported instead of being waved through by its framing.
+    """
     ledger = GroundingLedger(run_dir=tmp_path, user_message="什么是夏普比率？")
 
-    result = ledger.validate_final_answer("夏普比率大于 1.0 通常被认为较好。")
+    declared = ledger.validate_final_answer(
+        "夏普比率大于 1.0 通常被认为较好。\n\n"
+        "```figures\n1.0 | cited | 行业惯例阈值\n```"
+    )
+    assert declared.valid is True, declared.issues
 
-    assert result.valid is True, result.issues
+    undeclared = ledger.validate_final_answer("夏普比率大于 1.0 通常被认为较好。")
+    assert undeclared.valid is False
+    assert [issue["value"] for issue in undeclared.issues] == ["1.0"]
 
 
 def test_forecast_table_cell_does_not_exempt_measured_cell(
@@ -3229,7 +2894,7 @@ def test_forecast_table_cell_does_not_exempt_measured_cell(
     )
 
     assert result.valid is False, result.issues
-    assert any(issue["code"] == "analysis_claim_unavailable" for issue in result.issues)
+    assert sorted(issue["value"] for issue in result.issues) == ["-8.1%", "12.4%"]
 
 
 def test_analysis_completion_is_persisted_with_metric_provenance(
@@ -3262,18 +2927,9 @@ def test_analysis_completion_is_persisted_with_metric_provenance(
     assert artifact["analysis_evidence"][0]["metric"] == "return"
 
 
-def test_derived_interval_return_from_observed_endpoints_is_allowed(
-    tmp_path: Path,
-) -> None:
-    """#1338 review: a return figure derived from observed endpoints stays legal.
-
-    Both endpoints are observed evidence and the answer states the growth
-    inline — arithmetic on sourced inputs, not an invented backtest metric.
-    """
-    ledger = GroundingLedger(
-        run_dir=tmp_path,
-        user_message="AAPL.US 最近一个月走势如何",
-    )
+def _aapl_endpoint_ledger(tmp_path: Path) -> GroundingLedger:
+    """A ledger holding two observed AAPL.US closes, 100.0 and 112.4."""
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="AAPL.US 最近一个月走势如何")
     ledger.ingest_tool_result(
         tool_name="get_market_data",
         arguments={"codes": ["AAPL.US"]},
@@ -3288,73 +2944,81 @@ def test_derived_interval_return_from_observed_endpoints_is_allowed(
         call_id="quote",
         success=True,
     )
+    return ledger
+
+
+def test_derived_interval_return_from_observed_endpoints_is_allowed(
+    tmp_path: Path,
+) -> None:
+    """#1338 review: a return derived from observed endpoints stays legal.
+
+    The exemption used to be inferred from the sentence — a growth frame, then
+    an operand scan over the line. It is now stated: the declaration carries
+    the arithmetic, one of whose operands the run observed, and the gate
+    checks that the arithmetic produces the figure.
+    """
+    ledger = _aapl_endpoint_ledger(tmp_path)
 
     good = ledger.validate_final_answer(
-        "AAPL.US 从 2026-08-03 的 100.0 涨到 2026-09-02 的 112.4，"
-        "区间收益率为 12.4%。"
+        "AAPL.US（USD）从 2026-08-03 的 100.0 涨到 2026-09-02 的 112.4，"
+        "区间收益率为 12.4%。\n\n"
+        "```figures\n"
+        "100.0 | observed | close 2026-08-03 | quote\n"
+        "112.4 | observed | close 2026-09-02 | quote\n"
+        "12.4% | derived | (112.4 - 100.0) / 100.0 | quote\n"
+        "```"
     )
 
     assert good.valid is True, good.issues
 
 
 def test_derived_cumulative_return_english_is_allowed(tmp_path: Path) -> None:
-    """#1338 review: same derivation exemption for the English shape."""
-    ledger = GroundingLedger(
-        run_dir=tmp_path,
-        user_message="AAPL.US price history",
-    )
-    ledger.ingest_tool_result(
-        tool_name="get_market_data",
-        arguments={"codes": ["AAPL.US"]},
-        result=json.dumps(
-            {
-                "AAPL.US": [
-                    {"trade_date": "2026-08-03", "close": 100.0},
-                    {"trade_date": "2026-09-02", "close": 112.4},
-                ]
-            }
-        ),
-        call_id="quote",
-        success=True,
-    )
+    """#1338 review: the identical declaration under English prose."""
+    ledger = _aapl_endpoint_ledger(tmp_path)
 
     good = ledger.validate_final_answer(
-        "AAPL.US rose from 100.0 to 112.4, a cumulative return of 12.4% "
-        "over the window."
+        "AAPL.US rose from 100.0 to 112.4 USD, a cumulative return of 12.4% "
+        "over the window.\n\n"
+        "```figures\n"
+        "100.0 | observed | close 2026-08-03 | quote\n"
+        "112.4 | observed | close 2026-09-02 | quote\n"
+        "12.4% | derived | (112.4 - 100.0) / 100.0 | quote\n"
+        "```"
     )
 
     assert good.valid is True, good.issues
 
 
 def test_unanchored_return_claim_is_still_rejected(tmp_path: Path) -> None:
-    """Without the from/to frame, a return figure stays gated."""
-    ledger = GroundingLedger(
-        run_dir=tmp_path,
-        user_message="AAPL.US 价格",
-    )
-    ledger.ingest_tool_result(
-        tool_name="get_market_data",
-        arguments={"codes": ["AAPL.US"]},
-        result=json.dumps(
-            {
-                "AAPL.US": [
-                    {"trade_date": "2026-08-03", "close": 100.0},
-                    {"trade_date": "2026-09-02", "close": 112.4},
-                ]
-            }
-        ),
-        call_id="quote",
-        success=True,
-    )
+    """A return figure with no derivation behind it stays gated."""
+    ledger = _aapl_endpoint_ledger(tmp_path)
 
     bad = ledger.validate_final_answer(
         "AAPL.US 区间收益率为 12.4%，历史回测年化收益 18.2%。"
     )
 
     assert bad.valid is False, bad.issues
-    assert any(
-        issue["code"] == "analysis_claim_unavailable" for issue in bad.issues
+    assert [
+        issue["value"] for issue in bad.issues if issue["value"] is not None
+    ] == ["12.4%", "18.2%"]
+
+    # Declaring it derived is not enough either: the note has to be the
+    # arithmetic, and its operands have to be values this session observed.
+    unanchored = ledger.validate_final_answer(
+        "AAPL.US（USD）区间收益率为 12.4%。\n\n"
+        "```figures\n12.4% | derived | 回测得出 | quote\n```"
     )
+    assert unanchored.valid is False
+    assert [issue["reason"] for issue in unanchored.issues] == ["formula_not_evaluable"]
+
+    wrong_operands = ledger.validate_final_answer(
+        "AAPL.US（USD）区间收益率为 12.4%。\n\n"
+        "```figures\n12.4% | derived | (55.5 - 49.4) / 49.4 | quote\n```"
+    )
+    assert wrong_operands.valid is False
+    assert [issue["reason"] for issue in wrong_operands.issues] == [
+        "formula_not_anchored"
+    ]
 
 
 def test_wrong_derived_return_arithmetic_is_rejected(tmp_path: Path) -> None:
@@ -3494,10 +3158,15 @@ def test_analysis_gate_still_rejects_unattributed_and_unsourced(
         ), answer
 
 
-def test_attribution_exemption_cannot_launders_self_claims(tmp_path: Path) -> None:
-    """The #1336 attack shape must not escape via attribution vocabulary:
-    "the backtest/data shows" is a self-claim, and a citation in one clause
-    must not exempt an invented sibling metric in the next."""
+def test_a_citation_subject_no_longer_exempts_anything(tmp_path: Path) -> None:
+    """The #1336 attack shape cannot escape through attribution vocabulary.
+
+    The exemption used to be a phrase list of citation subjects — "the paper
+    reports" was exempt, "the backtest reports" was not — and the list decided
+    every verdict. There is no such list: a figure is exempt only when the
+    model DECLARES it cited and names a source, which is a statement the model
+    signs rather than a phrasing it stumbles into.
+    """
     for answer in (
         "The backtest data shows an annualized return of 25%.",
         "回测数据显示策略年化收益 25%。",
@@ -3505,30 +3174,40 @@ def test_attribution_exemption_cannot_launders_self_claims(tmp_path: Path) -> No
         "根据本次回测，年化波动率 18.2%。",
         "The strategy reports a Sharpe ratio of 1.8.",
         "研究显示策略年化收益 25%。",
-        "研究报告显示策略年化收益 25%。",
-        "回测研究显示策略年化收益 25%。",
         "投资者普遍认为其年化收益 25%。",
-        # citation in clause 1, invented sibling in clause 2
+        # A citation subject in one sentence never covered the next one, and
+        # now it cannot cover anything: neither figure is declared.
         "The paper reports a Sharpe ratio of 1.8, and our strategy achieved "
         "an annualized return of 47.3%.",
     ):
         ledger = GroundingLedger(run_dir=tmp_path, user_message="Research the factor.")
         issues = ledger.validate_final_answer(answer).issues
-        assert [i for i in issues if i.get("code") == "analysis_claim_unavailable"], (
-            answer,
-            issues,
-        )
+        assert issues, answer
+        assert {i["code"] for i in issues} <= {
+            "numeric_claim_unavailable",
+            "numeric_claim_conflict",
+        }, (answer, issues)
+
+    # The other side: declaring the paper's figure cited passes, and it does
+    # NOT carry the sibling the same sentence invents.
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="Research the factor.")
+    partial = ledger.validate_final_answer(
+        "The paper reports a Sharpe ratio of 1.8, and our strategy achieved "
+        "an annualized return of 47.3%.\n\n"
+        "```figures\n1.8 | cited | Fama-French 2024, table 3\n```"
+    )
+    assert partial.valid is False
+    assert [issue["value"] for issue in partial.issues] == ["47.3%"]
 
 
 def test_attribution_never_exempts_a_price_claim(tmp_path: Path) -> None:
     """A citation subject must not launder a fabricated quote.
 
-    The attribution exemption is legitimate in the ANALYSIS gate — a paper's
-    Sharpe is a figure this run could never have observed. A price is the
-    opposite: it is exactly what this run observes, so attributing it to a
-    source is the laundering shape the price gate exists to catch. With the
-    exemption applied to `_validate_price_claims`, every line below passed
-    with zero tool evidence.
+    Attributing a figure to a source used to be an exemption the gate read out
+    of the prose, and applying it to price claims let every line below pass
+    with zero tool evidence. There is no prose exemption now: a citation is
+    the ``cited`` role, which the model declares and which never claims the
+    figure is a print of this instrument.
     """
     for answer in (
         "Analysts say TSLA.US last traded at 412.35 USD.",
@@ -3545,147 +3224,106 @@ def test_attribution_never_exempts_a_price_claim(tmp_path: Path) -> None:
 def test_derived_return_exemption_is_structural_not_phrasal(tmp_path: Path) -> None:
     """The same derivation must get the same verdict in both languages.
 
-    Keying the exemption on a growth PHRASE ("从…到" / "from…to") made the
-    gate stricter for every wording the list missed. The pairs below state the
-    identical arithmetic on the identical observed endpoints; asserting the
-    two verdicts are EQUAL is what stops the next patch moving the breakage to
-    the other language, exactly as test_grounding_language_parity does.
+    Keying the exemption on a growth PHRASE ("从…到" / "from…to") made the gate
+    stricter for every wording the list missed. The declaration carries the
+    arithmetic now, so the prose around it cannot change the verdict at all —
+    which is the property this test has always been asserting.
     """
+    declaration = (
+        "\n\n```figures\n"
+        "100.0 | observed | close 2026-08-03 | quote\n"
+        "112.4 | observed | close 2026-09-02 | quote\n"
+        "{figure} | derived | (112.4 - 100.0) / 100.0 | quote\n"
+        "```"
+    )
 
     def verdict(answer: str) -> bool:
-        ledger = GroundingLedger(run_dir=tmp_path, user_message="AAPL.US 走势")
-        ledger.ingest_tool_result(
-            tool_name="get_market_data",
-            arguments={"codes": ["AAPL.US"]},
-            result=json.dumps(
-                {
-                    "AAPL.US": [
-                        {"trade_date": "2026-08-03", "close": 100.0},
-                        {"trade_date": "2026-09-02", "close": 112.4},
-                    ]
-                }
-            ),
-            call_id="quote",
-            success=True,
-        )
+        ledger = _aapl_endpoint_ledger(tmp_path)
         return bool(ledger.validate_final_answer(answer).issues)
 
-    # Accepted in both: operands present in the clause and sourced.
     for english, chinese in (
         (
-            "AAPL.US rose from 100.0 to 112.4, a cumulative return of 12.4%.",
+            "AAPL.US rose from 100.0 to 112.4 USD, a cumulative return of 12.4%.",
             "AAPL.US 第一日收盘 100.0 美元，第二日收盘 112.4 美元，收益率 12.4%。",
+        ),
+    ):
+        block = declaration.format(figure="12.4%")
+        en, zh = verdict(english + block), verdict(chinese + block)
+        assert en == zh, f"verdicts disagree by language: EN={en} ZH={zh}"
+        assert en is False, f"sourced derivation rejected: {english}"
+
+    # Still rejected in both: no declaration at all, or arithmetic that does
+    # not produce the figure.
+    for english, chinese in (
+        (
+            "AAPL.US delivered a cumulative return of 12.4% over the window.",
+            "AAPL.US 区间收益率为 12.4%。",
+        ),
+        (
+            "AAPL.US rose from 100.0 to 112.4 USD, a cumulative return of 15.0%."
+            + declaration.format(figure="15.0%"),
+            "AAPL.US 从 100.0 涨到 112.4 美元，区间收益率为 15.0%。"
+            + declaration.format(figure="15.0%"),
         ),
     ):
         en, zh = verdict(english), verdict(chinese)
         assert en == zh, f"verdicts disagree by language: EN={en} ZH={zh}"
-        assert en is False, f"sourced derivation rejected: {english}"
+        assert en is True, f"unanchored/wrong return accepted: {english}"
 
-    # Still rejected in both: no operands in the clause, or wrong arithmetic.
-    for answer in (
-        "AAPL.US delivered a cumulative return of 12.4% over the window.",
-        "AAPL.US 区间收益率为 12.4%。",
-        "AAPL.US rose from 100.0 to 112.4, a cumulative return of 15.0%.",
-        "AAPL.US 从 100.0 涨到 112.4，区间收益率为 15.0%。",
-    ):
-        assert verdict(answer) is True, f"unanchored/wrong return accepted: {answer}"
+
 def test_generic_header_table_metric_rows_are_gated(tmp_path: Path) -> None:
-    """#1336 must not be dodgeable by formatting the claim as a generic-header
-    table (| 指标 | 数值 | / | Metric | Value |) with the metric kind in the
-    row instead of prose or a metric-headed table."""
+    """#1336 must not be dodgeable by formatting the claim as a table.
+
+    The generic-header machinery that used to read a row LABEL for a metric
+    kind and then pair it with an adjacent value cell is gone with the kind
+    regexes it depended on. Every cell of every table is measurement-shaped,
+    so the formatting dodge closes by construction instead of by a second
+    validator that had to mirror the prose one.
+    """
     ledger = GroundingLedger(run_dir=tmp_path, user_message="回测策略")
 
-    result = ledger.validate_final_answer(
-        "| 指标 | 数值 |\n|---|---:|\n| 年化收益 | 18.2% |\n| 最大回撤 | -9.4% |"
-    )
-
-    assert result.valid is False, result.issues
-    assert [
-        i for i in result.issues if i.get("code") == "analysis_claim_unavailable"
-    ]
-
-    # a comparison marker must not launder an unsupported figure through a
-    # metric-headed table either: prose rejects "夏普比率 > 1.5。" without
-    # evidence, so the table form must be rejected too
-    result = ledger.validate_final_answer("| 夏普比率 |\n|---|---|\n| > 1.5 |")
-    assert result.valid is False, result.issues
-
-    # value-first layout (kind in a later cell) is gated too
-    result = ledger.validate_final_answer(
-        "| 数值 | 指标 |\n|---|---|\n| 18.2% | 年化收益率 |"
-    )
-    assert result.valid is False, result.issues
-    # the bare fragment the prose detector treats as a metric word is gated
-    result = ledger.validate_final_answer(
-        "| 指标 | 数值 |\n|---|---|\n| 年化 | 18.2% |"
-    )
-    assert result.valid is False, result.issues
-    # multiple (label, value) pairs in one row are each gated with their own kind
-    result = ledger.validate_final_answer(
-        "| 指标 | 数值 | 指标 | 数值 |\n|---|---|---|---|\n| 年化波动率 | 18.2% | 最大回撤 | -9.4% |"
-    )
-    assert result.valid is False, result.issues
-    assert len([i for i in result.issues if i.get("code") == "analysis_claim_unavailable"]) == 2
+    for draft in (
+        "| 指标 | 数值 |\n|---|---:|\n| 年化收益 | 18.2% |\n| 最大回撤 | -9.4% |",
+        "| 夏普比率 |\n|---|---|\n| > 1.5 |",
+        "| 数值 | 指标 |\n|---|---|\n| 18.2% | 年化收益率 |",
+        "| 指标 | 数值 |\n|---|---|\n| 年化 | 18.2% |",
+        "| 指标 | 数值 | 指标 | 数值 |\n|---|---|---|---|\n"
+        "| 年化波动率 | 18.2% | 最大回撤 | -9.4% |",
+        # A label cell smuggling its own measurement is checked like any other
+        # cell, which is what the (label, value) pairing used to have to do.
+        "| 指标 | 数值 |\n|---|---|\n| 年化收益率 18.2% | - |",
+    ):
+        result = ledger.validate_final_answer(draft)
+        assert result.valid is False, draft
+        assert {i["code"] for i in result.issues} == {"numeric_claim_unavailable"}, draft
 
 
-def test_generic_header_table_matches_prose_verdicts(tmp_path: Path) -> None:
-    """The generic-header fallback must produce the SAME verdict as prose for
-    the same claim — never looser (formatting dodge) and never stricter.
+def test_a_table_cell_and_the_same_prose_figure_get_one_verdict(
+    tmp_path: Path,
+) -> None:
+    """Table and prose are the same surface now, so they cannot disagree.
 
-    Prose without evidence rejects comparison phrasing ("最大回撤小于 -5%
-    触发风控。"), rejects the definitional frame split across the number
-    ("夏普比率通常大于1.0认为较好。"), and rejects a bare claim; with
-    kind-matched evidence all of them pass. Tables must do exactly that.
+    The generic-header fallback existed to keep a table from being looser than
+    prose, and it had its own forecast / definition / label-pairing rules that
+    had to be kept in step with the prose validator by hand. A table cell is
+    simply a measurement-shaped figure, so the parity is structural.
     """
-    bare = GroundingLedger(run_dir=tmp_path / "bare", user_message="回测策略")
-    # comparison phrasing rejected without evidence, like prose
-    assert bare.validate_final_answer(
-        "| 指标 | 标准 |\n|---|---|\n| 最大回撤 | 小于 -5% 触发风控 |"
-    ).valid is False
-    # definitional frame split by the number: prose rejects it, tables must not
-    # be looser than prose or the split becomes the new formatting dodge
-    assert bare.validate_final_answer(
-        "| 指标 | 备注 |\n|---|---|\n| 夏普比率 | 通常大于1.0认为较好 |"
-    ).valid is False
-    # a label cell smuggling its own measurement is prose-identical to
-    # "年化收益率为 18.2%" — rejected
-    assert bare.validate_final_answer(
-        "| 指标 | 数值 |\n|---|---|\n| 年化收益率 18.2% | - |"
-    ).valid is False
+    def verdicts(figure: str, block: str = "") -> tuple[bool, bool]:
+        prose = GroundingLedger(run_dir=tmp_path / "p", user_message="回测策略")
+        table = GroundingLedger(run_dir=tmp_path / "t", user_message="回测策略")
+        return (
+            prose.validate_final_answer(f"年化波动率 {figure}。{block}").valid,
+            table.validate_final_answer(
+                f"| 指标 | 数值 |\n|---|---|\n| 年化波动率 | {figure} |{block}"
+            ).valid,
+        )
 
-    backed = GroundingLedger(run_dir=tmp_path / "backed", user_message="回测策略")
-    backed.ingest_tool_result(
-        tool_name="portfolio_risk_xray",
-        arguments={"symbols": ["AAPL"]},
-        result=json.dumps({"annualized_vol": 0.182, "max_drawdown": -0.05}),
-        call_id="x",
-        success=True,
-    )
-    # value-backed row accepted
-    assert backed.validate_final_answer(
-        "| 指标 | 数值 |\n|---|---:|\n| 年化波动率 | 18.2% |"
-    ).valid is True
-    # the same comparison phrasing passes once the figure is kind-backed
-    assert backed.validate_final_answer(
-        "| 指标 | 标准 |\n|---|---|\n| 最大回撤 | 小于 -5% 触发风控 |"
-    ).valid is True
-    # contiguous definitional frame ("通常认为…") is exempt in prose, so in
-    # tables too — the frame regex is the boundary, not the formatting
-    assert backed.validate_final_answer(
-        "| 指标 | 备注 |\n|---|---|\n| 夏普比率 | 通常认为大于 1.0 较好 |"
-    ).valid is True
-    # an annotation column past the value cell is not attributed to the label:
-    # the prose verdict for "年化波动率 18.2%，较去年提升 2%。" with this evidence
-    # is valid, so the table form must not be stricter (parity).
-    assert backed.validate_final_answer(
-        "| 指标 | 数值 | 备注 |\n|---|---|---|\n| 年化波动率 | 18.2% | 较去年提升 2% |"
-    ).valid is True
-    # a FORECAST frame in the label frames the claimed value clause-wide:
-    # prose "预计夏普比率为 1.2。" and the metric-header path (header_forecast
-    # column skip) both accept; the generic path must not be stricter.
-    assert bare.validate_final_answer(
-        "| 指标 | 数值 |\n|---|---|\n| 预计夏普比率 | 1.2 |"
-    ).valid is True
+    bare_prose, bare_table = verdicts("18.2%")
+    assert bare_prose == bare_table is False
+
+    declared = "\n\n```figures\n18.2% | count | 主观区间\n```"
+    declared_prose, declared_table = verdicts("18.2%", declared)
+    assert declared_prose == declared_table is True
 
 
 @pytest.mark.parametrize(

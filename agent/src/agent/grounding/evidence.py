@@ -146,28 +146,22 @@ _ANALYSIS_KIND_ALIASES = {
     "return": "return",
     "returns": "return",
     "ic_positive_ratio": "win_rate",
+    # A-share tools key their JSON in Chinese. These are TOOL FIELD NAMES, in
+    # the same category as ``max_drawdown`` above: they name what a leaf of a
+    # result IS. Nothing here reads the answer's prose.
+    "最大回撤": "drawdown",
+    "回撤": "drawdown",
+    "夏普": "sharpe",
+    "夏普比率": "sharpe",
+    "年化波动率": "vol",
+    "波动率": "vol",
+    "胜率": "win_rate",
+    "命中率": "win_rate",
+    "概率": "probability",
+    "年化收益率": "return",
+    "累计收益率": "return",
+    "收益率": "return",
 }
-
-
-# Order matters: 最大回撤 is drawdown before 收益/return, and 年化波动率 is vol
-# before the generic return branch.
-_ANALYSIS_KIND_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"(?:回撤|drawdown|maxdd|最大亏损)", re.IGNORECASE), "drawdown"),
-    (
-        re.compile(
-            r"(?:波动率|波动性|volatility|annualized\s*vol|return\s*vol|年化波动)",
-            re.IGNORECASE,
-        ),
-        "vol",
-    ),
-    (re.compile(r"(?:夏普|sharpe)", re.IGNORECASE), "sharpe"),
-    (re.compile(r"(?:胜率|命中率|win\s*rate|hit\s*rate)", re.IGNORECASE), "win_rate"),
-    (re.compile(r"(?:概率|probability|prob)", re.IGNORECASE), "probability"),
-    # 年化/annualized alone ("| 年化 | 18.2% |") resolves to return so a
-    # generic-header table cannot dodge the gate with the fragment the prose
-    # detector (_ANALYSIS_METRIC_RE) already treats as a metric word.
-    (re.compile(r"(?:收益|回报|收益率|回报率|年化|\breturns?\b|\bannualized\b)", re.IGNORECASE), "return"),
-)
 
 
 def _symbol_from_csv_filename(stem: str) -> str | None:
@@ -237,38 +231,14 @@ def _coerce_csv_number(value: Any) -> int | float | None:
 
 
 # "." is deliberately not a separator: a decimal price such as 8.5 would parse
-# as month 8 day 5 and match a real trading day.
-# A report writes the day as a table cell -- "08-10(一)", "08-10(周一)盘中",
-# "08-10盘中" -- and the weekday or session suffix made the cell match no
-# evidence row at all, so every price in that row came back
-# "numeric_claim_unavailable" even though the run had fetched the bar.
-_TRADING_DAY_SUFFIX = (
-    r"(?:\s*[(（]\s*(?:周|星期)?[一二三四五六日天]\s*[)）])?"
-    r"\s*(?:盘中|盘后|盘前|收盘|开盘|早盘|尾盘)?"
+# A date CELL in a report carries annotations the bare ISO form does not:
+# "08-10(一)", "08-10(周一)盘中", "2026-08-10". Only the leading date matters,
+# so the year is optional and everything after the day is ignored — which is
+# also how the weekday/session annotations stopped needing a vocabulary.
+_CLAIM_DATE_RE = re.compile(
+    r"^\s*(?:((?:19|20)\d{2})\s*[-/年]\s*)?"
+    r"(0?[1-9]|1[0-2])\s*[-/月]\s*([12]\d|3[01]|0?[1-9])"
 )
-
-
-_YEARLESS_CLAIM_DATE_RE = re.compile(
-    r"^(0?[1-9]|1[0-2])\s*[-/月]\s*(0?[1-9]|[12]\d|3[01])\s*[日号]?"
-    + _TRADING_DAY_SUFFIX
-    + r"$"
-)
-
-
-# Two-digit day alternatives are tried before a bare digit so an
-# unanchored prefix match consumes the full day ("10" of "08-10(一)")
-# instead of stopping at "1".
-_ISO_CLAIM_DATE_PREFIX_RE = re.compile(
-    r"^\s*((?:19|20)\d{2})\s*[-/]\s*(0?[1-9]|1[0-2])\s*[-/]\s*([12]\d|3[01]|0?[1-9])"
-)
-
-
-_YEARLESS_CLAIM_DATE_PREFIX_RE = re.compile(
-    r"^\s*(0?[1-9]|1[0-2])\s*[-/月]\s*([12]\d|3[01]|0?[1-9])"
-)
-
-
-_ISO_TIMESTAMP_RE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})")
 
 
 def _claim_date_tuple(date_value: str) -> tuple[int, int] | None:
@@ -287,17 +257,10 @@ def _claim_date_tuple(date_value: str) -> tuple[int, int] | None:
     Returns:
         The (month, day) tuple, or None when no date prefix is present.
     """
-    claim = (date_value or "").strip()
-    match = _YEARLESS_CLAIM_DATE_RE.match(claim)
-    if match:
-        return (int(match.group(1)), int(match.group(2)))
-    match = _ISO_CLAIM_DATE_PREFIX_RE.match(claim)
-    if match:
-        return (int(match.group(2)), int(match.group(3)))
-    match = _YEARLESS_CLAIM_DATE_PREFIX_RE.match(claim)
-    if match:
-        return (int(match.group(1)), int(match.group(2)))
-    return None
+    match = _CLAIM_DATE_RE.match((date_value or "").strip())
+    if match is None:
+        return None
+    return (int(match.group(2)), int(match.group(3)))
 
 
 def _timestamp_matches_claim_date(timestamp: str, date_value: str) -> bool:
@@ -331,10 +294,14 @@ def _timestamp_matches_claim_date(timestamp: str, date_value: str) -> bool:
     if stamp.startswith(claim):
         return True
     claim_tuple = _claim_date_tuple(claim)
-    iso = _ISO_TIMESTAMP_RE.match(stamp)
-    if claim_tuple is None or not iso:
+    parts = stamp[:10].split("-")
+    if claim_tuple is None or len(parts) != 3:
         return False
-    return (int(iso.group(2)), int(iso.group(3))) == claim_tuple
+    try:
+        stamp_tuple = (int(parts[1]), int(parts[2]))
+    except ValueError:
+        return False
+    return stamp_tuple == claim_tuple
 
 
 def _price_field_for_path(path: str) -> str | None:
@@ -352,98 +319,62 @@ def _price_field_for_path(path: str) -> str | None:
     return _GENERIC_PRICE_FIELD_ALIASES.get(leaf)
 
 
-# A price-denominated indicator the session fetched is observed evidence in
-# the same sense an OHLC bar is: ``indicators.sma_20: 0.7158`` came out of
-# ``technical_indicators`` for this symbol, and an answer that writes "MA20
-# 0.7158" or derives an entry from it is quoting a tool, not inventing a
-# number. Before this, the value was compared against OHLC bars only and
-# rejected as a fabricated price (deriv2 probe, 2026-09-09). The family list is
-# closed and price-denominated on purpose — a moving average, band, pivot,
-# support/resistance level, VWAP or ATR is in the instrument's currency; RSI,
-# MACD, volume, counts and row totals are not. Letting a quote match
-# ``rows: 54`` or a volume average would gut the fabrication check, so any
-# non-price token anywhere in the path disqualifies the leaf.
-_PRICE_INDICATOR_TOKENS = frozenset(
-    {
-        "sma", "ema", "wma", "dma", "dema", "tema", "hma", "kama", "ma", "vwap", "vwma",
-        "bb", "bbands", "boll", "bollinger", "band", "bands", "keltner", "kc", "donchian",
-        "pivot", "pp", "support", "resistance",
-        "atr", "psar", "sar", "supertrend", "ichimoku", "tenkan", "kijun", "senkou",
-        "chikou", "highest", "lowest",
-    }
-)
+# Price-denominated indicator leaves, REGISTERED PER TOOL (spec §5). The
+# previous rule guessed from path tokens: a leaf counted as a price when its
+# name carried a family word ("sma", "band", "pivot") and no non-price word.
+# Guessing from a name is the same failure as guessing from prose — the family
+# list and the denylist both had to be complete, and they were not:
+# ``indicators.ma_diff``, ``indicators.sma_cross`` and
+# ``indicators.supertrend_direction`` were all admitted as observed prices,
+# so a payload with any of them set to 1.30 let the answer print "现价 1.30 元".
+#
+# A tool's output shape is a fact about that tool, so it is stated here per
+# tool and matched by path prefix. A leaf that is not registered is still
+# recorded as evidence — it simply cannot ground a price. Adding a tool that
+# returns price levels means adding a row here, which is the point: the
+# registration is a decision someone made, not a coincidence of naming.
+_REGISTERED_PRICE_INDICATORS: dict[str, tuple[str, ...]] = {
+    "technical_indicators": (
+        "latest_close",
+        "indicators.sma_",
+        "indicators.ema_",
+        "indicators.bollinger.upper",
+        "indicators.bollinger.middle",
+        "indicators.bollinger.lower",
+    ),
+}
 
 
-# Generic band leaves. "lower" is a price only under a band family, so these
-# need a family token elsewhere in the path: ``bollinger.lower`` qualifies,
-# a bare ``summary.lower`` does not.
-_PRICE_BAND_LEAVES = frozenset({"upper", "lower", "middle", "mid", "top", "bottom", "basis"})
-
-
-# Standard pivot-level spellings. They are matched before the trailing digits
-# are stripped: ``r1`` would otherwise become ``r``, which is in no set, and
-# the six literals ``r1 r2 r3 s1 s2 s3`` sat in the family list unreachable.
-_PIVOT_LEVEL_RE = re.compile(r"^[rs][123]$")
-
-
-_NON_PRICE_TOKENS = frozenset(
-    {
-        "volume", "vol", "turnover", "amount", "count", "rows", "returned", "signal",
-        "histogram", "rsi", "kdj", "k", "d", "j", "cci", "adx", "obv", "mfi", "roc",
-        "williams", "wr", "stoch", "pct", "percent", "ratio", "change", "chg", "width",
-        "position", "score", "z", "zscore", "slope", "angle", "days", "bars",
-        # Parameters and derived shapes, not levels: ``params.ma_period: 20``
-        # and ``entry_condition.ma_window: 20`` are settings, ``ma_diff`` and
-        # ``sma_cross`` are differences and booleans. The leaf test below
-        # already rejects those three, but a path that also carries a family
-        # token in another segment must not be readmitted by it.
-        "window", "period", "length", "span", "lookback", "n", "cross", "flag",
-    }
-)
-
-
-def _is_price_denominated_indicator(path: str) -> bool:
-    """Return whether a generic evidence path is a price-denominated indicator.
-
-    The decision is made on the LEAF — the last dotted segment, with a
-    trailing index stripped — not on "some token anywhere in the path". Under
-    the old any-token rule ``indicators.ma_diff``, ``indicators.sma_cross``
-    and ``indicators.supertrend_direction`` were all admitted as observed
-    prices because they carry ``ma`` / ``sma`` / ``supertrend`` somewhere,
-    and a payload with any of them set to 1.30 let the answer print
-    "现价 1.30 元" (attack6 probe, 2026-09-09). A difference, a crossover
-    flag and a direction are not prices.
+def _is_registered_price_indicator(tool: str, path: str) -> bool:
+    """Whether a tool registered this leaf as a price-denominated level.
 
     Args:
+        tool: The tool whose result produced the evidence record.
         path: Recorded evidence field, e.g. ``"indicators.bollinger.lower"``.
 
     Returns:
-        True when the leaf names a price-denominated indicator level and no
-        path token names a non-price quantity.
+        True when the tool has a registration whose prefix the path matches.
     """
-    text = str(path or "")
-    tokens = [
-        re.sub(r"\d+$", "", token).casefold()
-        for token in re.split(r"[._\[\]\-\s]+", text)
-        if token
-    ]
-    tokens = [token for token in tokens if token]
-    if not tokens:
+    prefixes = _REGISTERED_PRICE_INDICATORS.get(str(tool or ""))
+    if not prefixes:
         return False
-    if any(token in _NON_PRICE_TOKENS for token in tokens):
-        return False
-    segments = [segment for segment in re.split(r"[.\[\]]+", text) if segment]
-    if not segments:
-        return False
-    leaf = segments[-1].strip().casefold()
-    if _PIVOT_LEVEL_RE.match(leaf):
-        return True
-    leaf = re.sub(r"[_\-]?\d+$", "", leaf) or leaf
-    if leaf in _PRICE_INDICATOR_TOKENS:
-        return True
-    return leaf in _PRICE_BAND_LEAVES and any(
-        token in _PRICE_INDICATOR_TOKENS for token in tokens
-    )
+    leaf = str(path or "").strip()
+    for prefix in prefixes:
+        if leaf == prefix:
+            return True
+        if not leaf.startswith(prefix):
+            continue
+        # A registration ending in "_" names a parametrised family
+        # (``indicators.sma_20``), so what follows must be the parameter.
+        # Without that, ``indicators.sma_cross`` — a boolean — matched
+        # ``indicators.sma_`` and became a price, which is the exact defect
+        # the name-reading rule kept producing.
+        rest = leaf[len(prefix):]
+        if not prefix.endswith("_"):
+            return True
+        if rest.isdigit():
+            return True
+    return False
 
 
 def _metric_kind_for_path(path: str) -> str | None:
@@ -464,14 +395,6 @@ def _metric_kind_for_path(path: str) -> str | None:
             kind = _ANALYSIS_KIND_ALIASES.get("_".join(tokens[start : start + size]))
             if kind is not None:
                 return kind
-    return _metric_kind_for_text(path)
-
-
-def _metric_kind_for_text(text: str) -> str | None:
-    """Return the analysis metric kind named in a claim or header."""
-    for pattern, kind in _ANALYSIS_KIND_PATTERNS:
-        if pattern.search(text):
-            return kind
     return None
 
 
@@ -949,7 +872,7 @@ class _EvidenceMixin:
                 continue
             field_name = _price_field_for_path(record.field)
             if field_name is None:
-                if _is_price_denominated_indicator(record.field):
+                if _is_registered_price_indicator(record.tool, record.field):
                     records.append(replace(record, field="indicator"))
                 continue
             records.append(replace(record, field=field_name))

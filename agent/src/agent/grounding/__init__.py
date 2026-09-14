@@ -11,9 +11,16 @@ facts are structural rather than advisory:
 
 Those are the mechanically decidable parts of the agent's output principles.
 The rest of that contract — "state the as-of", "analysis, not advice", "refuse
-out loud" — stays in the system prompt on purpose: see
-``policies._validate_price_claims`` and the package tests for why a regex gate
-on them rejects correct answers.
+out loud" — stays in the system prompt on purpose.
+
+What a number IS — an observed print, a derived level, a proposal, a citation,
+a count — is declared by the model in a ``figures`` block and verified against
+evidence (:mod:`figures`, :mod:`policies`). It used to be inferred from the
+prose around the number, against a catalogue of price words, level words,
+indicator names, attribution verbs and forecast frames. A catalogue is only as
+complete as the day it was typed: the same sentence got opposite verdicts in
+its two translations, and each missing phrasing was either a rejected correct
+answer or a released fabrication.
 
 The package deliberately contains no provider or tool-registry dependencies so
 its state machine and final-answer checks remain deterministic and testable.

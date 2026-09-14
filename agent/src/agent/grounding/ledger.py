@@ -19,6 +19,7 @@ from src.agent.grounding.identity import (
     _utc_now,
 )
 from src.agent.grounding.evidence import EvidenceRecord, _EvidenceMixin, _json_object
+from src.agent.grounding.figures import parse_figures_block, scan_figures, strip_figures_block
 from src.agent.grounding.policies import ValidationResult, _PolicyMixin
 from src.agent.grounding.release import (
     MAX_GROUNDING_RECOVERY_ROUNDS,
@@ -263,12 +264,18 @@ class GroundingLedger(
             A deterministic validation result.
         """
         self._ingest_run_dir_ohlc_csvs()
+        block = parse_figures_block(content)
+        figures = scan_figures(content, block)
         issues: list[dict[str, Any]] = []
         issues.extend(self._validate_identity(content))
-        issues.extend(self._validate_unsourced_symbols(content))
-        issues.extend(self._validate_price_claims(content))
-        issues.extend(self._validate_analysis_claims(content))
-        result = ValidationResult(valid=not issues, issues=issues)
+        issues.extend(self._validate_unsourced_symbols(content, figures, block))
+        issues.extend(self._validate_figures(content, block, figures))
+        issues = self._dedupe_issues(issues)
+        result = ValidationResult(
+            valid=not issues,
+            issues=issues,
+            released_text=strip_figures_block(content, block),
+        )
         if not record:
             return result
         self._validations.append(
@@ -278,6 +285,7 @@ class GroundingLedger(
                 "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
                 "valid": result.valid,
                 "issues": issues,
+                "figures_block": block.raw,
             }
         )
         self.persist()

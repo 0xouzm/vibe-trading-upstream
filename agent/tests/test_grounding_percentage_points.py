@@ -1,115 +1,103 @@
-"""Percentage-point deltas must not be read as quoted prices.
+"""Percentage-point deltas: one shape, one verdict, in both languages.
 
-Regression test for the false positive described in HKUDS/Vibe-Trading#1341:
-`_numbers_without_dates_or_percent` masked "%" but not the percentage-point
-spellings, so "~3.6pp below Penumbra" yielded 3.0 (the ".6" consumed as a
-decimal). That number reached the OHLC comparator as an unsourced price claim,
-which rejected a correct fundamentals answer and demanded `get_market_data` to
-substantiate a statement that had nothing to do with price.
+Regression history for HKUDS/Vibe-Trading#1341: the price scan masked "%" but
+not the percentage-point spellings, so "~3.6pp below Penumbra" yielded 3.0 (the
+".6" consumed as a decimal) and that number reached the OHLC comparator as an
+unsourced price claim — rejecting a correct fundamentals answer and demanding
+`get_market_data` to substantiate a statement that had nothing to do with
+price. The mask that fixed it then had to grow: 个百分点 and 基点 were missing,
+the Chinese measure word broke the word boundary, and each gap was one more
+rejected answer.
 
-Both directions are pinned here: percentage-point deltas are masked, and a
-genuine price is still extracted.
+There is no mask now. A percentage-point delta is a decimal, which is
+measurement-shaped, which means the model declares what it is — and the twelve
+spellings below stop being twelve cases. What this file pins is that they are
+ONE case: the same shape, the same verdict, whatever unit token trails the
+number and whichever language it is written in.
 """
+
+from __future__ import annotations
+
+import pathlib
+import tempfile
 
 import pytest
 
 from src.agent.grounding import GroundingLedger
-
-_extract = GroundingLedger._numbers_without_dates_or_percent
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "gross margin ~3.6pp below Penumbra",
-        "gross margin 3.6 pp below Penumbra",
-        "operating margin improved 2.4ppt year over year",
-        "operating margin improved 12.5 ppts sequentially",
-        "spread widened 45bps after the print",
-        "spread widened 45 bps after the print",
-        "yield moved 7bp on the day",
-        "\u6bdb\u5229\u7387\u4e0b\u964d 3.6 \u767e\u5206\u70b9",
-        "margin fell -1.8pp sequentially",
-        "margin rose +0.9pp sequentially",
-        "roughly \u22483.6pp of dilution",
-    ],
-)
-def test_percentage_point_deltas_are_not_prices(text):
-    """No percentage-point delta should survive as a candidate price."""
-    assert _extract(text) == [], f"leaked a price candidate from: {text!r}"
+from src.agent.grounding.figures import parse_figures_block, scan_figures
 
 
-@pytest.mark.parametrize(
-    "text,expected",
-    [
-        ("closing price 48.20", 48.20),
-        ("the stock closed at 48.20 on heavy volume", 48.20),
-        ("last trade 152.75", 152.75),
-        ("opened at 1,204.50 and faded", 1204.50),
-    ],
-)
-def test_genuine_prices_are_still_extracted(text, expected):
-    """The mask must not swallow real quoted prices -- that would blind the
-    grounding check it exists to feed."""
-    assert expected in _extract(text), f"lost a real price from: {text!r}"
+def _shapes(text: str) -> list[str]:
+    """The shape of every number in ``text``, in document order."""
+    return [figure.shape for figure in scan_figures(text, parse_figures_block(text))]
 
 
-def test_mixed_sentence_keeps_price_drops_percentage_point():
-    """A sentence carrying both must yield only the price."""
-    values = _extract("closed at 48.20, with gross margin ~3.6pp below peers")
-    assert 48.20 in values
-    assert 3.0 not in values
-    assert 3.6 not in values
+def _verdict(text: str) -> bool:
+    """Validate a fundamentals answer against a run with no market evidence."""
+    ledger = GroundingLedger(
+        run_dir=pathlib.Path(tempfile.mkdtemp()),
+        user_message="compare the gross margins",
+    )
+    return ledger.validate_final_answer(text).valid
 
 
-def test_bare_number_still_extracted():
-    """Guard against the mask being over-broad: a plain number is untouched."""
-    assert 48.20 in _extract("48.20")
+_SPELLINGS = [
+    "gross margin ~3.6pp below Penumbra",
+    "gross margin 3.6 pp below Penumbra",
+    "operating margin improved 2.4ppt year over year",
+    "operating margin improved 12.5 ppts sequentially",
+    "spread widened 4.5bps after the print",
+    "yield moved 7.0bp on the day",
+    "margin fell -1.8pp sequentially",
+    "margin rose +0.9pp sequentially",
+    "毛利率下降 3.6 个百分点",
+    "毛利率下降3.6个百分点",
+    "同比下降 3.6 百分点",
+    "利差扩大 250.0 个基点",
+    "毛利率下降 3.6 个百分点后企稳",
+]
 
 
-# The English spellings above were the ones the report named, but this gate
-# sees whatever language the model answered in, and the UI ships seven locales.
-# The first version of the mask required the number to sit directly against
-# "百分点", which is the rare Chinese spelling — the ordinary one puts the
-# measure word 个 in between, and "基点" was not covered at all. Both were
-# still being read as prices, so a Chinese fundamentals answer kept getting
-# rejected while the identical English answer passed.
-@pytest.mark.parametrize(
-    "text",
-    [
-        "毛利率下降 3.6 个百分点",
-        "毛利率下降3.6个百分点",
-        "净利率提升 2 个百分点。",
-        "同比下降 3.6 百分点",
-        "利差扩大 250 个基点",
-        "利差扩大250基点",
-        # A trailing CJK character rather than punctuation: \b after a CJK
-        # unit needs a non-word char to follow, so this is the case that
-        # breaks if the boundary is reintroduced there.
-        "毛利率下降 3.6 个百分点后企稳",
-    ],
-)
-def test_chinese_percentage_point_deltas_are_masked(text: str) -> None:
-    assert _extract(text) == [], f"{text!r} leaked a price-like number"
+@pytest.mark.parametrize("text", _SPELLINGS)
+def test_every_spelling_is_the_same_measurement_shape(text: str) -> None:
+    """A decimal is a decimal, whatever unit token follows it.
+
+    The unit used to decide the verdict, which is why the mask kept growing.
+    ``3.6ppm`` was the worst case: the number scan fenced off trailing letters,
+    truncated the figure to ``3``, and the same statement was a decimal in
+    Chinese and a bare integer in English.
+    """
+    assert "measured" in _shapes(text), text
 
 
-# The other arm. Narrowing the false positives must not blind the gate to a
-# real unsourced price, in either language.
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("TSLA.US last traded at 412.35 USD", [412.35]),
-        ("closed at 412.35", [412.35]),
-        ("现价 412.35 元", [412.35]),
-        ("收盘价 412.35", [412.35]),
-        # "ppm" is not "pp": the ASCII units keep their word boundary, so the
-        # mask does not apply and a number still reaches the comparator. The
-        # value is 3.0 rather than 3.6 because the extractor drops a decimal
-        # tail followed immediately by letters — the same quirk the pp report
-        # describes, pre-existing and untouched here. Pinned as-is so a future
-        # change to either behaviour is visible.
-        ("3.6ppm impurity", [3.0]),
-    ],
-)
-def test_real_prices_still_extracted(text: str, expected: list) -> None:
-    assert _extract(text) == expected
+def test_the_unit_no_longer_truncates_the_figure() -> None:
+    """``3.6ppm`` is 3.6, not 3 — the fence is on digits, not on letters."""
+    text = "3.6ppm impurity"
+    figures = scan_figures(text, parse_figures_block(text))
+
+    assert [figure.text for figure in figures] == ["3.6"]
+
+
+@pytest.mark.parametrize("text", _SPELLINGS)
+def test_an_undeclared_delta_is_reported_in_every_spelling(text: str) -> None:
+    """The lower arm: a figure with no origin is named, not silently masked."""
+    assert _verdict(text) is False, text
+
+
+@pytest.mark.parametrize("text", _SPELLINGS)
+def test_a_declared_delta_passes_in_every_spelling(text: str) -> None:
+    """The upper arm: one declaration settles it, in either language.
+
+    Without this arm the file is satisfied by a gate that rejects everything,
+    which is the failure mode the mask had in the other direction.
+    """
+    figure = next(
+        figure.text
+        for figure in scan_figures(text, parse_figures_block(text))
+        if figure.shape == "measured"
+    )
+    declared = text + (
+        "\n\n```figures\n" + f"{figure} | cited | 2026 Q2 filing, margin bridge\n```"
+    )
+
+    assert _verdict(declared) is True, text

@@ -127,6 +127,8 @@ class Figure:
     date: str | None = None
     symbol: str | None = None
     scale: float = 1.0
+    # A currency mark or ISO code touches the digits ("$2050", "0.95 元").
+    currency: bool = False
 
 
 @dataclass(frozen=True)
@@ -577,11 +579,10 @@ def scan_figures(content: str, block: FiguresBlock) -> list[Figure]:
         cell = next(
             (entry for entry in cell_at if entry[0] <= start and end <= entry[1]), None
         )
+        currency = _currency_before(content, start) or _currency_after(content, match.end())
         if _within((start, match.end()), exempt):
             shape = "exempt"
-        elif percent or "." in match.group(0) or cell is not None:
-            shape = "measured"
-        elif _currency_before(content, start) or _currency_after(content, match.end()):
+        elif percent or currency or "." in match.group(0) or cell is not None:
             shape = "measured"
         else:
             shape = "bare"
@@ -607,6 +608,7 @@ def scan_figures(content: str, block: FiguresBlock) -> list[Figure]:
                 date=date_value,
                 symbol=symbol_value,
                 scale=scale,
+                currency=currency,
             )
         )
     return figures

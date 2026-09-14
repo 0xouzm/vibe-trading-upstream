@@ -334,6 +334,10 @@ def _formula_in_note(note: str) -> tuple[float, list[float], ast.Expression] | N
     parts = [note]
     for separator in ("≈", "≒", "＝", "=", "→", "->"):
         parts = [piece for part in parts for piece in part.split(separator)]
+    # A formula followed by its explanation ("(a − b) / b，自高点回撤"). A bare
+    # "," is not split: it groups thousands inside a formula.
+    for separator in ("，", "；", "：", "; ", ", "):
+        parts = [piece for part in parts for piece in part.split(separator)]
     candidates.extend(part for part in parts if part.strip())
     for candidate in candidates:
         evaluated = _evaluate_formula(candidate)

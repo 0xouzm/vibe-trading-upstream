@@ -275,6 +275,9 @@ def _shapes(text: str) -> dict[str, str]:
         "The 2026-09-09 close",                 # ISO date, English prose
         "On 2024 levels",                       # bare year, English prose
         "3. First conclusion",                  # ordered-list marker, English
+        "8月17–18日高点",                        # CJK month with a day range (real run)
+        "6月初低点，8月中旬平台",                  # CJK month alone (real run)
+        "| 阻力 | 含义 |\n|---|---|\n| 前高 | 8月17–18日高点 |",  # in a table cell
         "2026-09-11 / 09-14 两次盘中低点",       # zero-padded MM-DD after a full date
         "09-14 收盘",                           # zero-padded MM-DD alone
         "2026-10-11 / 10-14 两次盘中低点",       # unpadded MM-DD opened by a full date
@@ -299,6 +302,7 @@ def test_structural_shapes_need_no_declaration(text: str) -> None:
         "The close was 0.666",                    # decimal, English prose
         "Down 37% from the high",                 # percent, English prose
         "revenue of 400.5 billion",               # decimal, English prose
+        "| 区间 |\n|---|\n| 17–18 |",              # a range with no month mark is checked
         "| 区间 |\n|---|\n| 11-12 |",            # unpadded MM-DD shape may be a price range
         "| 日期 | 区间 |\n|---|---|\n| 2026-09-09 | 11-12 |",  # a date in ANOTHER cell
     ],

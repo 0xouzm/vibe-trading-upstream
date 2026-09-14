@@ -641,3 +641,16 @@ def test_a_price_discount_and_a_drawdown_still_derive(tmp_path: Path, prose: str
     result = _ledger(tmp_path, MARKET_A).validate_final_answer(HDR + prose + _block(ROW, row))
 
     assert result.valid is True, result.issues
+
+
+def test_a_formula_may_be_followed_by_its_explanation(tmp_path: Path) -> None:
+    """A real run wrote "(0.648 − 0.997) / 0.997，自7月1日收盘高点回撤" and lost a round."""
+    explained = _ledger(tmp_path / "ok", MARKET_A).validate_final_answer(
+        HDR + " 较高点回撤 37%。" + _block(ROW, "37% | derived | (1.053 − 0.666) / 1.053，自 5 月高点回撤 | c1")
+    )
+    wrong = _ledger(tmp_path / "bad", MARKET_A).validate_final_answer(
+        HDR + " 较高点回撤 12%。" + _block(ROW, "12% | derived | (1.053 − 0.666) / 1.053，自 5 月高点回撤 | c1")
+    )
+
+    assert explained.valid is True, explained.issues
+    assert "derivation_result_mismatch" in _reasons(wrong)

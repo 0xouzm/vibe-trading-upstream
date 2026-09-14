@@ -1957,3 +1957,14 @@ def test_a_held_back_line_that_never_became_a_fence_is_still_shown(tmp_path: Pat
 
     assert result["content"] == content
     assert streamed == content
+
+
+def test_prose_after_the_figures_block_still_reaches_the_stream(tmp_path: Path) -> None:
+    """The block is held back from its fence on; what follows it is flushed at the end."""
+    content = "建议每周复盘 3 次。\n\n```figures\n3 | count | 次/周\n```\n\n补充：先写结论。"
+
+    result, streamed, _ = _stream(tmp_path, content)
+
+    assert "figures" not in streamed
+    assert "补充：先写结论。" in result["content"]
+    assert streamed.rstrip().endswith("补充：先写结论。")

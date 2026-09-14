@@ -1395,13 +1395,22 @@ class AgentLoop:
                 )
 
                 streamed_chars = 0
+                stream_total = 0
 
                 def _on_text_chunk(delta: str) -> None:
-                    nonlocal streamed_chars
+                    nonlocal streamed_chars, stream_total
                     thinking_chunks.append(delta)
+                    stream_total += len(delta)
                     if buffer_text_output:
                         return
                     # The figures block never streams: see streamable_length.
+                    # Only a fence character can hold text back, so a clean
+                    # stream is emitted as it arrives instead of re-parsing the
+                    # whole answer on every chunk.
+                    if streamed_chars + len(delta) == stream_total and not ("`" in delta or "~" in delta):
+                        self._emit("text_delta", {"delta": delta, "iter": current_iter})
+                        streamed_chars = stream_total
+                        return
                     text = "".join(thinking_chunks)
                     safe = (
                         self._grounding.streamable_length(text)
@@ -1497,6 +1506,7 @@ class AgentLoop:
                     )
                     thinking_chunks.clear()
                     streamed_chars = 0
+                    stream_total = 0
                     reasoning_chars = 0
                     last_reasoning_emit = None
                     # Wait on the cancel event, not time.sleep: the delay now
@@ -1700,8 +1710,7 @@ class AgentLoop:
                             if repaired is not None:
                                 # Non-recording: no model round produced this
                                 # text, and ``validation_count`` is the
-                                # revision budget AND the rejected-draft
-                                # number the user is shown.
+                                # rejected-draft number the user is shown.
                                 recheck = self._grounding.revalidate(repaired)
                                 if recheck.valid:
                                     trace.write(
@@ -1862,10 +1871,14 @@ class AgentLoop:
                             # Flush a held-back last line that never became a
                             # figures fence; a stripped block leaves nothing.
                             shown = "".join(thinking_chunks)[:streamed_chars]
-                            if final_content.startswith(shown) and len(final_content) > streamed_chars:
+                            if not final_content.startswith(shown):
+                                # Stripping the block also trims the blank lines
+                                # the stream already showed before its fence.
+                                shown = shown.rstrip()
+                            if final_content.startswith(shown) and len(final_content) > len(shown):
                                 self._emit(
                                     "text_delta",
-                                    {"delta": final_content[streamed_chars:], "iter": current_iter},
+                                    {"delta": final_content[len(shown):], "iter": current_iter},
                                 )
                     should_continue_goal = False
                     continuation_snapshot = None

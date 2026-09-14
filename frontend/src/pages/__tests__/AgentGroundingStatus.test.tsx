@@ -153,4 +153,24 @@ describe("Agent grounding status line", () => {
     expect(useAgentStore.getState().status).toBe("streaming");
     expect(screen.queryByText(STATUS_TEXT)).not.toBeInTheDocument();
   });
+
+  it("steps aside when a recovery round starts a tool call", async () => {
+    await renderStreamingAttempt("attempt-1");
+
+    act(() => {
+      latestHandlers().grounding_status({ attempt_id: "attempt-1", stage: "revising", round: 1, issues: 2 });
+    });
+    expect(screen.getByText("Checking the figures in this answer (round 1)…")).toBeInTheDocument();
+
+    act(() => {
+      latestHandlers().tool_call({
+        attempt_id: "attempt-1",
+        tool: "get_market_data",
+        call_id: "call-recovery",
+        arguments: { codes: ["159516.SZ"] },
+      });
+    });
+    expect(screen.queryByText(STATUS_TEXT)).not.toBeInTheDocument();
+  });
+
 });

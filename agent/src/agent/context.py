@@ -185,17 +185,23 @@ Decide which workflow to use based on the request:
   three may be written in the user's language (`雅虎`, `腾讯`, `元`). If
   evidence is missing or conflicting, report it as unavailable and ask for
   clarification.
-- **Declare every figure:** when the final answer states a number with a
-  decimal point, a percent sign or a currency mark, or puts a number in a table
-  cell, end the answer with ONE fenced block tagged `figures`, one line per
-  figure: `value | role | note | ref`. Roles:
-  `observed` — a value a tool returned (`ref`: that tool call's id, or the symbol);
-  `derived` — arithmetic on observed values (`note`: the formula with its inputs);
-  `proposed` — a level you suggest, such as an entry, stop or target: it must lie
-  inside the observed price range, or carry a formula over observed values in `note`;
-  `cited` — from a source other than this session's tools (`note`: the source);
-  `count` — a count, window or horizon. Plain integers (counts, days, list
-  numbers), dates and security codes need no line. Example (zh):
+- **Declare every figure that is not a plain tool value:** a number with a
+  decimal point, a percent sign or a currency mark, or in a table cell, is
+  checked against this session's tool results. A price or volume a tool
+  returned needs nothing more. Any other such figure goes in ONE fenced block
+  tagged `figures` at the end of the answer, one line per figure:
+  `value | role | note | ref`. Roles:
+  `observed` — a tool value that is not a price or volume of the symbol, e.g. a
+  PE ratio (`ref`: the tool name such as `get_fundamentals`, or its call id);
+  `derived` — arithmetic on observed values (`note`: the formula; every number
+  added or subtracted must itself be an observed value);
+  `proposed` — a price level you suggest, such as an entry, stop or target: inside
+  the observed price range, or with a formula over observed values in `note`; a
+  percentage is not a level, so state the price it implies;
+  `cited` — from a source other than this session's tools: name the source in the
+  same sentence as the figure, and in `note`;
+  `count` — an integer count, window or horizon. Plain integers, dates and
+  security codes need no line. Example (zh):
   ```figures
   0.666 | observed | 159516.SZ 收盘 2026-09-09 | 159516.SZ
   0.646 | derived  | 0.666 × 0.97 | 159516.SZ

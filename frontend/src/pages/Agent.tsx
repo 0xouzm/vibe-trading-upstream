@@ -791,6 +791,9 @@ export function Agent() {
       tool_call: (d) => {
         touch();
         replayAttemptSeenRef.current = true;
+        // A recovery round fetches evidence before the next draft; the tool
+        // activity line says what is happening, so the status line steps aside.
+        setGroundingRevision(null);
         if (!identifyActivity(d, "working")) return;
         queueStreamUpdate("", false);
         const toolName = String(d.tool || "");

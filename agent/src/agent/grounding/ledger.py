@@ -110,14 +110,6 @@ class GroundingLedger(
         # names an instrument the run really handled.
         self._session_symbol_roots: set[str] = set()
 
-        # Six-digit codes the user typed, with or without a venue suffix.
-        self._bare_codes: set[str] = {
-            run
-            for run in "".join(ch if "0" <= ch <= "9" else " " for ch in user_message).split()
-            if len(run) == 6
-        }
-        self._bare_code_hits: dict[str, dict[str, str]] = {}
-
         self._seed_symbols(user_message, source="user_message")
         self.persist()
 
@@ -249,7 +241,6 @@ class GroundingLedger(
             self._ingest_resolution(arguments, payload, call_id)
         elif tool_name == "get_market_data":
             self._ingest_market_data(arguments, payload, call_id)
-            self._lock_bare_codes(arguments, payload, call_id)
         elif payload is not None:
             self._ingest_generic_numeric(tool_name, arguments, payload, call_id)
         self.persist()
@@ -270,9 +261,9 @@ class GroundingLedger(
         """Validate text WITHOUT counting it as a rejected draft.
 
         For the recheck that follows a deterministic repair or redaction. No
-        model round produced that text, so recording it would spend one unit
-        of the revision budget (``loop.py``) and add an attempt to the
-        artifact that no draft stands behind.
+        model round produced that text, so recording it would count a
+        rejected draft nobody wrote and add an artifact attempt no draft
+        stands behind.
 
         Args:
             content: The repaired or redacted answer.
@@ -285,12 +276,10 @@ class GroundingLedger(
     def _validate(self, content: str, *, record: bool) -> ValidationResult:
         """Run the gate, optionally without recording the attempt.
 
-        ``validation_count`` is the run's rejected-DRAFT count: it caps the
-        revision budget (``loop.py``) and is printed to the user as the number
-        of rejected drafts in the degraded-run reason. The release path's own
-        rechecks are not drafts — one successful ``redacted_release`` inflated
-        the count from 1 to 4 with no model round in between, shrinking the
-        budget and overstating the audit number — so they pass ``record=False``.
+        ``validation_count`` is the run's checked-DRAFT count: the degraded-run
+        reason prints it and the ``grounding_status`` round follows it (the
+        revision cap itself is counted in ``loop.py``). The release path's own
+        rechecks are not drafts, so they pass ``record=False``.
 
         Args:
             content: Candidate assistant answer.

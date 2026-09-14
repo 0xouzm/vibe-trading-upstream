@@ -22,27 +22,15 @@ from src.agent.grounding.figures import (
 )
 from src.agent.grounding.policies import ValidationResult
 
-# Bounded read-only recovery (#1081): a missing instrument identity or price
-# evidence is often recoverable deterministically, so the loop should keep
-# driving the original task through `search_symbol` and `get_market_data`
-# instead of handing the user a terminal "confirm and continue" fallback.
-# These budgets are separate from the rejected-draft count so real recovery
-# progress is never cut off at the three-draft retry cap.
+# Bounded read-only recovery (#1081) through `search_symbol` / `get_market_data`,
+# budgeted separately from rejected drafts so real progress is never cut off.
 MAX_GROUNDING_RECOVERY_ROUNDS = 6
 
-
-# Drafts the gate may reject on the correction path before the run stops
-# revising: the first is handed back with a correction prompt, the second is
-# released with its rejected figures cut (spec §0). Two, because a revision
-# costs a full model round on a report the user is already waiting for, and
-# the third and fourth rounds bought nothing measurable: the release
-# path now cuts the figures the gate objected to and ships the rest, so the
-# alternative to another round is a discounted answer, not a refusal.
+# Rejected drafts before the run stops revising: the first gets a correction
+# prompt, the second is released with its rejected figures cut (spec §0).
 MAX_GROUNDING_REVISIONS = 2
 
-
-# Issue codes whose figure can be cut out of its clause and the draft released
-# (see ``redacted_release``), and the provenance codes a data note repairs.
+# Issue codes whose figure can be cut out and the draft released.
 _REDACTABLE_CODES = frozenset(
     {
         "numeric_claim_conflict",
@@ -52,50 +40,33 @@ _REDACTABLE_CODES = frozenset(
     }
 )
 
-
-# The provenance codes a data note may fill in deterministically. The source
-# and the currency are metadata ABOUT a figure. ``canonical_symbol_not_surfaced``
-# is deliberately absent: the symbol is the figure's SUBJECT, and appending
-# "562500.SH: source yahoo" under a draft that calls the instrument 贵州茅台
-# footnotes a misattribution instead of repairing it — so the identity binding
-# keeps its model-correction round.
+# Provenance codes a data note repairs deterministically. The symbol is absent
+# on purpose: it is the figure's subject, and a footnote naming it under a draft
+# about another instrument would bless a misattribution.
 _REPAIRABLE_PROVENANCE_CODES = frozenset(
     {"data_source_not_surfaced", "currency_not_surfaced"}
 )
 
-
 _MAX_REDACTION_PASSES = 3
 
-
-# The in-text mark for an omitted figure. It replaces the number AND the unit
-# glued to it ("0.95 元" → "（略※）", "$1.10" → "(omitted※)") so the sentence
-# still reads as prose, and the ※ points at the one footnote that says how
-# many figures were omitted and why. A bracketed "[value removed]" left the
-# unit dangling and read like a redaction stamp.
+# The omission mark replaces the number and its glued unit so the sentence still
+# reads ("0.95 元" → "（略※）"); ※ points at the single footnote.
 _REDACTION_MARKER_ZH = "（略※）"
-
 
 _REDACTION_MARKER_EN = "(omitted※)"
 
-
 MAX_SYMBOL_RESOLUTION_ATTEMPTS = 2
-
 
 MAX_PRICE_EVIDENCE_ATTEMPTS = 3
 
 
 def _format_price(value: float) -> str:
-    """Render an observed price without scientific notation or lost digits.
-
-    ``%g`` switches to scientific notation past six significant digits, so an
-    index level printed in the release footnote read "1.23457e+06".
-    """
+    """Render a price without scientific notation (``%g`` gives "1.23457e+06")."""
     return format(value, ".10g")
 
 
-#: What the evidence says about a figure, keyed on the validator's reason. The
-#: reason is a state of the CHECK, never a word read out of the answer, so this
-#: table is language-independent the way the roles it reports on are.
+#: What the evidence says about a figure, keyed on the validator's reason: a
+#: state of the check, never a word read from the answer.
 _CORRECTION_REASONS = {
     "undeclared": "it is not declared at all",
     "no_evidence": "this session holds no evidence of that kind to check it against",
@@ -150,11 +121,10 @@ def _correction_line(issue: dict[str, Any]) -> str:
 
 
 def _digit_key(text: str) -> str:
-    """The digits a figure was written with, ignoring how it was decorated.
+    """The digits a figure was written with, ignoring decoration.
 
-    ``37%``, ``37 %`` and a bare ``37`` share one key; ``3`` and ``3.0`` do
-    not, because they are not the same number as written and sweeping one for
-    the other would cut an unrelated count.
+    ``37%``, ``37 %`` and ``37`` share a key; ``3`` and ``3.0`` do not, so a
+    sweep never cuts an unrelated count.
 
     Args:
         text: The figure exactly as it appears in the answer.
@@ -167,12 +137,10 @@ def _digit_key(text: str) -> str:
 
 
 def _strip_release_markers(content: str) -> str:
-    """Remove any redaction marker or release note the MODEL wrote.
+    """Remove redaction markers and ※ note lines the model wrote itself.
 
-    The marker and the footnote are the gate's own statements about what it
-    cut. A draft carrying "※ 略去 0 处……" of its own shipped both notes, one
-    contradicting the other, and a "（略※）" pasted into the body read as a
-    redaction that never happened.
+    Those are the gate's own statements about what it cut; a model-written copy
+    contradicts the real footnote or claims a redaction that never happened.
 
     Args:
         content: The rejected draft.
@@ -192,14 +160,11 @@ class _ReleaseMixin:
     """Release behaviour of :class:`GroundingLedger`."""
 
     def correction_prompt(self, validation: ValidationResult) -> str:
-        """Build bounded per-figure feedback for one rejected model draft.
+        """Build per-figure feedback for one rejected model draft (spec 6).
 
-        The feedback is per NUMBER, not per rule (spec 6). Each rejected figure
-        gets one line naming three things: the figure exactly as it was
-        written, the role it was DECLARED under, and what the EVIDENCE says
-        about it — the range that was observed, the values nearest to it, or
-        the value its own note evaluates to. The three ways out are then stated
-        once, because they are the same three for every figure.
+        Each rejected figure gets one line: the figure as written, the role it
+        was declared under, and what the evidence says. The three ways out are
+        stated once.
 
         Args:
             validation: The rejected draft's validation result.
@@ -279,11 +244,7 @@ class _ReleaseMixin:
         return "\n".join(lines)
 
     def _repeatedly_rejected(self, issues: Sequence[dict[str, Any]]) -> list[str]:
-        """Figures this draft repeats that an earlier draft was already refused for.
-
-        The model tends to restate a rejected figure in a new format rather
-        than drop it; the gate refuses it again and the run burns its whole
-        revision budget on one number.
+        """Figures in this draft that an earlier draft was already refused for.
 
         Args:
             issues: The current draft's figure issues.
@@ -301,17 +262,13 @@ class _ReleaseMixin:
         return list(dict.fromkeys(repeated))
 
     def recovery_action(self, validation: ValidationResult) -> str | None:
-        """Decide the next safe read-only recovery step for a rejected draft.
+        """Decide the next safe read-only recovery step for a rejected draft (#1081).
 
-        Returns ``search_symbol`` when instrument identity is unresolved and
-        resolution attempts remain; ``get_market_data`` when identity is locked
-        but a price claim has no observed evidence and fetch attempts remain;
-        otherwise ``None`` (genuinely ambiguous, conflicting, or exhausted —
-        the loop must then ask the user or fail closed).
-
-        This is the deterministic half of #1081: recoverable missing evidence is
-        often obtainable through read-only tools, so a rejected draft should
-        drive the original task forward instead of stopping.
+        Returns:
+            ``search_symbol`` when identity is unresolved and resolution attempts
+            remain; ``get_market_data`` when identity is locked, a price claim
+            lacks evidence and fetch attempts remain; otherwise None, and the
+            loop must ask the user or fail closed.
         """
         if self._recovery_rounds >= MAX_GROUNDING_RECOVERY_ROUNDS:
             return None
@@ -373,10 +330,8 @@ class _ReleaseMixin:
                 f"The verified observed OHLC range is: {joined}. "
                 "I will not invent an entry price without a visible derivation or refreshed evidence."
             )
-        # No observed price evidence: distinguish "identity unresolved" from
-        # "the draft cited prices this session never observed". Reporting the
-        # identity message for the latter is misleading (the run may not even
-        # have touched the market tools).
+        # No observed price: tell unresolved identity apart from a draft citing
+        # prices this session never observed.
         issue_codes = {
             code
             for validation in self._validations
@@ -413,11 +368,8 @@ class _ReleaseMixin:
 
         Args:
             is_zh: Whether to join the facts with Chinese punctuation.
-            content: The answer the summary is attached to, when there is one.
-                The symbol is then printed the way that answer spells it — a
-                footnote on an answer written throughout in ``562500.SS`` used
-                to name ``562500.SH``, because the evidence record is
-                canonicalised.
+            content: The answer the summary is attached to, if any; the symbol
+                is then printed the way that answer spells it.
 
         Returns:
             One fact per symbol, or None when the run observed no price.
@@ -498,27 +450,10 @@ class _ReleaseMixin:
     ) -> str | None:
         """Append a data note when the only defects are missing provenance words.
 
-        ``data_source_not_surfaced`` and ``currency_not_surfaced`` mean the
-        answer quoted a price without naming the source or the currency. Both
-        are known to the ledger, so the omission is deterministic — and
-        regenerating a multi-minute report to add the word "tencent" is a full
-        model round for one word. Nothing here touches a figure: a draft
-        carrying any other issue is returned as None so the numeric checks
-        keep their round.
-
-        ``canonical_symbol_not_surfaced`` is deliberately NOT repaired. That
-        check's job is that a price claim surfaces the symbol it is about, and
-        appending "562500.SH: price source yahoo" under a draft that reads
-        "贵州茅台 最新收盘价 1.171 元" turns a misattribution into a released
-        answer with a footnote naming a different instrument. It keeps its
-        model round.
-
-        The "unchecked price column" veto this used to carry is gone with the
-        surface it guarded. It declined the repair whenever a table held a
-        price column no validator read (``| 档位 | 挂单价 |``), because the
-        note would attest to figures the gate never saw. Every cell of every
-        table is now a measurement-shaped figure the gate checks, so no such
-        column exists.
+        Source and currency are known to the ledger, so naming them should not
+        cost a model round. Any other issue returns None so the numeric checks
+        keep their round; see ``_REPAIRABLE_PROVENANCE_CODES`` for why a missing
+        symbol is not repaired.
 
         Args:
             content: The rejected draft.
@@ -539,38 +474,25 @@ class _ReleaseMixin:
     def redacted_release(self, content: str, validation: ValidationResult) -> str | None:
         """Release the last rejected draft with its unverified figures cut out.
 
-        Once the revision budget is spent, the draft is still the analysis the
-        user waited through every revision for, and the gate objected to
-        specific figures — not to the trend read, the indicator commentary, or
-        the risk notes around them. Each rejected figure is replaced by a
-        visible marker AT ITS OWN SPAN, the missing provenance words are
-        appended if that is all that remains, and the cut document is
-        re-validated by the same gate: only text that passes is returned.
-
-        A document-wide sweep then removes any UNCHECKED restatement of a
-        figure that was cut (see :meth:`_sweep_same_values`), so the footnote's
-        count is the number of places the figure no longer appears, not the
-        number of spans the validator happened to flag.
-
-        Fail-closed by construction. None — leave the canned fallback in place
-        — whenever the run never observed a price at all, an issue is not a
-        cut-out-able figure (an identity finding is one), a flagged figure
-        cannot be located, or the document still fails after the cut.
+        Each rejected figure becomes a marker at its own span, missing provenance
+        is appended, bare restatements of a cut figure are swept, and the result
+        and its footnote are re-validated by the same gate. Fail-closed: None when
+        no price was observed, an issue cannot be cut (an identity finding), a
+        flagged figure cannot be located, or the text still fails.
 
         Args:
             content: The rejected draft.
             validation: Its validation result.
 
         Returns:
-            The redacted, re-validated answer with its declaration block
-            stripped and a note stating how many figures were removed, or None.
+            The redacted, re-validated answer without its declaration block and
+            with a note stating how many figures were removed, or None.
         """
         if not self._price_records():
             return None
         text = _strip_release_markers(content)
-        # Stripping moves every offset after it, and the issue spans are the
-        # only anchor the cuts have, so the verdict is retaken on the text the
-        # cuts will actually be made in.
+        # Stripping shifts offsets and the cuts anchor on issue spans, so the
+        # verdict is retaken on the stripped text.
         check = validation if text == content else self._validate(text, record=False)
         removed = 0
         keys: set[str] = set()
@@ -608,16 +530,13 @@ class _ReleaseMixin:
             text, check, removed = swept, recheck, removed + len(swept_texts)
         body = check.released_text
         note = self._release_note(removed, body)
-        # The note carries the observed range and the canonical symbols, so it
-        # is answer text too, and it goes through the same gate — in undeclared
-        # mode, since it has no block of its own. Shipping it unchecked would
-        # contradict the fail-closed promise above.
+        # The note is answer text too (range, symbols), so it passes the same
+        # gate, in undeclared mode.
         if not self._validate(note, record=False).valid:
             return None
         released = body.rstrip() + "\n\n" + note
-        # Recorded beside the drafts but NOT as one: the artifact otherwise
-        # held no evidence for the fail-closed promise above, because every
-        # recheck on this path is deliberately unrecorded.
+        # Recorded beside the drafts, not as one: every recheck here is
+        # unrecorded, so this is the artifact's only evidence of the release.
         self._released = {
             "released_at": _utc_now(),
             "content_sha256": hashlib.sha256(released.encode("utf-8")).hexdigest(),
@@ -629,11 +548,10 @@ class _ReleaseMixin:
 
     @staticmethod
     def _issue_span(text: str, issue: dict[str, Any]) -> tuple[int, int] | None:
-        """Locate the flagged figure in ``text``.
+        """Locate the flagged figure in ``text`` by its recorded character span.
 
-        The validators record the character span of the figure itself, which
-        is the only reliable anchor: a stored claim string is normalised and
-        a bare numeric cell ("1.10") matches inside a longer number ("21.10").
+        The span is the only reliable anchor: a bare cell "1.10" also matches
+        inside "21.10".
 
         Args:
             text: The document the issue was raised against.
@@ -660,19 +578,16 @@ class _ReleaseMixin:
     ) -> tuple[str | None, list[str]]:
         """Replace every flagged figure with the omission marker.
 
-        An issue naming one figure cuts that figure. An issue with no value —
-        ``unsourced_symbol_figures``, which says "every figure on this line
-        belongs to an instrument no tool handled" — cuts every
-        measurement-shaped figure inside its span.
+        An issue without a value (``unsourced_symbol_figures``) cuts every
+        measured figure inside its span.
 
         Args:
             text: The document to rewrite.
             issues: The issues raised against it.
 
         Returns:
-            ``(rewritten text, figures replaced as written)``, or
-            ``(None, [])`` when a flagged issue could not be located and the
-            release must fail closed.
+            ``(rewritten text, figures replaced as written)``, or ``(None, [])``
+            when a flagged issue cannot be located and release must fail closed.
         """
         block = parse_figures_block(text)
         figures = scan_figures(text, block)
@@ -696,20 +611,11 @@ class _ReleaseMixin:
         return self._apply_cuts(text, cuts)
 
     def _sweep_same_values(self, text: str, keys: set[str]) -> tuple[str, list[str]]:
-        """Cut every UNCHECKED restatement of a figure that was already cut.
+        """Cut every bare-integer restatement of a figure that was already cut.
 
-        Cutting a figure at its own span leaves the same claim standing
-        wherever the shape rules do not check it. A bare integer is the one
-        such place: "回撤 37%" is a measurement and is verified, while the
-        "37" of "回撤 37 个百分点" is a bare integer that spec 3 deliberately
-        does not check, so the number the footnote says was removed would
-        still be on the page.
-
-        Only bare figures are swept. A measurement-shaped occurrence that
-        survived the cuts is one this gate CHECKED and grounded, and removing
-        it would delete a figure the evidence supports; an exempt occurrence
-        is a date, a security code or fenced text, and cutting those corrupts
-        the structure they belong to.
+        After "回撤 37%" is cut, "回撤 37 个百分点" still carries an unchecked bare
+        "37". Measured survivors were checked and grounded, and exempt ones are
+        structure (dates, codes, fenced text), so only bare figures are swept.
 
         Args:
             text: The already-cut document.
@@ -756,10 +662,8 @@ class _ReleaseMixin:
             end = currency_suffix_end(text, end)
             marker = self._marker_for(text, start)
             if marker is _REDACTION_MARKER_ZH:
-                # "建议买入价 0.95 元" → "建议买入价（略※）": a full-width
-                # bracket sits flush against the preceding word. Not against a
-                # table pipe, though — "| 第一档 |（略※） |" loses the column's
-                # padding and reads as a broken row.
+                # "建议买入价 0.95 元" → "建议买入价（略※）": flush against the word,
+                # but not against a table pipe, which would break the row's padding.
                 while (
                     start > cursor
                     and text[start - 1] == " "
@@ -775,11 +679,7 @@ class _ReleaseMixin:
     def _marker_for(self, text: str, position: int) -> str:
         """Pick the omission marker in the script of the line being cut.
 
-        A Chinese user asking about a US name gets English tables, and running
-        one marker over the whole document released
-        "Suggested entry price（略※） per share." A stretch with neither script
-        — a numeric table row — falls back to the user's language, which is
-        what the footnote is written in.
+        A line with neither script (a numeric table row) uses the user's language.
         """
         line = ""
         for candidate, start in _lines_with_offsets(text):
@@ -797,13 +697,7 @@ class _ReleaseMixin:
         )
 
     def _release_note(self, removed: int, content: str | None = None) -> str:
-        """Explain the redaction to the user, with the observed range.
-
-        ``redacted_release`` returns None before this is reached when the run
-        holds no price record, which is the only case in which the summary is
-        None — so it is read directly rather than behind an ``or ""`` that
-        described a state the caller cannot produce.
-        """
+        """Explain the redaction to the user, with the observed range."""
         is_zh = self._user_writes_chinese()
         joined = self._observed_range_summary(is_zh, content)
         if is_zh:

@@ -1,9 +1,7 @@
 """Evidence intake: what a tool result is allowed to ground.
 
-Every observed number the gate can validate against enters through this module
-— market-data rows, registered indicator leaves, backtest metrics, run-dir CSVs
-and generic numeric leaves. The kind map is keyed on TOOL FIELD NAMES, not on
-natural language.
+Every observed number the gate validates against enters here. Kind maps are
+keyed on tool field names, never on natural language.
 """
 
 from __future__ import annotations
@@ -25,17 +23,12 @@ from src.agent.grounding.identity import (
 
 _PRICE_FIELDS = {"open", "high", "low", "close", "adj_close", "price"}
 
-
 _TIMESTAMP_FIELDS = ("trade_date", "date", "datetime", "timestamp", "time", "index")
-
 
 _MAX_GENERIC_EVIDENCE = 2_000
 
-
-# CSV columns (case-insensitive) accepted from OHLC files the run wrote via
-# bash+yfinance, and their canonical price-field names. Everything else in the
-# file (Volume, Adj Close, etc.) is deliberately ignored so the contradiction
-# check does not gain values it would be willing to accept.
+# Only these CSV columns count; Volume, Adj Close etc. are ignored so the
+# contradiction check gains no values it would be willing to accept.
 _CSV_PRICE_COLUMNS = {
     "open": "open",
     "high": "high",
@@ -44,36 +37,18 @@ _CSV_PRICE_COLUMNS = {
     "price": "price",
 }
 
-
 _CSV_DATE_COLUMNS = {"date", "datetime", "trade_date", "timestamp", "index"}
 
-
-# Filename -> symbol mapping for run-dir CSVs. The bash workaround writes each
-# series with a filesystem-safe stem: ``BYN_V.csv`` for ``BYN.V``, ``PDI_TO.csv``
-# for ``PDI.TO``, ``GC_F.csv`` for ``GC=F``.
 _CSV_FILENAME_SUFFIX_MAP = (
     ("_V", ".V"),
     ("_TO", ".TO"),
     ("_F", "=F"),
-    # A US name is written ``INTC_US.csv`` by the same workaround, and
-    # ``.US`` is the venue suffix the rest of the project resolves on. Without
-    # this row the CSV was ingested as no evidence at all, so every price the
-    # run had actually fetched came back "numeric_claim_unavailable".
     ("_US", ".US"),
 )
 
-
-# Only ``get_market_data`` returns bars whose columns are already the canonical
-# OHLC field names. Every other market-sensitive tool nests its quote somewhere,
-# and ``_ingest_generic_numeric`` stores that JSON path verbatim — "data.last",
-# "quote[0].close_price". Without this map those observations never reach the
-# final-answer check, so a price the run genuinely retrieved is rejected as
-# "no matching observed tool evidence": measured against the live validator, an
-# answer quoting a ``get_stock_profile`` price failed with
-# ``numeric_claim_unavailable`` while the identical claim backed by
-# ``get_market_data`` passed. Only unambiguous quote fields are mapped; ratios,
-# volumes, strikes, and analyst targets stay out so the contradiction check does
-# not gain a wider set of values it is willing to accept.
+# Nested quote leaves of non-OHLC tools ("data.last", "quote[0].close_price")
+# mapped to canonical price fields. Only unambiguous quote fields: ratios,
+# volumes, strikes and analyst targets stay out so the check accepts no more.
 _GENERIC_PRICE_FIELD_ALIASES = {
     "open": "open",
     "open_price": "open",
@@ -116,10 +91,8 @@ _GENERIC_PRICE_FIELD_ALIASES = {
     "最新价": "price",
 }
 
-
-# Metric family for a claim/evidence leaf, so a figure is only grounded by
-# evidence of its own kind: an observed price must never stand in for an
-# invented volatility (#1336).
+# Metric family per field name: a figure is grounded only by evidence of its
+# own kind, so an observed price never stands in for a volatility (#1336).
 _ANALYSIS_KIND_ALIASES = {
     "annualized_vol": "vol",
     "annualized_volatility": "vol",
@@ -146,9 +119,7 @@ _ANALYSIS_KIND_ALIASES = {
     "return": "return",
     "returns": "return",
     "ic_positive_ratio": "win_rate",
-    # A-share tools key their JSON in Chinese. These are TOOL FIELD NAMES, in
-    # the same category as ``max_drawdown`` above: they name what a leaf of a
-    # result IS. Nothing here reads the answer's prose.
+    # Chinese TOOL FIELD NAMES from A-share tools, not answer prose.
     "最大回撤": "drawdown",
     "回撤": "drawdown",
     "夏普": "sharpe",
@@ -165,20 +136,16 @@ _ANALYSIS_KIND_ALIASES = {
 
 
 def _symbol_from_csv_filename(stem: str) -> str | None:
-    """Map a run-dir CSV stem back to a canonical project symbol.
+    """Map a run-dir CSV stem (``BYN_V`` -> ``BYN.V``) to a canonical symbol.
 
-    The bash workaround writes filesystem-safe stems: ``BYN_V.csv`` -> ``BYN.V``,
-    ``PDI_TO.csv`` -> ``PDI.TO``, ``GC_F.csv`` -> ``GC=F``, ``INTC_US.csv`` ->
-    ``INTC.US``. A stem without a recognized suffix (e.g. a bare US name
-    ``AAPL``) maps to None because the project convention requires an explicit
-    venue suffix.
+    A stem without a known venue suffix (a bare ``AAPL``) maps to None, because
+    the project requires an explicit venue suffix.
 
     Args:
         stem: CSV filename without the ``.csv`` extension.
 
     Returns:
-        The canonical symbol, or ``None`` when the stem has no recognizable
-        venue suffix.
+        The canonical symbol, or None.
     """
     upper = (stem or "").strip().upper()
     if not upper:
@@ -212,12 +179,7 @@ def _is_number(value: Any) -> bool:
 
 
 def _coerce_csv_number(value: Any) -> int | float | None:
-    """Coerce a CSV cell to a finite number, or return None.
-
-    CSV readers return every cell as text (``"0.375"``), so a bare
-    ``_is_number`` check would discard them all. Values that do not parse as a
-    finite number (blank cells, ``-``, ``N/A``) return ``None``.
-    """
+    """Coerce a CSV text cell (``"0.375"``) to a finite number, or None."""
     if _is_number(value):
         return value
     if isinstance(value, str):
@@ -230,11 +192,9 @@ def _coerce_csv_number(value: Any) -> int | float | None:
     return None
 
 
-# "." is deliberately not a separator: a decimal price such as 8.5 would parse
-# A date CELL in a report carries annotations the bare ISO form does not:
-# "08-10(一)", "08-10(周一)盘中", "2026-08-10". Only the leading date matters,
-# so the year is optional and everything after the day is ignored — which is
-# also how the weekday/session annotations stopped needing a vocabulary.
+# "." is not a separator: a decimal price such as 8.5 would parse as a date.
+# Only the leading month-day (optional year) matters; annotations after the
+# day ("08-10(一)", "08-10盘中") are ignored.
 _CLAIM_DATE_RE = re.compile(
     r"^\s*(?:((?:19|20)\d{2})\s*[-/年]\s*)?"
     r"(0?[1-9]|1[0-2])\s*[-/月]\s*([12]\d|3[01]|0?[1-9])"
@@ -242,17 +202,10 @@ _CLAIM_DATE_RE = re.compile(
 
 
 def _claim_date_tuple(date_value: str) -> tuple[int, int] | None:
-    """Extract the (month, day) named by a report-style date cell.
-
-    Reports routinely annotate a trading day: the date column reads
-    ``08-10(一)``, ``08-10(周一)盘中`` or ``08-10盘中`` rather than the bare
-    ``08-10`` the strict full-cell matchers accept. Any leading month-day (or
-    full ISO date) prefix is therefore accepted so such a claim still compares
-    against the matching evidence row instead of being reported as
-    unevidenced.
+    """Extract the (month, day) a report-style date cell names.
 
     Args:
-        date_value: Date cell as written in the answer.
+        date_value: Date cell as written in the answer, e.g. ``08-10(周一)``.
 
     Returns:
         The (month, day) tuple, or None when no date prefix is present.
@@ -266,19 +219,9 @@ def _claim_date_tuple(date_value: str) -> tuple[int, int] | None:
 def _timestamp_matches_claim_date(timestamp: str, date_value: str) -> bool:
     """Match an evidence timestamp against the date cell of a claim.
 
-    The comparison used to be ``timestamp.startswith(date_value)``, which can
-    only succeed when the answer repeats the year. A table whose date column
-    reads ``08-05`` — the ordinary way a report writes a trading day — matched
-    nothing, so every cell in the row was reported as having no supporting
-    evidence while that evidence sat right there (#983: 79 such rejections in
-    one run, every value inside the observed range).
-
-    A year-less date is matched on month and day, and a date cell may carry
-    weekday or intraday annotations (``08-10(一)``, ``08-10盘中``) whose
-    leading month-day is still recognized. Matching the wrong year is a
-    smaller failure than matching nothing, but it is a real one, so the
-    caller still compares the value against every record that matched rather
-    than trusting the date.
+    A year-less cell (``08-05``) matches on month and day. That can match the
+    wrong year, so callers still compare the value against every matched record
+    rather than trusting the date.
 
     Args:
         timestamp: Evidence timestamp, normally ISO ``YYYY-MM-DD``.
@@ -319,20 +262,9 @@ def _price_field_for_path(path: str) -> str | None:
     return _GENERIC_PRICE_FIELD_ALIASES.get(leaf)
 
 
-# Price-denominated indicator leaves, REGISTERED PER TOOL (spec §5). The
-# previous rule guessed from path tokens: a leaf counted as a price when its
-# name carried a family word ("sma", "band", "pivot") and no non-price word.
-# Guessing from a name is the same failure as guessing from prose — the family
-# list and the denylist both had to be complete, and they were not:
-# ``indicators.ma_diff``, ``indicators.sma_cross`` and
-# ``indicators.supertrend_direction`` were all admitted as observed prices,
-# so a payload with any of them set to 1.30 let the answer print "现价 1.30 元".
-#
-# A tool's output shape is a fact about that tool, so it is stated here per
-# tool and matched by path prefix. A leaf that is not registered is still
-# recorded as evidence — it simply cannot ground a price. Adding a tool that
-# returns price levels means adding a row here, which is the point: the
-# registration is a decision someone made, not a coincidence of naming.
+# Price-denominated indicator leaves, registered per tool and matched by path
+# prefix (spec §5). An unregistered leaf is still evidence but cannot ground a
+# price: inferring price-ness from leaf names admitted ``sma_cross`` as a price.
 _REGISTERED_PRICE_INDICATORS: dict[str, tuple[str, ...]] = {
     "technical_indicators": (
         "latest_close",
@@ -364,11 +296,8 @@ def _is_registered_price_indicator(tool: str, path: str) -> bool:
             return True
         if not leaf.startswith(prefix):
             continue
-        # A registration ending in "_" names a parametrised family
-        # (``indicators.sma_20``), so what follows must be the parameter.
-        # Without that, ``indicators.sma_cross`` — a boolean — matched
-        # ``indicators.sma_`` and became a price, which is the exact defect
-        # the name-reading rule kept producing.
+        # A prefix ending in "_" names a parametrised family (``sma_20``): only a
+        # numeric parameter may follow, so ``sma_cross`` is not a price.
         rest = leaf[len(prefix):]
         if not prefix.endswith("_"):
             return True
@@ -384,11 +313,8 @@ def _metric_kind_for_path(path: str) -> str | None:
     kind = _ANALYSIS_KIND_ALIASES.get(leaf)
     if kind is not None:
         return kind
-    # Compound leaves name the kind as a token ("reported_annualized_return",
-    # "strategy_max_drawdown"). #1338 review: matching only the verbatim alias
-    # table makes every other spelling silently ungroundable. Scan from the
-    # right — English compounds put the head noun last, so "return_vol"
-    # resolves to vol, never to return.
+    # Compound leaves ("strategy_max_drawdown"): scan tokens from the right,
+    # where English puts the head noun, so "return_vol" is vol, not return.
     tokens = [token for token in re.split(r"[_.]", leaf) if token]
     for size in (2, 1):
         for start in range(len(tokens) - size, -1, -1):
@@ -425,12 +351,11 @@ class _EvidenceMixin:
         payload: dict[str, Any] | None,
         call_id: str,
     ) -> None:
-        """Record metric numbers a completed analysis result actually produced.
+        """Record metric figures a completed analysis result actually produced.
 
-        Success of the call envelope is not enough: ``backtest`` reports ok for
-        any runner exit, and a deduplicated ("skipped") call carries no new
-        result at all (#1336). Only results that yielded at least one
-        recognisable metric figure count as completed analysis.
+        An ok envelope is not enough: ``backtest`` reports ok for any runner exit
+        and a skipped call carries no result (#1336). Only a result yielding at
+        least one recognisable metric counts as completed analysis.
         """
         if payload is None or payload.get("skipped"):
             return
@@ -602,14 +527,6 @@ class _EvidenceMixin:
                 recorded += 1
         return recorded
 
-    def _observed_price_values(self) -> list[float]:
-        """Every observed price value the run holds, for redaction protection."""
-        return [
-            float(record.value)
-            for record in self._comparable_price_records()
-            if record.value is not None
-        ]
-
     def _record_tool_failure(self, tool_name: str, call_id: str, result: str) -> None:
         """Store structured unavailable evidence for failed business envelopes."""
         payload = _json_object(result) or {}
@@ -764,19 +681,12 @@ class _EvidenceMixin:
         visit(payload, "")
 
     def _ingest_run_dir_ohlc_csvs(self) -> None:
-        """Register OHLC rows from CSVs the run wrote via the bash workaround.
+        """Register OHLC rows from per-symbol CSVs the run wrote via bash+yfinance.
 
-        The bash+yfinance escape hatch writes per-symbol OHLC CSVs into the run
-        directory (e.g. ``data/raw/BYN_V.csv``) instead of returning them through
-        ``get_market_data``. Those prices were genuinely observed tool output,
-        but they never entered the ledger, so the final-answer gate rejected
-        every one of them as ``numeric_claim_unavailable``. Scan the run dir for
-        such CSVs and register their open/high/low/close/price rows as observed
-        evidence, keyed to the symbol derived from the filename.
-
-        Only files whose filename maps to a symbol already tracked in this run
-        are accepted, so a stray CSV cannot mint new identity. Rows are bounded
-        by ``_MAX_GENERIC_EVIDENCE`` and each file is ingested at most once.
+        Those prices were observed but bypassed ``get_market_data``. Only a file
+        whose name maps to a symbol already tracked in this run is accepted, so a
+        stray CSV cannot mint identity; rows are bounded by
+        ``_MAX_GENERIC_EVIDENCE`` and each file is ingested once.
         """
         if not self.run_dir.is_dir():
             return
@@ -854,11 +764,8 @@ class _EvidenceMixin:
     def _comparable_price_records(self) -> list[EvidenceRecord]:
         """Return every observed quote a numeric claim may be checked against.
 
-        ``_price_records`` only sees fields already named ``open``/``close``/…,
-        which in practice means ``get_market_data``. Quotes returned by the
-        other market-sensitive tools are re-keyed onto the same canonical field
-        so the contradiction check compares like with like instead of reporting
-        the claim as unevidenced.
+        Quotes from non-OHLC tools are re-keyed onto canonical price fields and
+        registered indicator leaves onto ``indicator``.
 
         Returns:
             Observed price evidence with canonical ``field`` values.

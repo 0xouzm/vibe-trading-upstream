@@ -1,13 +1,8 @@
 """Per-role validation: what each declared figure has to survive.
 
-The model declares what every measurement-shaped number in its answer IS
-(spec §2); this module decides whether the evidence backs that declaration
-(spec §4). It reads no prose word. Its predecessor did — twenty-two masks and
-a dozen phrase catalogues — and the catalogues could never close: the same
-sentence passed in one language and failed in the other, a level word the list
-had not seen cost a revision round, and every new phrasing needed a new entry.
-Roles now come from the model, evidence comes from the ledger, and shape comes
-from :mod:`figures`.
+The model declares what each measurement-shaped number IS (spec §2); this
+module checks that declaration against ledger evidence (spec §4). It reads no
+prose word: roles come from the model, shape from :mod:`figures`.
 """
 
 from __future__ import annotations
@@ -48,11 +43,8 @@ _PRIVATE_ASSERTION_RE = re.compile(
     re.IGNORECASE,
 )
 
-
-# A loader's id is ASCII, but the answer follows the user's language, so a
-# Chinese report names the same provider in Chinese. Demanding the ASCII id
-# verbatim rejected correct prose: "数据来源：腾讯财经" was reported as
-# ``data_source_not_surfaced`` against evidence sourced from ``tencent``.
+# Loader ids are ASCII but the answer follows the user's language, so a source
+# is surfaced by any alias ("数据来源：腾讯财经" for ``tencent``).
 _SOURCE_ALIASES = {
     "akshare": ("akshare", "ak share"),
     "baostock": ("baostock",),
@@ -71,12 +63,10 @@ _SOURCE_ALIASES = {
     "yfinance": ("yfinance", "yahoo", "雅虎"),
 }
 
-
 _CURRENCY_ALIASES = {
     "USD": ("usd", "us$", "美元", "美金"),
-    # ¥ is how a model actually writes a CNY quote. It is the yen sign too, but
-    # ``_infer_currency`` maps no venue to JPY, so nothing in this system can
-    # mean yen by it; adding a JPY venue means revisiting this entry.
+    # ¥ is also the yen sign, but ``_infer_currency`` maps no venue to JPY;
+    # adding a JPY venue means revisiting this entry.
     "CNY": ("cny", "cnh", "rmb", "人民币", "¥", "￥"),
     "HKD": ("hkd", "hk$", "港元", "港币"),
     "KRW": ("krw", "韩元", "韩圜"),
@@ -84,13 +74,9 @@ _CURRENCY_ALIASES = {
     "CAD": ("cad", "c$", "加元", "加拿大元"),
 }
 
-
-# "元" is how a Chinese answer writes a CNY quote, but it is also the tail of
-# 港元/美元/日元, so accepting it unguarded would let an answer about a Hong
-# Kong listing satisfy a CNY requirement. It counts only when no other
-# currency's character owns it.
+# "元" counts as CNY only when no other currency's character precedes it
+# (港元/美元/日元), or a Hong Kong listing would satisfy a CNY requirement.
 _OTHER_CURRENCY_PREFIXES = "港美日欧韩台新加澳"
-
 
 #: Relative band a value must fall in to count as matching evidence.
 _TOLERANCE = 0.005
@@ -100,9 +86,8 @@ _TOLERANCE = 0.005
 class ValidationResult:
     """Final-answer grounding decision.
 
-    ``released_text`` is the draft with its declaration block removed: the
-    block is a contract between the model and this gate, not part of the
-    answer, and it never reaches the user.
+    ``released_text`` is the draft without its declaration block, which is a
+    contract with the gate and never reaches the user.
     """
 
     valid: bool
@@ -123,10 +108,6 @@ def _close_any(value: float, targets: Iterable[float]) -> bool:
 def _nearest(value: float, targets: Iterable[float], limit: int = 3) -> list[float]:
     """The observed values closest to a rejected figure.
 
-    A range ("0.567-1.053") tells the model the figure is outside the window;
-    the nearest prints tell it what to write instead, which is what spec 6 asks
-    the correction prompt to say.
-
     Args:
         value: The rejected figure's value.
         targets: Every value the relevant evidence pool holds.
@@ -140,11 +121,7 @@ def _nearest(value: float, targets: Iterable[float], limit: int = 3) -> list[flo
 
 
 def _written_half_unit(text: str) -> float:
-    """Half a unit of the last digit a figure was WRITTEN with.
-
-    "约 37%" for a derived 36.75% asserts that the value rounds to 37, and a
-    flat relative band rejects every integer-percent rounding a model makes.
-    """
+    """Half a unit of the last digit a figure was written with ("37%" -> 0.5)."""
     body = text.strip().rstrip("%％").strip()
     decimals = len(body.split(".", 1)[1]) if "." in body else 0
     return 0.5 * 10.0 ** (-decimals)
@@ -218,11 +195,8 @@ def _evaluate_formula(expression: str) -> tuple[float, list[float]] | None:
 def _formula_in_note(note: str) -> tuple[float, list[float]] | None:
     """Find the derivation a note states.
 
-    A note is written either as the expression alone ("0.666 × 0.97") or as
-    the expression together with its own result ("0.666 × 0.97 = 0.646"). The
-    whole note is tried first, then each segment between result separators.
-    Those separators are punctuation, not vocabulary, which is why the English
-    and Chinese spellings of the same derivation now get the same verdict.
+    The whole note is tried first, then each segment between result separators
+    ("0.666 × 0.97 = 0.646"); separators are punctuation, not vocabulary.
 
     Args:
         note: The declaration's free-text note.
@@ -245,24 +219,14 @@ def _formula_in_note(note: str) -> tuple[float, list[float]] | None:
 class _PolicyMixin:
     """Policy behaviour of :class:`GroundingLedger`."""
 
-    # ------------------------------------------------------------------ #
-    # identity
-    # ------------------------------------------------------------------ #
-
     def _validate_identity(self, content: str) -> list[dict[str, Any]]:
         """Validate aggregate state and listed/private contradictions."""
         issues: list[dict[str, Any]] = []
         status = self.identity_status
-        # Two conditions, both load-bearing.
-        #
-        # ``self._identities`` — a run that never named an instrument has no
-        # identity to get wrong. The trigger phrase is matched against the user
-        # message, so "什么是市盈率估值法？" set identity_required and then failed
-        # every draft it could ever produce, including the honest answer.
-        #
-        # ``ambiguous`` is deliberately absent. A shortlist is an answer, and
-        # consumers stay blocked on it in ``authorize_tool_call``, so such a
-        # run still cannot fetch a quote to misattribute.
+        # Only a run that named an instrument can get its identity wrong: the
+        # trigger phrase matches the user message, so "什么是市盈率估值法？" would
+        # otherwise fail every draft. ``ambiguous`` is absent on purpose: a
+        # shortlist is an answer and consumers stay blocked in ``authorize_tool_call``.
         if (
             self._identity_required
             and self._identities
@@ -307,10 +271,6 @@ class _PolicyMixin:
                 }
             )
         return issues
-
-    # ------------------------------------------------------------------ #
-    # figures
-    # ------------------------------------------------------------------ #
 
     def _validate_figures(
         self,
@@ -413,12 +373,7 @@ class _PolicyMixin:
         message: str,
         **extra: Any,
     ) -> dict[str, Any]:
-        """Build one figure-scoped issue.
-
-        Every figure issue carries the same five fields — value, role, span,
-        symbol and reason — so the correction prompt can name the exact number
-        and the release path can cut exactly it.
-        """
+        """Build one figure-scoped issue with value, role, span, symbol and reason."""
         issue = {
             "code": code,
             "value": figure.text,
@@ -441,11 +396,12 @@ class _PolicyMixin:
         document_symbol: str | None,
         records: Sequence[EvidenceRecord],
     ) -> str | None:
-        """Resolve which instrument a figure is about (spec §4 order).
+        """Resolve which instrument a figure is about (spec §4).
 
-        The declaration's own ``ref``/``note`` wins, then the table row's
-        symbol column, then the one canonical evidence symbol on the figure's
-        line, then the one canonical evidence symbol in the whole answer.
+        Order: the declaration's ``ref``/``note``, the table row's symbol column,
+        the figure's punctuation segment, its line, then the whole answer. The
+        segment precedes the line because a comparison report names both
+        instruments on one header line and then writes about one of them.
         """
         if declaration is not None:
             declared = self._symbol_for_claim(
@@ -457,10 +413,6 @@ class _PolicyMixin:
             normalized = _normalize_symbol(figure.symbol)
             if normalized:
                 return normalized
-        # Inside the figure's own segment first. A comparison report names both
-        # instruments in its header and then writes about one of them, so the
-        # LINE is too coarse an owner: 562500's moving average grounded a level
-        # written under 600519 on the same line.
         left, right = segment_bounds(content, figure.start, figure.end)
         segment_symbol = self._symbol_for_claim(content[left:right], records)
         if segment_symbol:
@@ -469,17 +421,11 @@ class _PolicyMixin:
             return line_symbols[figure.line]
         return document_symbol
 
-    # ------------------------------------------------------------------ #
-    # evidence pools
-    # ------------------------------------------------------------------ #
-
     def _referenced_values(self, ref: str) -> list[float] | None:
         """Every observed value one tool call produced, or None when unknown.
 
-        A declaration whose ``ref`` names a call id says "this number came out
-        of THAT call". That is the tightest scoping available and the only one
-        that can ground a figure the price pool cannot hold — a filing's
-        revenue, a factor's IC, a volume.
+        A ``ref`` naming a call id is the tightest scoping, and the only one that
+        can ground a non-price figure (revenue, IC, volume).
         """
         key = (ref or "").strip()
         if not key:
@@ -508,19 +454,15 @@ class _PolicyMixin:
     ) -> list[float]:
         """Observed price values a figure may be compared against.
 
-        Filtered by symbol when one was resolved; further narrowed to the OHLC
-        field and trade date when the figure sits under those table headers,
-        which is the table semantics §4 preserves.
+        Filtered by symbol, then by OHLC field and trade date when the figure sits
+        under those table headers (spec §4).
         """
         candidates = list(records)
         if symbol:
             candidates = [record for record in candidates if record.symbol == symbol]
         elif len({record.symbol for record in records if record.symbol}) > 1:
-            # An indicator reading is symbol-bound in a way an OHLC bar's union
-            # is not. With evidence for two instruments and a figure attributed
-            # to neither, 562500's sma_20 grounded a level written beside
-            # 600519.SH; the union was argued for observed quotes, not for a
-            # level attached to one symbol.
+            # Two instruments and no resolved symbol: an indicator reading is
+            # symbol-bound, so it cannot ground a figure attributed to neither.
             candidates = [record for record in candidates if record.field != "indicator"]
         if column:
             candidates = [record for record in candidates if record.field == column]
@@ -534,12 +476,10 @@ class _PolicyMixin:
         return [float(record.value) for record in candidates if record.value is not None]
 
     def _row_pool(self, symbol: str | None) -> list[float]:
-        """Non-price numbers a market-data ROW carried (volume, turnover, …).
+        """Non-price numbers a market-data row carried (volume, turnover, …).
 
-        A row is one observation, and a report quoting its volume beside its
-        close is quoting the same tool result. Only ``get_market_data`` rows
-        and the run-dir CSVs the bash escape hatch writes are included, so a
-        generic tool's hundreds of numeric leaves never widen the price check.
+        Only ``get_market_data`` and run-dir CSV rows count, so a generic tool's
+        numeric leaves never widen the check.
         """
         return [
             float(record.value)
@@ -551,12 +491,7 @@ class _PolicyMixin:
         ]
 
     def _metric_pool(self, symbol: str | None) -> list[float]:
-        """Analysis/risk metric values the run actually recorded.
-
-        Two sources, both keyed on TOOL FIELD NAMES: metrics parsed from a
-        completed analysis result, and observed leaves whose path maps to a
-        metric kind (``annualized_vol``, ``max_drawdown``, …).
-        """
+        """Metric values from completed analysis results and metric-named leaves."""
         values = [
             float(entry["value"])
             for entry in self._analysis_metrics
@@ -580,22 +515,14 @@ class _PolicyMixin:
     ) -> bool:
         """Whether a figure equals evidence, at its own scale or a metric's.
 
-        ``direct`` is compared literally; the caller decides what may go in it,
-        and for a percent-written figure that is nothing at all — an OHLC close
-        is never a ratio. ``scaled`` absorbs the two conventions tools and
-        answers disagree on: fraction vs percent (0.182 vs 18.2%), and the sign
-        a fall is written with (a drawdown is recorded as -0.094 and quoted as
-        9.4%).
+        ``direct`` is compared literally. ``scaled`` absorbs fraction vs percent
+        (0.182 vs 18.2%) and the sign of a fall (drawdown -0.094 quoted as 9.4%).
         """
         if _close_any(figure.value, direct):
             return True
         candidates = {abs(figure.value), abs(figure.value) / 100.0}
         magnitudes = [abs(target) for target in scaled]
         return any(_close_any(candidate, magnitudes) for candidate in candidates)
-
-    # ------------------------------------------------------------------ #
-    # roles
-    # ------------------------------------------------------------------ #
 
     def _check_observed(
         self,
@@ -628,8 +555,7 @@ class _PolicyMixin:
             symbol, records, column=figure.column, date=figure.date
         )
         if figure.percent:
-            # A percent-written figure is a ratio, and a price or a volume is
-            # not, so no amount of price evidence may answer one.
+            # A percent is a ratio; no price or volume may answer it.
             direct: list[float] = []
         elif figure.column:
             direct = list(prices)
@@ -690,10 +616,8 @@ class _PolicyMixin:
             return "formula_not_evaluable"
         result, operands = evaluated
         if not symbol and len({record.symbol for record in records if record.symbol}) > 1:
-            # A comparison run holds two instruments' bars, and the expensive
-            # one's close makes any arithmetic "anchored" no matter which
-            # instrument the answer is about. Without a resolved symbol there
-            # is nothing to anchor TO.
+            # Two instruments' bars and no resolved symbol: any arithmetic would
+            # look anchored, with nothing to anchor it to.
             return "no_symbol"
         anchors = (
             self._price_pool(symbol, records)
@@ -713,20 +637,11 @@ class _PolicyMixin:
     def _result_matches(declaration: Declaration, result: float) -> bool:
         """Whether a formula's result is the value the declaration states.
 
-        The band is half a unit of the last digit the value was WRITTEN with,
-        because "约 37%" for a derived 36.75% asserts that it rounds to 37 and
-        a flat relative band rejects every rounding a model makes.
-
-        A figure carrying "%" is percentage points and is compared ONLY
-        against the derivation in those units. Running it against the fraction
-        too gave an integer percent a half-unit band of 0.5 in FRACTION units
-        — fifty percentage points — and "区间收益率约 0%" validated against a
-        real +58% move. A figure written without "%" is genuinely ambiguous
-        and is tried both ways.
-
-        Magnitudes are compared because the note for a fall is written both as
-        ``(low − high) / high`` and as the drop it produces; the note itself is
-        what states which subtraction was taken.
+        The band is half a unit of the last written digit ("约 37%" for 36.75%
+        asserts rounding). A "%" figure is compared only in percentage points,
+        since against the fraction a half-unit band spans fifty points; a bare
+        figure is tried both ways. Magnitudes are compared because a fall is
+        noted either as ``(low − high) / high`` or as the drop.
         """
         half_unit = _written_half_unit(declaration.value_text)
         targets = (
@@ -764,10 +679,7 @@ class _PolicyMixin:
         result, _ = derivation
         if declaration is not None and self._result_matches(declaration, result):
             return []
-        # Reported in the figure's OWN units. ``_result_matches`` compares a
-        # percent-written figure against ``result * 100``, so telling a model
-        # that wrote "12%" that its formula "evaluates to -0.3675" names a
-        # number that appears nowhere in the comparison it just failed.
+        # Reported in the figure's own units, as ``_result_matches`` compares it.
         scaled = result * 100.0 if figure.percent else result
         shown = f"{scaled:.6g}%" if figure.percent else f"{scaled:.6g}"
         return [
@@ -789,14 +701,10 @@ class _PolicyMixin:
         symbol: str | None,
         records: Sequence[EvidenceRecord],
     ) -> list[dict[str, Any]]:
-        """A proposed level is derived, or inside the observed range.
+        """A proposed level (entry, target, stop) is derived or inside the observed range.
 
-        An entry, a target or a stop is a number the answer proposes rather
-        than one it observed, so it cannot be required to equal a print. It
-        can be required to be anchored: either the note derives it from what
-        the run observed, or it lies between the lowest and highest price this
-        session actually saw for the instrument. A level far outside that
-        window is the invention this gate exists to stop.
+        It cannot be required to equal a print, only to be anchored; a level far
+        outside what the session saw is the invention this gate exists to stop.
         """
         derivation = self._derivation(declaration, symbol, records)
         if (
@@ -844,10 +752,8 @@ class _PolicyMixin:
     ) -> list[dict[str, Any]]:
         """A cited figure names its source and does not pose as a print.
 
-        The value is not checked — the run could never have observed a paper's
-        Sharpe — so the only thing to enforce is that the citation is not used
-        to launder an observation: the same number may not also be declared
-        observed, and it may not sit in a table's OHLC column.
+        Its value is unchecked, so the citation may not launder an observation:
+        the value may not also be declared observed or sit in an OHLC column.
         """
         if declaration is not None and not declaration.note.strip():
             return [
@@ -876,10 +782,6 @@ class _PolicyMixin:
             ]
         return []
 
-    # ------------------------------------------------------------------ #
-    # symbols and provenance
-    # ------------------------------------------------------------------ #
-
     def _validate_unsourced_symbols(
         self,
         content: str,
@@ -888,16 +790,9 @@ class _PolicyMixin:
     ) -> list[dict[str, Any]]:
         """Reject figures attached to an instrument no tool in this run handled.
 
-        This is the mechanically decidable half of "what the tools did not
-        return, you do not supply" (#886/#887). Naming a symbol is left alone —
-        prose may legitimately mention an index or a peer — but the moment a
-        line pairs an unhandled canonical symbol with a figure, the figure has
-        no possible origin other than model memory.
-
-        A figure the model declared ``cited`` is exempt, because a citation is
-        an origin. That replaces the phrase catalogue of attribution verbs the
-        exemption used to be keyed on, which could not tell "the paper reports"
-        from "the backtest reports" without listing every subject by hand.
+        Naming a symbol is fine, but a line pairing an unhandled canonical symbol
+        with a measured figure has no origin other than model memory (#886/#887).
+        A figure declared ``cited`` is exempt, since a citation is an origin.
         """
         issues: list[dict[str, Any]] = []
         reported: set[str] = set()

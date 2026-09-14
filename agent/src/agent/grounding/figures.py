@@ -1,21 +1,10 @@
 """The figures block, the shape of a number, and how the two are matched.
 
-This module is the whole "inference" surface of the gate, and it is
-deliberately tiny. It answers three questions and no others:
-
-* where is the model's ``figures`` block, and what did it declare;
-* what SHAPE is each run of digits in the prose — a date, a symbol, a list
-  marker, a measurement, or a bare integer;
-* which declaration, if any, covers a given prose number.
-
-Nothing here reads a natural-language word. The predecessor of this module
-decided a number's ROLE from a catalogue of price words, target/stop words,
-ATH spellings, indicator names, order-book phrases and observation binders;
-every one of those catalogues was only as complete as the day it was typed,
-so the gate's verdict differed between two translations of one sentence and a
-correct draft was rejected for a phrasing the list had not seen. The role is
-now declared by the model and verified against evidence; shape is all that is
-left to infer, and shape is language-independent.
+This is the gate's whole inference surface: it finds the model's ``figures``
+declarations, classifies every prose number by SHAPE (date, symbol, list
+marker, measurement, bare integer) and matches prose numbers to declarations.
+It reads no natural-language word; roles are declared by the model and shape
+is language-independent.
 """
 
 from __future__ import annotations
@@ -32,25 +21,15 @@ ROLES = ("observed", "derived", "proposed", "cited", "count")
 #: The info string that marks the declaration block.
 BLOCK_LANGUAGE = "figures"
 
-
-# SHAPE 1 — a number. Grouped thousands are one token, and the lookbehind
-# keeps an identifier's digits ("SMA20", "MA5") from being read as a value.
-#
-# The lookahead deliberately fences only DIGITS, not letters. Fencing letters
-# too truncated a figure glued to its unit: "3.6pp" failed the fence at "p",
-# backtracked, and matched the bare "3" — so the same statement was a decimal
-# in Chinese ("3.6 个百分点") and a bare integer in English, and the two
-# languages got different verdicts from a difference in spacing conventions.
+# SHAPE 1 — a number. Grouped thousands are one token and the lookbehind keeps
+# an identifier's digits ("SMA20") out. The lookahead fences only digits, so
+# "3.6pp" reads as 3.6 rather than backtracking to a bare "3".
 _NUMBER_RE = re.compile(
     r"(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?!\d)"
 )
 
-
-# SHAPE 2 — a calendar date or a bare year. Both are structural exemptions
-# (spec §3): a date's digits are never a measurement. Only the spellings that
-# could otherwise be read as a measurement need to be here — a year-less
-# "8/5" or "08-10" is a pair of bare integers, which this gate does not check
-# at all, so no mask is needed for them.
+# SHAPE 2 — a calendar date or a bare year: structure, never a measurement
+# (spec §3). A year-less "08-10" is two bare integers and needs no mask.
 _DATE_RE = re.compile(
     r"(?:19|20)\d{2}\s*[-/年]\s*\d{1,2}\s*[-/月]\s*\d{1,2}\s*[日号]?"
     r"|\d{1,2}\s*月\s*\d{1,2}\s*[日号]"
@@ -58,24 +37,16 @@ _DATE_RE = re.compile(
     r"|(?:19|20)\d{2}"
 )
 
-
-# SHAPE 3 — a line-leading ordinal: an ordered-list marker or a numbered
-# heading. The punctuation is required, so a line that opens with a real
-# figure ("1.171 元是收盘价") is untouched.
+# SHAPE 3 — a line-leading list marker or numbered heading. The punctuation is
+# required, so a line opening with a figure ("1.171 元是收盘价") is untouched.
 _ORDINAL_RE = re.compile(r"(?m)^[^\S\n]*(?:#{1,6}[^\S\n]*)?\d{1,3}[.)、．][^\S\n]+")
 
-
-# SHAPE 4 — a fenced block. Its contents are code or the figures block, and
-# neither is prose.
+# SHAPE 4 — a fenced block: code or the figures block, never prose.
 _FENCE_RE = re.compile(r"(?m)^[^\S\n]*(?:`{3,}|~{3,})[^\n]*$")
 
-
-# A currency marker is a SYMBOL SET, not a vocabulary: the question is only
-# whether a character that denotes money touches the number, which is what
-# makes a bare integer ("$100", "820 CNY") measurement-shaped. Membership is
-# per character for the symbols and per token for the ISO codes.
+# Currency is a symbol set, not a vocabulary: a money character or ISO code
+# touching a bare integer ("$100", "820 CNY") makes it measurement-shaped.
 _CURRENCY_CHARS = frozenset("$¥￥€£₩₹元币圆镑")
-
 
 _CURRENCY_CODES = frozenset(
     {
@@ -84,13 +55,10 @@ _CURRENCY_CODES = frozenset(
     }
 )
 
-
 _PERCENT_CHARS = "%％"
 
-
-# A CJK currency word is at most three characters (人民币 is the longest).
-# Bounding the run is what keeps 元宵/元件 from reading as money: those sit
-# inside a longer uninterrupted CJK run.
+# A CJK currency word is at most three characters (人民币); bounding the run
+# keeps 元宵/元件, inside longer CJK runs, from reading as money.
 _MAX_CURRENCY_WORD = 3
 
 
@@ -120,10 +88,8 @@ class FiguresBlock:
     def match(self, value: float, percent: bool) -> Declaration | None:
         """Return the declaration covering ``value``, or None.
 
-        Matching is by NUMERIC value at the precision the figure was written
-        with (tolerance 1e-9), and percent-ness must agree: ``37%`` and
-        ``0.37`` are different assertions and never cover each other, while
-        ``37%`` and ``37 %`` are the same one.
+        Matching is numeric (tolerance 1e-9) and percent-ness must agree:
+        ``37%`` and ``0.37`` are different assertions.
 
         Args:
             value: The prose figure's numeric value.
@@ -166,11 +132,8 @@ class TableRow:
     date_column: int | None
     symbol_column: int | None
 
-
-# Header spellings that bind a table column to an OHLC field or to a date.
-# These are the TABLE's own schema — the column header declares what its
-# cells are, exactly as a tool result's field name declares what its leaf is
-# — so they are a header map, not prose inference (spec §4).
+# Header spellings binding a table column to an OHLC field: the table's own
+# schema, like a tool field name, not prose inference (spec §4).
 _TABLE_FIELD_ALIASES = {
     "open": "open",
     "opening": "open",
@@ -192,21 +155,13 @@ _TABLE_FIELD_ALIASES = {
     "收盘价": "close",
 }
 
-
 _DATE_HEADERS = {"date", "datetime", "trade date", "timestamp", "日期", "交易日", "时间"}
-
 
 _SYMBOL_HEADERS = {"symbol", "ticker", "code", "标的", "代码", "证券代码"}
 
 
 def _lines_with_offsets(content: str) -> list[tuple[str, int]]:
-    """Return each line of ``content`` with its character offset in it.
-
-    ``str.splitlines`` discards the terminators, so an issue raised on a line
-    could not say where in the document that line sits. Offsets are recovered
-    by scanning forward, which is exact because only line terminators separate
-    one line's end from the next line's start.
-    """
+    """Return each line of ``content`` with its character offset in it."""
     positions: list[tuple[str, int]] = []
     cursor = 0
     for line in content.splitlines():
@@ -258,11 +213,9 @@ def _parse_value(text: str) -> tuple[float, bool] | None:
 def parse_figures_block(content: str) -> FiguresBlock:
     """Parse the model's ``figures`` block out of a draft.
 
-    Parsing is lenient by contract (spec §2): a full-width pipe, run-on
-    spacing and a missing ``ref`` are all accepted. What is NOT accepted is
-    silence — a line that cannot be read as ``value | role | note | ref`` is
-    reported as malformed, because a declaration the gate skipped is a figure
-    the gate never checked.
+    Parsing is lenient (full-width pipe, run-on spacing, missing ``ref``), but a
+    line that cannot be read as ``value | role | note | ref`` is reported as
+    malformed: a skipped declaration is a figure the gate never checked.
 
     Args:
         content: The candidate answer.
@@ -349,10 +302,8 @@ def _is_separator_row(cells: Sequence[tuple[str, int, int]]) -> bool:
 def table_rows(content: str) -> list[TableRow]:
     """Return every Markdown table row with its header's column roles.
 
-    A table block is a maximal run of lines carrying at least two pipes. The
-    first line is the header; its cells bind columns to OHLC fields, to the
-    trade date and to the symbol, which is the only per-column semantics this
-    gate has (spec §4).
+    A table is a maximal run of lines with at least two pipes; its first line is
+    the header, whose cells bind columns to OHLC fields, trade date and symbol.
     """
     positions = _lines_with_offsets(content)
     rows: list[TableRow] = []
@@ -398,9 +349,8 @@ def _currency_before(text: str, start: int) -> bool:
 def _currency_after(text: str, end: int) -> bool:
     """Whether a currency symbol or ISO code touches the number on its right.
 
-    The CJK branch takes the maximal run of CJK characters and accepts it only
-    when it is short enough to BE a currency word: "美元" qualifies, the
-    six-character run of "元宵节后关注" does not.
+    A CJK run counts only when short enough to be a currency word: "美元" does,
+    "元宵节后关注" does not.
     """
     tail = text[end:].lstrip()
     if not tail:
@@ -425,11 +375,7 @@ def _currency_after(text: str, end: int) -> bool:
 
 
 def currency_prefix_start(text: str, start: int) -> int:
-    """Where a currency symbol attached to the LEFT of a figure begins.
-
-    Redacting "$1.10" has to take the "$" with it, or the released sentence
-    reads "$(omitted)".
-    """
+    """Where a currency symbol attached to the left of a figure ("$1.10") begins."""
     head = text[:start]
     stripped = head.rstrip()
     if stripped and stripped[-1] in _CURRENCY_CHARS and not _is_cjk(stripped[-1]):
@@ -438,11 +384,10 @@ def currency_prefix_start(text: str, start: int) -> int:
 
 
 def currency_suffix_end(text: str, end: int) -> int:
-    """Where a currency unit attached to the RIGHT of a figure ends.
+    """Where a currency unit attached to the right of a figure ("0.95 元") ends.
 
-    Redacting "0.95 元" has to take the 元 with it. It must NOT take the first
-    half of a compound unit: 元/股 and USD/share are one unit, and swallowing
-    only its numerator left a denominator with nothing above it.
+    A compound unit (元/股, USD/share) is left whole, or its denominator would be
+    left with nothing above it.
     """
     tail = text[end:]
     lead = len(tail) - len(tail.lstrip(" \t"))
@@ -477,11 +422,9 @@ def _is_cjk(char: str) -> bool:
     return "㐀" <= char <= "鿿"
 
 
-# Punctuation that ends one statement and starts the next. This is the ONLY
-# segmentation the gate has, and it is made of characters: it decides which
-# instrument a figure is about (spec §4), never what the figure means. The
-# ASCII period counts only when whitespace follows it, which is what keeps a
-# decimal, a ticker suffix and an abbreviation inside one segment.
+# Statement-ending punctuation, the gate's only segmentation: it decides which
+# instrument a figure is about (spec §4), never what it means. "." counts only
+# before whitespace, so decimals and ticker suffixes stay in one segment.
 _SEGMENT_BREAKS = frozenset("，,；;。、\n！!？?")
 
 
@@ -521,20 +464,13 @@ def _within(span: tuple[int, int], spans: Sequence[tuple[int, int]]) -> bool:
 
 
 def scan_figures(content: str, block: FiguresBlock) -> list[Figure]:
-    """Locate and classify every number in the prose of a draft.
+    """Locate and classify every number in the prose of a draft (spec §3).
 
-    Three classes, and only three (spec §3):
-
-    * ``exempt`` — a date, a year, digits inside a security code, a
-      line-leading ordinal, a table's own date/symbol column, or anything
-      inside a fenced block. Structure, not measurement.
-    * ``measured`` — carries a decimal point, a percent sign, a touching
-      currency mark, or sits in a table cell. This is the shape a fabricated
-      price, level or metric is written in, and it must be declared.
-    * ``bare`` — a plain integer with none of those marks. Counts, horizons,
-      window lengths, lot sizes and line numbers all live here and are not
-      checked, which is what retires the mask catalogue that used to try to
-      name each of them.
+    * ``exempt`` — a date, year, security-code digits, line-leading ordinal, a
+      table's date/symbol column, or anything fenced: structure.
+    * ``measured`` — a decimal point, percent sign, touching currency mark or
+      table cell: the shape a fabricated price or metric takes; must be declared.
+    * ``bare`` — a plain integer (counts, horizons, window lengths): unchecked.
 
     Args:
         content: The candidate answer.
@@ -547,8 +483,7 @@ def scan_figures(content: str, block: FiguresBlock) -> list[Figure]:
     line_of: list[tuple[int, int, int]] = [
         (start, start + len(line), index) for index, (line, start) in enumerate(positions)
     ]
-    # Every fenced block is exempt, the ``figures`` block among them: its span
-    # comes from the same scan, so it needs no entry of its own.
+    # Every fenced block is exempt, the figures block included.
     exempt: list[tuple[int, int]] = [
         (start, end) for start, end, _, _ in _fenced_blocks(content)
     ]

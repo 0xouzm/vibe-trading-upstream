@@ -11,7 +11,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   words around it.** Only a number's SHAPE is inferred — a decimal point, a
   percent sign, a currency mark or a table cell makes it a measurement; dates
   (including year-less "09-14"), years, security codes, line-leading ordinals
-  and fenced text are structure; a plain integer is not checked — so a sentence
+  and code in a language-tagged fence are structure; a plain integer is checked
+  only as a price of an instrument quoted in the thousands — so a sentence
   gets the same verdict in every language. A measurement that equals a price
   or volume this session's tools returned needs nothing more. Any other one is
   declared in a fenced `figures` block at the end of the answer, one line per
@@ -24,8 +25,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   with; `proposed` is a price inside its own symbol's observed range or a
   derivation; `cited` must name its source on the figure's own line, because
   the block is stripped before anyone reads the answer; `count` covers counts,
-  weights, thresholds and probabilities, and a currency-marked figure declared
-  `count` is checked as observed. No role other than `observed` may sit in a
+  weights, thresholds and probabilities, while a currency-marked figure, or one
+  inside its instrument's price range that no derivation uses as a factor, is
+  checked as observed when declared `count`. No role other than `observed` may sit in a
   price column. The block is stripped from the released answer and never
   streamed; the artifact keeps it. The price-word, level-word,
   derivation-phrase and metric-subject catalogues are deleted with it
@@ -114,6 +116,19 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   the forced-text iteration with tool-call markup in a run whose output is
   buffered, the replacement message was streamed by its own branch and again as
   the released answer, so the chat and the CLI showed it twice.
+- **No unchecked number reaches the chat before the gate runs.** An unbuffered
+  answer (no instrument asked about, no tool evidence yet) streamed its first
+  draft live, numbers included, and a rejection then replaced it; the stream now
+  stops at the first measurement-shaped number, and a rejected draft's shown
+  prefix is cleared with `stream_reset`.
+- **A trading plan in a bare code fence is checked.** Only a fence tagged with a
+  language holds code; an untagged fence is read as prose.
+- **An integer price of an instrument quoted in the thousands is checked**
+  ("600519.SH 最新收盘 1520"), within half to twice its observed range; a
+  window such as "200 日均线" stays unchecked.
+- **A price declared `count` is checked.** A number inside its instrument's
+  observed price range may be a `count` only when a declared derivation uses it
+  as a factor.
 - **A redaction footnote the model wrote itself is removed** before the real
   cuts, so a released answer never carries two contradictory footnotes or a
   marker for a cut that did not happen.

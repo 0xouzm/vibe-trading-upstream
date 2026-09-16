@@ -19,7 +19,7 @@ __alpha_meta__ = {
     'frequency': ['1d'],
     'decay_horizon': 20,
     'min_warmup_bars': 20,
-    'notes': 'A missing close leaves window+1 rolling rows NaN; on sparse panels this can trigger the >95% NaN registry guard (from ~~15% missing bars).',
+    'notes': 'A missing close leaves window+1 rolling rows NaN; on sparse panels this can trigger the >95% NaN registry guard (from ~15% missing bars).',
 }
 
 

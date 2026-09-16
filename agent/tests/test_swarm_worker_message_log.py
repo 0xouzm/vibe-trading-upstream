@@ -4,7 +4,8 @@
 for: the assistant message carries ``function.arguments`` verbatim, while the
 event stream redacts ``run_dir`` from the argument preview. A terminal path
 that reports a summary must also write the log, so a completed run, a token
-limit and a content-filter trip all leave the same two files.
+limit, a content-filter trip and an output-contract rejection all leave the
+same two files.
 """
 
 from __future__ import annotations
@@ -74,6 +75,20 @@ class _ContentFilteredLLM:
         if self._remaining >= 0:
             return LLMResponse(content="", content_filter_triggered=True)
         return LLMResponse(content="unreachable", tool_calls=[])
+
+    def close(self) -> None:
+        """No-op: the scripted stub owns no HTTP client."""
+
+
+class _AnswersWithoutToolCallsLLM:
+    """A final answer and nothing else, for a data agent that never probed."""
+
+    def stream_chat(self, messages, tools=None, timeout=None, on_text_chunk=None):
+        return LLMResponse(
+            content="The market looks range-bound, so no further analysis is needed.",
+            tool_calls=[],
+            finish_reason="stop",
+        )
 
     def close(self) -> None:
         """No-op: the scripted stub owns no HTTP client."""
@@ -153,6 +168,21 @@ def test_content_filter_circuit_breaker_persists_the_message_log(
 
     assert result.status == "failed"
     assert "circuit_breaker" in (result.error or "")
+    assert (artifact_dir / "summary.md").is_file()
+    assert (artifact_dir / "messages.json").is_file()
+
+
+def test_incomplete_run_persists_the_message_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A data agent that answers without calling a tool must leave a log too."""
+    result = _run_worker_to_terminal(
+        tmp_path, monkeypatch, llm_factory=_AnswersWithoutToolCallsLLM
+    )
+    artifact_dir = agent_artifact_dir(tmp_path, "analyst")
+
+    assert result.status == "incomplete", result.error
+    assert "no tool calls" in (result.error or "")
     assert (artifact_dir / "summary.md").is_file()
     assert (artifact_dir / "messages.json").is_file()
 

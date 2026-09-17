@@ -76,6 +76,24 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A `local:` code in a backtest is served from your own dataset or not at
+  all** (#1467). The market-data tool and the README already treated
+  `local:AAPL.US` this way, but the backtest runner did not. With
+  `source="local"` it counted the served `AAPL.US` as missing and sent it down
+  the A-share network fallback chain. With `source="auto"` it ignored the
+  prefix and fetched the symbol from network loaders. The prefix now picks the
+  local loader only, a symbol the dataset lacks fails with
+  `incomplete data for source=local`, and the rest of the run sees the bare
+  symbol: market rules, artifacts (`ohlcv_AAPL.US.csv`, no colon in the file
+  name) and the run card. A `local:` code requested from a network source, or
+  one symbol requested both with and without the prefix, is refused up front.
+- **Event-study z-statistics no longer over-reject** (#1466). A CAR's standard
+  error summed each day's variance, ignoring that every day is forecast with
+  the same estimated parameters, so the days' abnormal returns are correlated.
+  On null data, the standardised CAR's variance was 1.11 with a 120-day
+  estimation window and 1.41–1.46 with a 30-day one. It is now 1.02 and 1.07,
+  which is only the t correction for an estimated residual variance. Patell and
+  BMP inherit the fix; `market_adjusted` was already right.
 - **Robinhood live trading reads and trades the account the mandate names**
   (#1442). The runner, the pre-trade gate and the commit-time ceiling fetch
   called Robinhood with no `account_number`, and read replies one level too

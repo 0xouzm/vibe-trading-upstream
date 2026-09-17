@@ -793,3 +793,22 @@ def test_the_spanish_var_report_from_1418_grounds_once_its_confidence_is_declare
 
     assert declared.valid is True, declared.issues
     assert invented.valid is False
+
+
+def test_a_worded_cell_still_checks_an_integer_price_in_the_thousands(tmp_path: Path) -> None:
+    """#1471 reads "1520 (limit)" as prose, and prose checks an integer price of 600519.SH."""
+    head = "600519.SH（akshare，CNY）\n\n| 项目 | 说明 |\n|---|---|\n"
+
+    invented = _ledger(tmp_path / "bad", MARKET_B, message=f"分析 {B}").validate_final_answer(
+        head + "| 入场 | 1520 (limit) |\n"
+    )
+    observed = _ledger(tmp_path / "good", MARKET_B, message=f"分析 {B}").validate_final_answer(
+        head + "| 入场 | 1450 (last close) |\n"
+    )
+    horizon = _ledger(tmp_path / "horizon", MARKET_B, message=f"分析 {B}").validate_final_answer(
+        head + "| 周期 | 200 日均线 |\n"
+    )
+
+    assert invented.valid is False
+    assert observed.valid is True, observed.issues
+    assert horizon.valid is True, horizon.issues

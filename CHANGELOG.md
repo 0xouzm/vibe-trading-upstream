@@ -76,6 +76,19 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A redacted answer keeps its row numbers and its labels** (#1471). When the
+  grounding gate released a draft with its unverified figures cut, a ranked
+  table came back with `(omitted※)` in place of 1, 2, 3, of the `12m` in its
+  headers and of "3 names" in the prose. Every integer in a table cell was a
+  measurement, so the rank column was cut; and each cut figure's digits were
+  then swept out of the rest of the page, single digits included. Three shape
+  rules, no word list: a column whose numbered cells read 1, 2, 3 … in row
+  order is the table's index; a plain integer in a cell that also holds a
+  word (`12m mean return`, `Mean beta (9 reported)`) is read as it would be
+  in a sentence, while a cell that holds only a number, any decimal, percent
+  or currency figure, and every cell under an OHLC column stay measurements;
+  and the sweep never keys on a single digit. An integer price of an
+  instrument quoted in the thousands is still checked inside a worded cell.
 - **One cash-starved open is one rejection, not twenty-six** (#1470). In
   `position_adjustment="hold"`, the search that scales a basket down to the
   cash available re-planned every open on each step, and every step whose

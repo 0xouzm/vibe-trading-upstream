@@ -76,6 +76,20 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A real VaR result grounds the VaR it returned** (#1464). `quantlib_call`
+  records a scalar result under the function name. For `historical_var` and
+  `parametric_var` that name reduces to `var`, which the grounding gate accepts
+  only as a whole field name, so the result recorded no evidence and a correct
+  answer quoting it was rejected. Both names are now tail-risk aliases.
+  Variances such as `residual_var` stay unmapped.
+- **Nineteen alphas no longer fill a missing input with a constant** (#1463).
+  A halt left a comparison reading 0, a `.where(cond, 0)` reading a flat day, or
+  an `np.fmax` returning the other side, and the value then fed every rolling
+  window that reached back to the gap. Those cells are NaN now. On gap-free
+  data every finite value is bit-identical to before. A perturbation sweep over
+  all 462 alphas counts 36 still carrying a missing bar forward, down from 55.
+  Most of them are recursive smoothers (`ewm` / SMA), whose policy is still
+  open on the issue.
 - **A `local:` code in a backtest is served from your own dataset or not at
   all** (#1467). The market-data tool and the README already treated
   `local:AAPL.US` this way, but the backtest runner did not. With

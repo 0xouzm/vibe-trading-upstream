@@ -141,6 +141,20 @@ def test_auto_refuses_a_local_code_the_dataset_lacks_instead_of_fetching_it(
     assert network.calls == []
 
 
+@pytest.mark.parametrize("source", ["local", "auto"])
+def test_a_local_code_the_dataset_lacks_is_never_filled_from_the_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, network: type[_NetworkLoader], source: str
+) -> None:
+    """Stripping the prefix must not let a network chain serve the bare symbol instead."""
+    _configure_local(monkeypatch, tmp_path, ["AAPL.US"])
+
+    with pytest.raises(NoAvailableSourceError, match=r"source=local; missing symbols: \['local:MSFT.US'\]"):
+        runner.fetch_data_map(
+            {"source": source, "codes": ["local:AAPL.US", "local:MSFT.US"], "start_date": _START, "end_date": _END}
+        )
+    assert network.calls == []
+
+
 def test_a_local_code_from_a_network_source_is_refused(network: type[_NetworkLoader]) -> None:
     with pytest.raises(ValueError, match="need source='local' or 'auto'"):
         runner.fetch_data_map({"source": "yahoo", "codes": ["local:AAPL.US"], "start_date": _START, "end_date": _END})

@@ -1624,6 +1624,13 @@ def fetch_data_map(config: dict) -> DataFetchResult:
             )
         used_sources = [served_by] if data_map else []
         missing = [code for code in codes if code not in data_map]
+        # With the prefix stripped, a network chain could serve the bare symbol
+        # as if the dataset held it. A ``local:`` code is the dataset's or nothing.
+        unserved_local = [code for code in prefixed if strip_local_prefix(code) in missing]
+        if unserved_local:
+            raise NoAvailableSourceError(
+                f"incomplete data for source=local; missing symbols: {unserved_local}"
+            )
         if missing:
             logger.warning(
                 "source=%s returned data for %d/%d symbols; missing: %s",

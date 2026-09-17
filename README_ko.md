@@ -370,7 +370,7 @@ vibe-trading run -p "Analyze my trading behavior, extract my shadow strategy, an
 
 ## 💼 로컬 멀티 브로커 포트폴리오
 
-Web UI에 선택한 브로커 연결의 보유 종목을 한데 모아 보여주는 읽기 전용 **포트폴리오** 페이지가 추가됐습니다. 소스는 `account.read`와 `positions.read`를 선언한 읽기 전용 profile의 연결 인스턴스이며, [상세 기능](#-상세-기능)의 **브로커 커넥터**에서 설정합니다. IBKR 공식 MCP profile은 아직 소스로 사용할 수 없습니다.
+Web UI에 선택한 브로커 연결의 보유 종목을 한데 모아 보여주는 읽기 전용 **포트폴리오** 페이지가 추가됐습니다. 소스는 `account.read`와 `positions.read`를 선언한 읽기 전용 profile의 연결 인스턴스이며, [상세 기능](#-상세-기능)의 **브로커 커넥터**에서 설정합니다. IBKR 공식 MCP profile은 아직 소스로 사용할 수 없습니다. Robinhood는 브로커의 계좌 목록에서 직접 고른 계좌 하나만 읽으며(`vibe-trading connector select-account <id>` 또는 연결 센터) 기본 계좌로 대체하지 않습니다. 주식 포지션은 시세 응답이 매핑될 때까지 평가액 없이 표시되고, 옵션·암호화폐·선물·이벤트 계약·뮤추얼 펀드·채권을 함께 보유한 계좌는 주식만 보여주는 대신 소스 오류로 처리됩니다.
 
 | 동작 | 제공되는 것 |
 |------|-------------|

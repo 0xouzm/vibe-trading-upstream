@@ -369,7 +369,7 @@ vibe-trading run -p "Analyze my trading behavior, extract my shadow strategy, an
 
 ## 💼 本地多账户持仓
 
-Web UI 新增只读的 **持仓** 页面，把你选中的券商连接的持仓汇总到一起。数据源是声明了 `account.read` 与 `positions.read` 的只读 profile 的连接实例——在 [Detailed Capabilities](#-detailed-capabilities) 的 **Broker Connectors** 中配置。IBKR 官方 MCP profile 暂时还不能作为数据源。
+Web UI 新增只读的 **持仓** 页面，把你选中的券商连接的持仓汇总到一起。数据源是声明了 `account.read` 与 `positions.read` 的只读 profile 的连接实例——在 [Detailed Capabilities](#-detailed-capabilities) 的 **Broker Connectors** 中配置。IBKR 官方 MCP profile 暂时还不能作为数据源。 Robinhood 只读取你从券商账户列表中选定的那一个账户（`vibe-trading connector select-account <id>` 或连接中心），不会回退到默认账户；其股票持仓在报价映射完成前不计价，而同时持有期权、加密货币、期货、事件合约、共同基金或固定收益的账户会被标记为读取失败，而不是只显示股票部分。
 
 | 行为 | 你得到什么 |
 |------|------------|

@@ -369,7 +369,7 @@ vibe-trading run -p "Analyze my trading behavior, extract my shadow strategy, an
 
 ## 💼 Cartera Local Multi-Broker
 
-La Web UI añade una página **Cartera** de solo lectura que agrega las posiciones de las conexiones de broker que elijas. Las fuentes son instancias de conexión de perfiles de solo lectura que declaran `account.read` y `positions.read` — configúralas en **Conectores de Broker** dentro de [Detailed Capabilities](#-detailed-capabilities). El perfil MCP oficial de IBKR aún no puede usarse como fuente.
+La Web UI añade una página **Cartera** de solo lectura que agrega las posiciones de las conexiones de broker que elijas. Las fuentes son instancias de conexión de perfiles de solo lectura que declaran `account.read` y `positions.read` — configúralas en **Conectores de Broker** dentro de [Detailed Capabilities](#-detailed-capabilities). El perfil MCP oficial de IBKR aún no puede usarse como fuente. Robinhood lee solo la cuenta que eliges de la propia lista del bróker (`vibe-trading connector select-account <id>` o el centro de conexiones) y nunca recurre a una cuenta predeterminada; sus posiciones en acciones se muestran sin precio hasta que se mapee la respuesta de cotizaciones, y una cuenta que además tenga opciones, cripto, futuros, contratos de eventos, fondos mutuos o renta fija marca la fuente como error en lugar de mostrar solo las acciones.
 
 | Comportamiento | Qué obtienes |
 |----------------|--------------|

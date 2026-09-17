@@ -370,7 +370,7 @@ vibe-trading run -p "Analyze my trading behavior, extract my shadow strategy, an
 
 ## 💼 ローカル・マルチブローカー Portfolio
 
-Web UI に、選んだブローカー接続の保有を横断してまとめる読み取り専用の **Portfolio** ページが加わりました。データソースは `account.read` と `positions.read` を宣言する読み取り専用 profile の接続インスタンスで、[詳細な機能](#-詳細な機能) の **ブローカー connectors** で設定します。IBKR の公式 MCP profile はまだデータソースとして使えません。
+Web UI に、選んだブローカー接続の保有を横断してまとめる読み取り専用の **Portfolio** ページが加わりました。データソースは `account.read` と `positions.read` を宣言する読み取り専用 profile の接続インスタンスで、[詳細な機能](#-詳細な機能) の **ブローカー connectors** で設定します。IBKR の公式 MCP profile はまだデータソースとして使えません。 Robinhood はブローカー自身の口座一覧から選んだ 1 口座だけを読み取り（`vibe-trading connector select-account <id>` または接続センター）、既定の口座にフォールバックしません。株式ポジションは気配値の対応付けが済むまで評価額なしで表示され、オプション・暗号資産・先物・イベント契約・投資信託・債券も保有する口座は、株式だけの表示ではなくソースのエラーになります。
 
 | 挙動 | 得られるもの |
 |------|--------------|

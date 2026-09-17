@@ -5,6 +5,21 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **A Robinhood account can be a read-only portfolio source** (#1428). The new
+  `robinhood-live-mcp-readonly` profile uses the same MCP server and OAuth
+  grant as the trading profile. Its connection reads exactly one account,
+  picked from Robinhood's own `get_accounts` list in the connection center or
+  with `vibe-trading connector select-account <id>`. Nothing is preselected,
+  and a source with no account errors before any broker call. Holdings come
+  from `get_portfolio` and `get_equity_positions` and are mapped only from the
+  shapes the reporter posted. A second page of positions, a null list or item,
+  or an unknown field is an error, not a shorter account. Positions show
+  quantity and cost but no price until the quote reply is mapped. An account
+  that also holds options, crypto, futures, event contracts, mutual funds or
+  fixed income fails the source instead of showing an equity-only view.
+
 ### Changed
 
 - **The final-answer grounding gate no longer guesses what a number is from the
@@ -60,6 +75,22 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   arrives, in all eight locales.
 
 ### Fixed
+
+- **Robinhood live trading reads and trades the account the mandate names**
+  (#1442). The runner, the pre-trade gate and the commit-time ceiling fetch
+  called Robinhood with no `account_number`, and read replies one level too
+  shallow (`data.positions` where Robinhood nests `data.data.positions`). So
+  every reconciliation aborted, and the gate refused every order because it
+  could not read positions. The tests stayed green only because their fake
+  replies had a shape Robinhood never sends. A Robinhood mandate is now bound
+  at commit to one account from `get_accounts`: listed, not deactivated, and
+  open to agentic trading. The Web confirm dialog and the CLI both ask for
+  it, and never take it from the agent-written proposal. Every runner and gate
+  call sends that account, and an order naming another account is refused.
+  Held positions, which Robinhood reports without a price, are priced the way
+  a quantity order already was, and one that cannot be priced fails the
+  exposure check closed. Existing Robinhood mandates must be committed again
+  with an account.
 
 - **Plain integers in prose are not price claims.** A list number ("输出原则
   4"), a window length or a count was checked like a quoted price and could be

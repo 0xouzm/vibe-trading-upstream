@@ -76,6 +76,15 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **One cash-starved open is one rejection, not twenty-six** (#1470). In
+  `position_adjustment="hold"`, the search that scales a basket down to the
+  cash available re-planned every open on each step, and every step whose
+  size rounded to zero booked a `zero_size` rejection for the same symbol on
+  the same bar — one contract the cash could not hold read as 26 lot-rounding
+  failures. The trial plans are silent now; a sleeve that was a real order at
+  full scale and left the basket is reported once, after the search, as
+  `insufficient_capital`, which the rebalance path's dropped sleeves now use
+  too. `zero_size` means the lot rule and nothing else.
 - **A real VaR result grounds the VaR it returned** (#1464). `quantlib_call`
   records a scalar result under the function name. For `historical_var` and
   `parametric_var` that name reduces to `var`, which the grounding gate accepts

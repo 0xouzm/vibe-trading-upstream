@@ -13,8 +13,21 @@ dyadic (prices in sixteenths, integer volume) and differences are compared with 
 tight tolerance, so pandas' online rolling sums carry no rounding residue that
 would read as a dependence.
 
-The recursive smoothers (``ewm`` / SMA) are deliberately not listed: whether a
-smoother may skip a missing observation is a policy decision still open on #1463.
+The recursive smoothers are held to a different rule, decided on #1463: a
+statistic that carries state — the GTJA ``SMA(A, n, m)`` written as
+``.ewm(alpha=m/n, adjust=False)``, a running product — skips the missing
+observation and continues from its last state, so the bars after a gap carry a
+value computed from the observations it saw. ``test_a_smoother_skips_the_gap``
+pins that: the gap bar itself is NaN (the registry masks it), the next bar is
+not, and the later values are not the gap-free ones.
+
+Four alphas the sweep still flags — ``alpha101_013``, ``alpha101_016``,
+``gtja191_083``, ``gtja191_099``, all ``rank(ts_cov(rank(x), rank(y), 5))`` —
+are the oracle's own artifact, not a dependence: their flagged cells sit 10 to
+241 bars past a 5-bar window, every one is a cross-sectional rank moving by
+exactly 1/48 or 1/24, and the covariances agree to twelve decimals between the
+two perturbed runs. Percentile ranks (k/24) are not dyadic, so the rolling
+covariance carries a rounding residue that breaks a tie differently.
 """
 
 from __future__ import annotations
@@ -41,6 +54,7 @@ FIXED = [
     "gtja191_058",
     "gtja191_084",
     "gtja191_094",
+    "gtja191_098",
     "gtja191_112",
     "gtja191_128",
     "gtja191_129",
@@ -103,3 +117,56 @@ def test_no_value_after_a_missing_bar_depends_on_it(alpha_id: str) -> None:
 
     assert moved.any(), "the perturbation reached no later bar; the oracle proves nothing"
     assert fabricated.size == 0, f"bars after the gap computed from it: {fabricated.tolist()}"
+
+
+# The recursive statistics: 27 GTJA SMA(A, n, m) smoothers and one running product.
+SMOOTHERS = [
+    "gtja191_022",
+    "gtja191_023",
+    "gtja191_024",
+    "gtja191_028",
+    "gtja191_047",
+    "gtja191_057",
+    "gtja191_063",
+    "gtja191_067",
+    "gtja191_072",
+    "gtja191_079",
+    "gtja191_081",
+    "gtja191_082",
+    "gtja191_089",
+    "gtja191_096",
+    "gtja191_102",
+    "gtja191_111",
+    "gtja191_135",
+    "gtja191_143",
+    "gtja191_146",
+    "gtja191_151",
+    "gtja191_152",
+    "gtja191_155",
+    "gtja191_160",
+    "gtja191_162",
+    "gtja191_164",
+    "gtja191_169",
+    "gtja191_173",
+    "gtja191_174",
+]
+
+
+@pytest.mark.parametrize("alpha_id", SMOOTHERS)
+def test_a_smoother_skips_the_gap(alpha_id: str) -> None:
+    """Skip and continue, not NaN until rewarmed: the policy set on #1463."""
+    registry = get_default_registry()
+    deps = set(registry.get(alpha_id).meta.get("columns_required", []))
+    base = _base()
+    clean = registry.compute(alpha_id, _panel(base, deps, "base")).iloc[:, _SYMBOL].to_numpy(dtype=float)
+    gapped = registry.compute(alpha_id, _panel(base, deps, "missing")).iloc[:, _SYMBOL].to_numpy(dtype=float)
+
+    assert np.isnan(gapped[_GAP]), "the registry masks the bar whose input is missing"
+    # gtja191_146 averages the smoothed residual over a full 20-bar window, which
+    # is NaN while it holds the gap; the smoother underneath it never stops.
+    first = _GAP + (21 if alpha_id == "gtja191_146" else 1)
+    assert np.isfinite(gapped[first:]).all(), "the smoother continued from its last state"
+    both = np.isfinite(clean[first:]) & np.isfinite(gapped[first:])
+    assert not np.allclose(clean[first:][both], gapped[first:][both], rtol=1e-9, atol=1e-12), (
+        "the values after the gap were computed from the observations the smoother saw, not copied"
+    )

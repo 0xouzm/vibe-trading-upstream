@@ -91,14 +91,20 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   only as a whole field name, so the result recorded no evidence and a correct
   answer quoting it was rejected. Both names are now tail-risk aliases.
   Variances such as `residual_var` stay unmapped.
-- **Nineteen alphas no longer fill a missing input with a constant** (#1463).
-  A halt left a comparison reading 0, a `.where(cond, 0)` reading a flat day, or
-  an `np.fmax` returning the other side, and the value then fed every rolling
-  window that reached back to the gap. Those cells are NaN now. On gap-free
-  data every finite value is bit-identical to before. A perturbation sweep over
-  all 462 alphas counts 36 still carrying a missing bar forward, down from 55.
-  Most of them are recursive smoothers (`ewm` / SMA), whose policy is still
-  open on the issue.
+- **Twenty alphas no longer fill a missing input with a constant** (#1463).
+  A halt left a comparison reading 0 or False, a `.where(cond, 0)` reading a
+  flat day, or an `np.fmax` returning the other side, and the value then fed
+  every rolling window that reached back to the gap. Those cells are NaN now.
+  On gap-free data every finite value is bit-identical to before. A
+  perturbation sweep over all 462 alphas counts 35 still carrying a missing
+  bar forward, down from 55, and every one of them is accounted for: 28 are
+  recursive statistics (the GTJA `SMA(A, n, m)` smoothers and one running
+  product), which by the policy set on #1463 skip a missing observation and
+  continue from their last state — the operator layer's header now states
+  that exception, and a test pins it; 3 declare their own partial window; 4
+  are the sweep's own rank-tie artifact. Nothing rewarms a smoother after a
+  gap, and the registry's look-back mask was measured and rejected: it hid
+  4,270 legitimate cells to remove 41% of the fabricated ones.
 - **A `local:` code in a backtest is served from your own dataset or not at
   all** (#1467). The market-data tool and the README already treated
   `local:AAPL.US` this way, but the backtest runner did not. With

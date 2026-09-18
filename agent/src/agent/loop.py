@@ -14,6 +14,7 @@ Tool execution:
 from __future__ import annotations
 
 import concurrent.futures
+import contextvars
 import copy
 import json
 import logging
@@ -3187,8 +3188,12 @@ class AgentLoop:
                     _compact_error.append(exc)
 
             if _compact_timeout > 0:
+                # A new thread starts with an empty context, so the session
+                # bound by run() (x-opencode-session, #1416) would not reach
+                # this call: run it inside a copy of the caller's context.
                 worker = threading.Thread(
-                    target=_run_compact_summary,
+                    target=contextvars.copy_context().run,
+                    args=(_run_compact_summary,),
                     name="compact-summary",
                     daemon=True,
                 )

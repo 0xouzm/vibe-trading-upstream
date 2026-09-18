@@ -571,7 +571,7 @@ if ChatOpenAI is not None:
             try:
                 return super()._generate(*args, **kwargs)
             except Exception as exc:  # noqa: BLE001 - retried or re-raised below
-                if not self._remember_temperature_unsupported(exc):
+                if not self._recoverable_rejection(exc):
                     raise
                 return super()._generate(*args, **kwargs)
 
@@ -579,7 +579,7 @@ if ChatOpenAI is not None:
             try:
                 return await super()._agenerate(*args, **kwargs)
             except Exception as exc:  # noqa: BLE001 - retried or re-raised below
-                if not self._remember_temperature_unsupported(exc):
+                if not self._recoverable_rejection(exc):
                     raise
                 return await super()._agenerate(*args, **kwargs)
 
@@ -605,6 +605,47 @@ if ChatOpenAI is not None:
                 _ANTHROPIC_TEMPERATURE_UNSUPPORTED.add(model)
             return True
 
+        def _use_responses_api(self, payload: dict) -> bool:  # type: ignore[override]
+            """Route a model whose chat endpoint refused tools to /v1/responses."""
+            if str(self.model_name) in _RESPONSES_REQUIRED:
+                return True
+            return super()._use_responses_api(payload)
+
+        def _remember_responses_required(self, exc: BaseException) -> bool:
+            """Record a chat-completions refusal naming /v1/responses; report a one-shot retry.
+
+            OpenAI's gpt-5.6-* reject function tools on ``/v1/chat/completions``
+            unless ``reasoning_effort`` is 'none', which would run the model
+            without its reasoning; the same request on ``/v1/responses`` is
+            accepted with the effort under ``reasoning.effort`` (issue #1473).
+            The model is remembered in ``_RESPONSES_REQUIRED`` so later requests
+            take that route up front. A model that already failed there is not
+            retried again.
+            """
+            if not _is_responses_required_error(exc):
+                return False
+            model = str(self.model_name)
+            if model in _RESPONSES_REQUIRED or self.use_responses_api is True:
+                return False
+            logger.warning(
+                "Model %s refuses function tools on /v1/chat/completions with a "
+                "reasoning effort; retrying on /v1/responses and using it for "
+                "subsequent calls. Set LANGCHAIN_USE_RESPONSES_API=true to select "
+                "it up front.",
+                model,
+            )
+            _RESPONSES_REQUIRED.add(model)
+            return True
+
+        def _recoverable_rejection(self, exc: BaseException) -> bool:
+            """Report whether a failed request should be sent once more.
+
+            Each branch records what the endpoint rejected so the retry, and
+            every later request, is shaped differently: without ``temperature``
+            (#1223) or on ``/v1/responses`` (#1473).
+            """
+            return self._remember_temperature_unsupported(exc) or self._remember_responses_required(exc)
+
         def _stream(self, *args: Any, **kwargs: Any) -> Iterator[Any]:
             """Route Responses streams through the mapping-compatible adapter."""
             if self._use_responses_api({**kwargs, **self.model_kwargs}):
@@ -624,7 +665,7 @@ if ChatOpenAI is not None:
                     emitted = True
                     yield chunk
             except Exception as exc:  # noqa: BLE001 - retried or re-raised below
-                if emitted or not self._remember_temperature_unsupported(exc):
+                if emitted or not self._recoverable_rejection(exc):
                     raise
                 yield from self._stream(*args, **kwargs)
 
@@ -696,7 +737,7 @@ if ChatOpenAI is not None:
                     emitted = True
                     yield chunk
             except Exception as exc:  # noqa: BLE001 - retried or re-raised below
-                if emitted or not self._remember_temperature_unsupported(exc):
+                if emitted or not self._recoverable_rejection(exc):
                     raise
                 async for chunk in self._astream(*args, **kwargs):
                     yield chunk
@@ -1012,6 +1053,34 @@ def _is_stream_usage_unsupported_error(exc: BaseException) -> bool:
         or "not a valid" in message
         or "not allowed" in message
     )
+
+# Models whose Chat Completions endpoint refused function tools and named
+# /v1/responses as the way out (issue #1473). OpenAI's gpt-5.6-* answer HTTP 400
+# "Function tools with reasoning_effort are not supported for <model> in
+# /v1/chat/completions. To use function tools, use /v1/responses or set
+# reasoning_effort to 'none'" whenever the request carries tools and the effort
+# is anything but 'none' -- the model's own default when none is configured
+# included. Setting 'none' would run the model without its reasoning, so the
+# request is retried on /v1/responses instead, where the effort travels as
+# ``reasoning.effort``. Membership is populated on that first refusal and reused
+# process-wide so later calls skip the failed request.
+_RESPONSES_REQUIRED: set[str] = set()
+
+
+def _is_responses_required_error(exc: BaseException) -> bool:
+    """Return True when an endpoint refused tools and pointed at /v1/responses.
+
+    Matches the endpoint's own instruction, not a model name: the message has
+    to name ``reasoning_effort``, say it is not supported, and offer
+    ``/v1/responses``. A gateway that merely rejects ``reasoning_effort`` as an
+    unknown field does not match, because nothing says its Responses route
+    would fare better.
+    """
+    message = str(getattr(exc, "message", "") or exc).lower()
+    if "reasoning_effort" not in message or "/v1/responses" not in message:
+        return False
+    return "not supported" in message or "unsupported" in message
+
 
 # Cache of base ChatAnthropic class -> temperature-safe subclass, so the dynamic
 # subclass is built once per resolved base class (keyed to support test doubles).

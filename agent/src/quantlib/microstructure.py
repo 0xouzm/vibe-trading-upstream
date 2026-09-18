@@ -33,6 +33,10 @@ def roll_effective_spread(prices: Sequence[float] | np.ndarray | pd.Series) -> f
 
     Returns:
         Estimated effective dollar spread (non-negative float).
+
+    Raises:
+        ValueError: Fewer than 4 prices, or a price that is NaN or infinite.
+            A non-finite price used to come back as a ``0.0`` spread.
     """
     p = np.asarray(prices, dtype=float)
     if len(p) < 4:
@@ -61,7 +65,12 @@ def amihud_illiquidity(
         dollar_volumes: Array of traded dollar volumes (> 0).
 
     Returns:
-        Amihud illiquidity metric (positive float).
+        Amihud illiquidity metric (positive float). Rows whose return or volume
+        is NaN or infinite, or whose volume is not positive, are dropped; NaN
+        when no row is left.
+
+    Raises:
+        ValueError: Empty inputs or mismatched shapes.
     """
     r = np.asarray(returns, dtype=float)
     v = np.asarray(dollar_volumes, dtype=float)
@@ -87,7 +96,11 @@ def kyles_lambda(
         signed_order_flow: Array of signed trade volumes (+ for buy, - for sell).
 
     Returns:
-        Kyle's lambda price impact slope.
+        Kyle's lambda price impact slope; ``0.0`` when the order flow is all zero.
+
+    Raises:
+        ValueError: Mismatched shapes, fewer than 2 observations, or a value
+            that is NaN or infinite.
     """
     dp = np.asarray(price_changes, dtype=float)
     flow = np.asarray(signed_order_flow, dtype=float)
@@ -120,6 +133,11 @@ def vpin(
 
     Returns:
         1-D ndarray of VPIN values in [0, 1] for completed volume buckets.
+
+    Raises:
+        ValueError: Mismatched or empty volumes, a volume that is negative, NaN
+            or infinite, or a ``bucket_size`` / ``n_buckets`` that is not
+            positive.
     """
     vb = np.asarray(buy_volume, dtype=float)
     vs = np.asarray(sell_volume, dtype=float)

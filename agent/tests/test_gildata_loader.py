@@ -177,6 +177,10 @@ class TestFetch:
         url = mock_post.call_args[0][0]
         assert "token=secret" in url
         assert "format=json" in url
+        # MCP streamable-HTTP requires the dual Accept header (measured:
+        # the endpoint answers 400 without it).
+        headers = mock_post.call_args.kwargs["headers"]
+        assert headers["Accept"] == "application/json, text/event-stream"
         # The JSON-RPC body routes to StockDailyQuote with qfq adjustment.
         body = mock_post.call_args.kwargs["json_body"]
         assert body["method"] == "tools/call"

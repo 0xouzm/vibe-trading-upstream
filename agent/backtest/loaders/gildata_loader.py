@@ -158,6 +158,9 @@ def _call_tool(tool: str, arguments: Dict[str, Any]) -> List[Dict[str, Any]]:
         host_key=_HOST_KEY,
         min_interval=_min_interval(),
         json_body=payload,
+        # MCP streamable-HTTP servers reject requests whose Accept header
+        # does not name both content types (measured: 400 without it).
+        headers={"Accept": "application/json, text/event-stream"},
         timeout=_TIMEOUT_S,
     )
 

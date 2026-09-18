@@ -21,7 +21,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   `GILDATA_BASE_URL` overrides the endpoint, `VIBE_TRADING_GILDATA_MIN_INTERVAL`
   the 0.3s default spacing). Without a token the loader reports unavailable
   and the chain skips it — no behavior change for existing users beyond one
-  reorderable entry at the chain's tail.
+  reorderable entry at the chain's tail. One migration note: a
+  `MARKET_DATA_ORDER_A_SHARE` value saved before this change is a permutation
+  of the old 7-source chain, so it stops validating once `gildata` joins —
+  the Settings card flags it and the default order applies until the saved
+  order is re-saved (one click) with the new source included.
 
 - **A Robinhood account can be a read-only portfolio source** (#1428). The new
   `robinhood-live-mcp-readonly` profile uses the same MCP server and OAuth

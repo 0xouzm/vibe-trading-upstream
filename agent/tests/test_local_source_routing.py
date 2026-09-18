@@ -15,6 +15,7 @@ import pandas as pd
 import pytest
 
 from backtest.benchmark import resolve_benchmark
+from backtest.loaders.registry import _NO_NETWORK_FALLBACK_SOURCES
 from backtest.engines.china_a import ChinaAEngine
 from backtest.engines.crypto import CryptoEngine
 from backtest.engines.global_equity import GlobalEquityEngine
@@ -230,8 +231,13 @@ class TestNoNetworkFallbackIsPerSymbolToo:
         cfg.update(over)
         return cfg
 
+    # Every member of the set is pinned, not only ``local``: with the guard
+    # narrowed to ``primary_source != "local"`` the suite stayed green while
+    # qveris / fmp / tickerall / nobitex / wallex kept filling gaps from the
+    # network. A source added to the set later is covered the moment it lands.
+    @pytest.mark.parametrize("source", sorted(_NO_NETWORK_FALLBACK_SOURCES))
     def test_missing_symbol_raises_instead_of_reaching_the_network(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self, monkeypatch: pytest.MonkeyPatch, source: str,
     ) -> None:
         from backtest.loaders.base import NoAvailableSourceError
         from backtest.runner import fetch_data_map
@@ -243,7 +249,7 @@ class TestNoNetworkFallbackIsPerSymbolToo:
 
         monkeypatch.setattr(
             "backtest.runner._get_loader",
-            lambda source: lambda: type("L", (), {"name": "local", "fetch": staticmethod(_only_first)})(),
+            lambda name: lambda: type("L", (), {"name": source, "fetch": staticmethod(_only_first)})(),
         )
         monkeypatch.setattr(
             "backtest.runner.LOADER_REGISTRY",
@@ -251,7 +257,7 @@ class TestNoNetworkFallbackIsPerSymbolToo:
         )
 
         with pytest.raises(NoAvailableSourceError, match="MSFT.US"):
-            fetch_data_map(self._config())
+            fetch_data_map(self._config(source=source))
 
     def test_a_fallback_source_still_reaches_the_chain(
         self, monkeypatch: pytest.MonkeyPatch,

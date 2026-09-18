@@ -205,7 +205,6 @@ class MemoryLifecycle:
 
         now = time.time()
         actions: list[dict] = []
-        gc_acted_ids: set[str] = set()
 
         for entry in entries:
             age_days = (now - entry.created_at) / 86400.0
@@ -238,17 +237,17 @@ class MemoryLifecycle:
                     # Tier 1: force archive even if classified as delete
                     effective = "archive" if not self.ENABLE_DELETE else action
                     self._execute_gc_action(entry, effective)
-                    gc_acted_ids.add(entry.id)
 
         self._append_gc_log(actions, dry_run)
 
         # Tier 2: Trigger compression for aged entries. Skipped on dry_run:
         # compression rewrites entry bodies and frontmatter in place, and a
-        # dry run must not mutate the files it is only auditing. Entries
-        # already archived/deleted above are skipped too: _execute_gc_action
-        # already renamed or unlinked entry.path on disk, so re-using this
-        # same pre-Tier-1 snapshot for them would try to compress a file
-        # that no longer exists at that location.
+        # dry run must not mutate the files it is only auditing. An entry
+        # Tier 1 archived or deleted is skipped too: _execute_gc_action renamed
+        # or unlinked entry.path, and this is the pre-Tier-1 snapshot. The
+        # check is on the path, not on entry.id: ids are a six-hex hash two
+        # files can share, and an archive step that returned early (lock
+        # timeout, OSError) leaves its file in place to be compressed (#1450).
         from src.config.accessor import get_env_config
         if not dry_run and get_env_config().memory.compression_enabled:
             try:
@@ -256,7 +255,7 @@ class MemoryLifecycle:
                 pipeline = CompressionPipeline(self._memory._dir)
                 now_ts = time.time()
                 for entry in entries:
-                    if entry.id in gc_acted_ids:
+                    if not entry.path.exists():
                         continue
                     target = pipeline.should_compress(
                         compression_level=entry.compression_level,

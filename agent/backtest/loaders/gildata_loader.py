@@ -3,8 +3,8 @@
 Gildata serves its market data over MCP streamable-HTTP: every tool call is one
 JSON-RPC POST to a single endpoint whose token rides the URL query string::
 
-    POST https://api.gildata.com/mcp-servers/aidata-assistant-srv-rawapi
-         ?token=<GILDATA_TOKEN>&format=json
+    POST https://api.gildata.com/mcp-servers/aidata-assistant-srv-rawapi?format=json
+         Authorization: Bearer <GILDATA_TOKEN>
     {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
      "params": {"name": "StockDailyQuote", "arguments": {...}}}
 
@@ -146,7 +146,10 @@ def _call_tool(tool: str, arguments: Dict[str, Any]) -> List[Dict[str, Any]]:
         raise RuntimeError(f"{_TOKEN_ENV} is not set")
 
     base = _base_url()
-    url = f"{base}{'&' if '?' in base else '?'}token={token}&format=json"
+    # The token rides the Authorization header, never the URL: request
+    # exceptions (DNS failure, timeout) embed the full URL in their message,
+    # and a query-string token would leak into those logs (review of #1474).
+    url = f"{base}{'&' if '?' in base else '?'}format=json"
     payload = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -160,7 +163,10 @@ def _call_tool(tool: str, arguments: Dict[str, Any]) -> List[Dict[str, Any]]:
         json_body=payload,
         # MCP streamable-HTTP servers reject requests whose Accept header
         # does not name both content types (measured: 400 without it).
-        headers={"Accept": "application/json, text/event-stream"},
+        headers={
+            "Accept": "application/json, text/event-stream",
+            "Authorization": f"Bearer {token}",
+        },
         timeout=_TIMEOUT_S,
     )
 

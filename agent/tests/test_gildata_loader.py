@@ -173,13 +173,16 @@ class TestFetch:
             out = DataLoader().fetch(["600519.SH"], "2024-01-01", "2024-01-31")
         assert set(out) == {"600519.SH"}
         assert len(out["600519.SH"]) == 2
-        # Token and structured-JSON flag ride the URL query string.
+        # The token rides the Authorization header — never the URL, whose
+        # full form request exceptions embed in their messages (review of
+        # #1474: a query-string token would leak into error logs).
         url = mock_post.call_args[0][0]
-        assert "token=secret" in url
+        assert "token=" not in url
         assert "format=json" in url
+        headers = mock_post.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Bearer secret"
         # MCP streamable-HTTP requires the dual Accept header (measured:
         # the endpoint answers 400 without it).
-        headers = mock_post.call_args.kwargs["headers"]
         assert headers["Accept"] == "application/json, text/event-stream"
         # The JSON-RPC body routes to StockDailyQuote with qfq adjustment.
         body = mock_post.call_args.kwargs["json_body"]

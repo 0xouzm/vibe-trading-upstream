@@ -251,16 +251,139 @@ class TestSingleMarketAnnualisationChecksTheServedData:
         )
         assert _annualisation_bars("1D", "tushare", data, ["600519.SH"]) == 252
 
-    def test_unsupported_spacing_keeps_the_declaration_and_says_so(self, caplog):
-        """Weekly bars match no supported interval; naming a count would guess."""
+    # --- spacing wider than any supported interval (review point 2) ---
+
+    @pytest.mark.parametrize("declared", ["1D", "1H"])
+    def test_weekly_bars_are_annualised_from_the_calendar(self, declared, caplog):
+        """A weekly file has no trading-day table and needs none: 52 a year.
+
+        Keeping the declaration was the same bug one step coarser -- a weekly
+        file declared ``1H`` annualised at 1,764 bars a year.
+        """
         from backtest.runner import _annualisation_bars
 
         data = self._frame(pd.date_range("2024-01-05", periods=60, freq="W-FRI"))
         with caplog.at_level("WARNING", logger="backtest.runner"):
-            resolved = _annualisation_bars("1D", "tushare", data, ["600519.SH"])
+            resolved = _annualisation_bars(declared, "tushare", data, ["600519.SH"])
+
+        assert resolved == 52
+        assert any("wider than any supported interval" in r.getMessage() for r in caplog.records)
+
+    def test_monthly_bars_are_twelve_a_year(self):
+        from backtest.runner import _annualisation_bars
+
+        data = self._frame(pd.date_range("2020-01-01", periods=48, freq="MS"))
+        assert _annualisation_bars("1D", "yahoo", data, ["600519.SH"]) == 12
+
+    def test_a_daily_series_over_a_holiday_week_is_not_read_as_weekly(self, caplog):
+        """Five daily bars around Christmas measure a two-day median: the
+        declaration stands, the report states the spacings, and the count is
+        not recomputed from a spacing that is only gaps."""
+        from backtest.runner import _annualisation_bars
+
+        index = pd.to_datetime(["2025-12-22", "2025-12-23", "2025-12-24", "2025-12-26", "2025-12-29"])
+        with caplog.at_level("WARNING", logger="backtest.runner"):
+            resolved = _annualisation_bars("1D", "yahoo", self._frame(index), ["600519.SH"])
 
         assert resolved == 252
+        message = " ".join(r.getMessage() for r in caplog.records)
+        assert "matches no supported interval" in message
+        assert "re-run" not in message
+
+    def test_sub_minute_bars_keep_the_declaration_and_say_so(self, caplog):
+        from backtest.runner import _annualisation_bars
+
+        data = self._frame(pd.date_range("2026-09-07 09:30", periods=200, freq="10s"))
+        with caplog.at_level("WARNING", logger="backtest.runner"):
+            resolved = _annualisation_bars("1m", "yahoo", data, ["600519.SH"])
+
+        assert resolved == calc_bars_per_year("1m", "yahoo")
         assert any("matches no supported interval" in r.getMessage() for r in caplog.records)
+
+    # --- properties the code relies on, each pinned against its mutation ---
+
+    def test_hourly_bars_declared_30m_switch_to_the_hourly_count(self):
+        """Neighbouring intervals differ by 2x, above the 1.5 gate."""
+        from backtest.runner import _annualisation_bars
+
+        data = self._frame(self._session(days=5, per_day=7, freq="1h"))
+        assert _annualisation_bars("30m", "yahoo", data, ["600519.SH"]) == calc_bars_per_year("1H", "yahoo")
+
+    def test_four_hour_bars_declared_1h_switch_to_the_four_hour_count(self):
+        """A 4x mismatch must switch too: the gate is 1.5, not a larger number."""
+        from backtest.runner import _annualisation_bars
+
+        data = self._frame(self._session(days=5, per_day=2, freq="4h"))
+        assert _annualisation_bars("1H", "yahoo", data, ["600519.SH"]) == calc_bars_per_year("4H", "yahoo")
+
+    def test_spacing_inside_the_tolerance_keeps_the_declaration(self):
+        """Bars 72 minutes apart declared 1H sit at ratio 1.2: not a mismatch."""
+        from backtest.runner import _annualisation_bars
+
+        data = self._frame(self._session(days=5, per_day=5, freq="72min"))
+        assert _annualisation_bars("1H", "yahoo", data, ["600519.SH"]) == calc_bars_per_year("1H", "yahoo")
+
+    def test_spacing_near_a_neighbouring_interval_resolves_to_it(self):
+        """Bars 72 minutes apart declared 30m are a mismatch (ratio 2.4) whose
+        nearest interval, 1H, sits inside the tolerance (ratio 1.2): the run
+        annualises as 1H. A tighter gate would find no match and keep 30m."""
+        from backtest.runner import _annualisation_bars
+
+        data = self._frame(self._session(days=5, per_day=5, freq="72min"))
+        assert _annualisation_bars("30m", "yahoo", data, ["600519.SH"]) == calc_bars_per_year("1H", "yahoo")
+
+    def test_bars_finer_than_declared_switch_as_well(self):
+        """The gate is two-sided: hourly bars declared 1D annualise as 1H."""
+        from backtest.runner import _annualisation_bars
+
+        data = self._frame(self._session(days=5, per_day=7, freq="1h"))
+        assert _annualisation_bars("1D", "yahoo", data, ["600519.SH"]) == calc_bars_per_year("1H", "yahoo")
+
+    def test_three_bars_are_too_few_to_overrule_the_declaration(self):
+        """Two differences cannot outvote one gap, so the declaration stands."""
+        from backtest.runner import _annualisation_bars
+
+        data = self._frame(pd.bdate_range("2026-09-08", periods=3))
+        assert _annualisation_bars("1H", "yahoo", data, ["600519.SH"]) == calc_bars_per_year("1H", "yahoo")
+
+    def test_only_price_frames_are_measured_even_when_a_panel_is_longer(self):
+        """A longer injected panel must not win the measurement by length."""
+        from backtest.runner import _annualisation_bars
+
+        data = self._frame(pd.date_range("2024-01-02", periods=654, freq="B"))
+        data["_fundamentals"] = pd.DataFrame(
+            {"pe": [1.0] * 1000}, index=pd.date_range("2024-01-02", periods=1000, freq="h")
+        )
+        assert _annualisation_bars("1D", "tushare", data, ["600519.SH"]) == 252
+
+    def test_the_longest_price_frame_decides(self):
+        """A short hourly stub beside a long daily series does not switch the run."""
+        from backtest.runner import _annualisation_bars
+
+        data = self._frame(pd.date_range("2024-01-02", periods=654, freq="B"))
+        data["000001.SZ"] = pd.DataFrame(
+            {"close": [10.0] * 10}, index=pd.date_range("2024-01-02 09:30", periods=10, freq="h")
+        )
+        assert _annualisation_bars("1D", "tushare", data, ["600519.SH", "000001.SZ"]) == 252
+
+    def test_the_report_is_handed_to_the_caller_for_the_run_card(self):
+        from backtest.runner import _annualisation_bars
+
+        data = self._frame(pd.date_range("2024-01-02", periods=654, freq="B"))
+        warnings: list[str] = []
+        resolved = _annualisation_bars("1H", "tushare", data, ["600519.SH"], warnings=warnings)
+
+        assert resolved == 252
+        assert len(warnings) == 1 and "annualising as 1D" in warnings[0]
+
+    def test_a_clean_run_hands_over_no_report(self):
+        from backtest.runner import _annualisation_bars
+
+        data = self._frame(pd.date_range("2024-01-02", periods=654, freq="B"))
+        warnings: list[str] = []
+        _annualisation_bars("1D", "tushare", data, ["600519.SH"], warnings=warnings)
+
+        assert warnings == []
 
     def test_mismatch_is_logged(self, caplog):
         from backtest.runner import _annualisation_bars

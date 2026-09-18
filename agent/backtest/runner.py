@@ -1288,9 +1288,12 @@ def main(run_dir: Path) -> None:
     if len(market_types) > 1:
         bars_per_year = None
     else:
+        annualisation_warnings: list[str] = []
         bars_per_year = _annualisation_bars(
-            interval, effective_source, data_map, codes
+            interval, effective_source, data_map, codes, warnings=annualisation_warnings
         )
+        if annualisation_warnings:
+            config["_run_card_annualisation_warning"] = annualisation_warnings[0]
 
     # Every source has already been fetched, sanitized, and enriched above.
     # Reuse that exact snapshot so provider costs and run-card provenance stay
@@ -1330,6 +1333,13 @@ _SPACING_MISMATCH_RATIO = 1.5
 #: (``[1, 1, 3]`` -> 1 day); two do not (``[1, 3]`` -> 2 days).
 _MIN_BARS_FOR_SPACING = 4
 
+#: Spacing at least this many times a day is a weekly or monthly series, not a
+#: daily one with gaps: a daily index over a holiday week measures a median of
+#: two or three days, a weekly file seven. Such a series has no trading-day
+#: table to look up and needs none -- its bars per year is the calendar's.
+_WIDER_THAN_DAILY_RATIO = 4.0
+_CALENDAR_YEAR_SECONDS = 365.25 * 86_400.0
+
 
 def _observed_spacing(data_map: dict, codes: List[str]) -> float | None:
     """Median spacing of the served price bars in seconds, or None when
@@ -1356,7 +1366,11 @@ def _observed_spacing(data_map: dict, codes: List[str]) -> float | None:
 
 
 def _annualisation_bars(
-    interval: str, source: str, data_map: dict, codes: List[str]
+    interval: str,
+    source: str,
+    data_map: dict,
+    codes: List[str],
+    warnings: list[str] | None = None,
 ) -> int:
     """Bars per year for a single-market run, checked against the served bars.
 
@@ -1379,18 +1393,29 @@ def _annualisation_bars(
     :func:`~backtest.metrics.calc_bars_per_year` -- looked up with the interval
     the spacing actually matches -- so the per-source trading-day table keeps
     producing the number and a run card never picks up a window-dependent one.
+    Bars spaced wider than any supported interval (a weekly or monthly file)
+    are annualised from the calendar instead, 52 for a weekly series; a
+    spacing that matches nothing in either direction keeps the declaration.
 
     Args:
         interval: Bar size the caller declared.
         source: Primary source name, for the per-source trading-day table.
         data_map: Fetched ``code -> frame`` map.
         codes: The instrument codes.
+        warnings: When given, a mismatch report is appended here as well as
+            logged, so the run card carries it next to the caliber warning.
 
     Returns:
-        Bars per year for the declared interval, or for the interval the served
-        spacing matches when the two disagree.
+        Bars per year for the declared interval; for the interval the served
+        spacing matches when the two disagree; or the calendar count of a
+        spacing wider than every supported interval.
     """
     from backtest.metrics import _normalize_interval, calc_bars_per_year
+
+    def _report(message: str) -> None:
+        logger.warning("%s", message)
+        if warnings is not None:
+            warnings.append(message)
 
     declared = calc_bars_per_year(interval, source)
     declared_spacing = _INTERVAL_SECONDS.get(_normalize_interval(interval))
@@ -1407,27 +1432,34 @@ def _annualisation_bars(
     )
     matched_spacing = _INTERVAL_SECONDS[matched]
     if max(matched_spacing, observed) / min(matched_spacing, observed) >= _SPACING_MISMATCH_RATIO:
-        # Spacing that is no supported interval (a weekly file, say). Naming a
-        # bar count for it would be a guess, so the declaration stands and the
-        # mismatch is reported instead.
-        logger.warning(
-            "interval=%s declares bars spaced %.0fs but the served data is "
-            "spaced %.0fs, which matches no supported interval; annualising at "
-            "the declared rate. Check the earlier loader warning and re-run at "
-            "the granularity the source actually has.",
-            interval, declared_spacing, observed,
+        if observed >= _WIDER_THAN_DAILY_RATIO * _INTERVAL_SECONDS["1D"]:
+            calendar_bars = max(1, round(_CALENDAR_YEAR_SECONDS / observed))
+            _report(
+                f"interval={interval} declares bars spaced {declared_spacing:.0f}s but the "
+                f"served data is spaced {observed:.0f}s, wider than any supported interval; "
+                f"annualising at {calendar_bars} bars/year from that spacing instead of "
+                f"{declared}."
+            )
+            return calendar_bars
+        # Between two supported intervals, or finer than a minute: no count to
+        # look up, so the declaration stands. A daily series over a holiday
+        # week lands here with a two-day median, so the report states the
+        # spacings and nothing more.
+        _report(
+            f"interval={interval} declares bars spaced {declared_spacing:.0f}s but the "
+            f"served data is spaced {observed:.0f}s, which matches no supported interval; "
+            f"annualising at the declared rate ({declared} bars/year)."
         )
         return declared
 
-    logger.warning(
-        "interval=%s declares bars spaced %.0fs but the served data is spaced "
-        "%.0fs; annualising as %s (%d bars/year) instead of %d. The loader returned "
-        "bars coarser or finer than requested -- check the earlier loader "
-        "warning, and set interval to the granularity the source actually has.",
-        interval, declared_spacing, observed, matched,
-        calc_bars_per_year(matched, source), declared,
+    resolved = calc_bars_per_year(matched, source)
+    _report(
+        f"interval={interval} declares bars spaced {declared_spacing:.0f}s but the served "
+        f"data is spaced {observed:.0f}s; annualising as {matched} ({resolved} bars/year) "
+        f"instead of {declared}. The loader served bars coarser or finer than requested; "
+        f"set interval to the granularity the source has if that was not intended."
     )
-    return calc_bars_per_year(matched, source)
+    return resolved
 
 
 def _create_market_engine(source: str, config: dict, codes: List[str]):

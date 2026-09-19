@@ -277,10 +277,12 @@ PRICE_CALIBER_BY_SOURCE: dict[str, str] = {
 PRICE_CALIBER_BY_SOURCE_MARKET: dict[tuple[str, str], str] = {
     # Tushare publishes no HK adjustment-factor series, so its HK path is raw.
     ("tushare", "hk_equity"): "raw",
-    # Tencent's HK series is unadjusted despite the qfq request parameter: its
-    # qfq and hfq replies are identical to its own day series on 00939.HK and
-    # 00700.HK, over a window where eastmoney's adjusted HK series differs from
-    # raw, so the actions exist and this source does not apply them (#1493).
+    # Tencent serves no adjusted series for HK at all: its fqkline reply carries
+    # only "day" (never "qfqday"/"hfqday") for HK symbols, so the loader's
+    # ``qfqday or day`` fallback silently serves unadjusted bars and the `,qfq`
+    # request parameter changes nothing. Checked on 00939.HK and 00700.HK against
+    # eastmoney, whose adjusted HK series does differ from its raw one, so the
+    # actions exist and are simply not served here (#1493).
     ("tencent", "hk_equity"): "raw",
 }
 

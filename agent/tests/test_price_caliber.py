@@ -13,6 +13,7 @@ import pytest
 from backtest import runner
 from backtest.loaders.registry import (
     FALLBACK_CHAINS,
+    additive_caliber_warning,
     mixed_caliber_warning,
     price_caliber,
 )
@@ -114,6 +115,39 @@ def test_tencent_only_basket_stays_silent() -> None:
         )
         is None
     )
+
+
+def test_additive_warning_fires_on_a_single_source() -> None:
+    """The blind spot the caliber alone could not cover: a run with no mix at
+    all still computes its returns off additive levels, and with tencent
+    heading the A-share chain that is the ordinary case, not an edge one."""
+    msg = additive_caliber_warning({"600519.SH": ("tencent", "split_dividend_additive")})
+    assert msg is not None
+    assert "600519.SH" in msg and "tencent" in msg
+    assert "not total returns" in msg
+
+
+def test_additive_warning_stays_silent_on_multiplicative_and_raw() -> None:
+    """Tencent's HK path rides in the same basket and must not trip it: that
+    series is stamped raw by the market override, not additive."""
+    assert (
+        additive_caliber_warning(
+            {
+                "600519.SH": ("baostock", "split_dividend"),
+                "AAPL.US": ("yahoo", "split_dividend"),
+                "0700.HK": ("tencent", "raw"),
+                "BTC-USDT": ("okx", "na"),
+            }
+        )
+        is None
+    )
+
+
+def test_additive_warning_truncates_a_long_served_list() -> None:
+    stamps = {f"{600000 + i}.SH": ("tencent", "split_dividend_additive") for i in range(6)}
+    msg = additive_caliber_warning(stamps)
+    assert msg is not None
+    assert "+2 more" in msg
 
 
 def test_non_equity_markets_stamp_na() -> None:
@@ -297,6 +331,64 @@ def test_fetch_data_map_silent_on_single_caliber(
 
     assert result.caliber_warning is None
     assert "mixed price calibers" not in caplog.text
+
+
+class _TencentStub:
+    name = "tencent"
+
+    def fetch(self, codes, start, end, fields=None, interval="1D"):  # noqa: ANN001, ANN201
+        return {"600519.SH": _df()}
+
+
+def test_fetch_data_map_warns_on_additive_caliber(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A single-source tencent run mixes nothing, so the mixed-caliber warning
+    is right to stay silent — but the series it served is additive, and the
+    run must still say so."""
+    monkeypatch.setattr(runner, "resolve_loader", lambda market: _TencentStub())
+    monkeypatch.setattr(runner, "LOADER_REGISTRY", {})
+
+    result = runner.fetch_data_map(
+        {
+            "source": "auto",
+            "codes": ["600519.SH"],
+            "start_date": "2024-01-01",
+            "end_date": "2024-01-03",
+            "interval": "1D",
+        }
+    )
+
+    assert result.caliber_warning is not None
+    assert "additive price adjustment" in result.caliber_warning
+    assert "600519.SH" in result.caliber_warning
+    assert "not total returns" in result.caliber_warning
+    assert "mixed price calibers" not in result.caliber_warning
+    assert "additive price adjustment" in caplog.text
+
+
+def test_fetch_data_map_reports_both_warnings_when_they_apply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """tencent (additive) serving 600519.SH beside sina (raw) serving TSLA.US is
+    both a mixed basket and an additive series; one warning must not shadow the
+    other, since each says something the other does not."""
+    monkeypatch.setattr(runner, "resolve_loader", lambda market: _TencentStub())
+    monkeypatch.setattr(runner, "LOADER_REGISTRY", {"sina": _SinaStub})
+
+    result = runner.fetch_data_map(
+        {
+            "source": "auto",
+            "codes": ["600519.SH", "TSLA.US"],
+            "start_date": "2024-01-01",
+            "end_date": "2024-01-03",
+            "interval": "1D",
+        }
+    )
+
+    assert result.caliber_warning is not None
+    assert "mixed price calibers" in result.caliber_warning
+    assert "additive price adjustment" in result.caliber_warning
 
 
 # --------------------------------------------------------------------------

@@ -299,6 +299,13 @@ _COMPARABLE_CALIBERS = frozenset(
     {"raw", "split", "split_dividend", "split_dividend_additive"}
 )
 
+#: Calibers whose daily moves cannot be read as returns at all. Cash dividends
+#: enter the price *level* as an offset rather than scaling the series, so a
+#: window return is not a total return and an old level can even go negative.
+#: Unlike a mixed basket, this is a defect of the series itself: it needs a
+#: warning even when every symbol in the run came from the one source.
+_ADDITIVE_CALIBERS = frozenset({"split_dividend_additive"})
+
 
 def price_caliber(source: str, market: str | None = None) -> str:
     """Return the adjustment caliber of ``source``'s served prices.
@@ -338,6 +345,37 @@ def mixed_caliber_warning(stamps: dict[str, tuple[str, str]]) -> str | None:
         "Prices are not on the same scale across calibers, so cross-symbol "
         "comparisons (momentum ranks, relative performance) are biased. "
         "See the adjustment field of each symbol's provenance entry."
+    )
+
+
+def additive_caliber_warning(stamps: dict[str, tuple[str, str]]) -> str | None:
+    """Build the served-additive-caliber warning for a run, or None.
+
+    ``stamps`` maps each served symbol to the (source, caliber) pair that
+    served it. Unlike :func:`mixed_caliber_warning` this fires on a *single*
+    additive source, because the problem is the series rather than the basket:
+    a run that mixes nothing is still computing returns off levels that have
+    dividends added back as a flat offset. That is the common A-share case,
+    since ``tencent`` heads the chain (#1493).
+    """
+    additive = {
+        symbol: source
+        for symbol, (source, caliber) in stamps.items()
+        if caliber in _ADDITIVE_CALIBERS
+    }
+    if not additive:
+        return None
+    shown = ", ".join(
+        f"{symbol} ({source})" for symbol, source in sorted(additive.items())[:4]
+    )
+    if len(additive) > 4:
+        shown += f", +{len(additive) - 4} more"
+    return (
+        "additive price adjustment in this run: " + shown + ". "
+        "Cash dividends are added back as a flat offset rather than "
+        "reinvested, so period returns and volatilities are not total "
+        "returns and long-horizon backtests are distorted (old prices can "
+        "go negative). Prefer a multiplicative source for return math."
     )
 
 

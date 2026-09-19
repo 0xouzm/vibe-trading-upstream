@@ -9,7 +9,7 @@ import pytest
 from src.portfolio import service as portfolio_service
 from src.portfolio.config import PortfolioSettingsStore
 from src.portfolio.normalization import auth_metadata
-from src.portfolio.service import PORTFOLIO_VALUATION_VERSION, PortfolioService
+from src.portfolio.service import PortfolioService
 from src.portfolio.store import PortfolioStore
 from src.trading.types import TradingProfile
 

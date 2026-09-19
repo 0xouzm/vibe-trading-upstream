@@ -511,6 +511,11 @@ function RefreshProgress({ state, settings }: { state: PortfolioRefreshState; se
 function AccountCard({ account, active, displayCurrency, onClick, onReconnect, onRetry, busy, actionsDisabled }: { account: PortfolioAccount; active: boolean; displayCurrency: string; onClick: () => void; onReconnect?: () => void; onRetry?: () => void; busy: boolean; actionsDisabled: boolean }) {
   const { t } = useTranslation();
   const failed = account.status === "error";
+  const displayValue = account.total_display ?? (
+    displayCurrency === "USD" ? account.total_usd :
+    displayCurrency === "CNY" ? account.total_cny :
+    null
+  );
   return <div role="button" tabIndex={0} onClick={onClick} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onClick(); }} className={`cursor-pointer rounded-xl border bg-card p-5 transition ${active ? "border-primary ring-1 ring-primary/20" : "hover:border-primary/40"}`}>
     <div className="flex items-center justify-between gap-3">
       <div><div className="font-medium">{account.label ?? account.broker.toUpperCase()}</div><div className="mt-1 flex flex-wrap items-center gap-2 text-xs"><BrokerBadge broker={account.broker} /><PortfolioCompatibilityBadge compatibility={account.portfolio_compatibility} /></div></div>
@@ -523,7 +528,7 @@ function AccountCard({ account, active, displayCurrency, onClick, onReconnect, o
       </>
     ) : (
       <>
-        <div className="mt-4 text-2xl font-semibold">{money(account.total_display ?? (displayCurrency === "CNY" ? account.total_cny : account.total_usd), displayCurrency)}</div>
+        <div className="mt-4 text-2xl font-semibold">{money(displayValue, displayCurrency)}</div>
         <div className="mt-1 text-xs text-muted-foreground">{displayCurrency === "USD" ? money(account.total_cny, "CNY") : money(account.total_usd)} · {t("portfolio.accounts.positions", { count: account.position_count ?? 0 })}</div>
         <div className="mt-4 flex items-center justify-between border-t pt-3 text-xs"><span className="text-positive">{t("portfolio.accounts.fresh")}</span><span className="text-muted-foreground">{dateTime(account.last_success_at)}</span></div>
       </>

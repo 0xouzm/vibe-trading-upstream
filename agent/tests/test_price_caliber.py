@@ -38,7 +38,7 @@ def _df() -> pd.DataFrame:
         ("yahoo", "split_dividend"),
         ("yfinance", "split_dividend"),
         ("eastmoney", "split_dividend"),
-        ("tencent", "split_dividend"),
+        ("tencent", "split_dividend_additive"),
         ("akshare", "split_dividend"),
         ("baostock", "split_dividend"),
         ("tushare", "split_dividend"),
@@ -65,6 +65,55 @@ def test_tushare_hk_override_is_raw() -> None:
     assert price_caliber("tushare", "a_share") == "split_dividend"
 
 
+# --------------------------------------------------------------------------
+# Tencent's adjustment is additive in dividends (#1493): between corporate
+# actions its qfq equals raw plus a constant, measured on 600519.SH where the
+# offset takes five values over 500 bars and steps only at dividend dates. An
+# additive series is not on the same scale as a multiplicative one, so sharing
+# the `split_dividend` label made the mixed-caliber warning blind to exactly the
+# mix it exists to catch. Its HK series is not adjusted at all.
+# --------------------------------------------------------------------------
+
+
+def test_tencent_a_share_caliber_is_additive_not_multiplicative() -> None:
+    """A-share qfq subtracts cash dividends from the level, not by a ratio."""
+    assert price_caliber("tencent", "a_share") == "split_dividend_additive"
+
+
+def test_tencent_hk_series_is_unadjusted() -> None:
+    """Tencent's HK qfq and hfq are identical to its own day series (measured on
+    00939.HK and 00700.HK), so HK stamps raw. The actions are real — eastmoney's
+    adjusted HK series differs from raw over the same window — this source just
+    does not apply them."""
+    assert price_caliber("tencent", "hk_equity") == "raw"
+
+
+def test_tencent_a_share_basket_warns_against_multiplicative_sources() -> None:
+    """The label collision was the bug: with both sources on `split_dividend`
+    the warning returned None for a basket that mixes them."""
+    stamps = {
+        "600519.SH": ("tencent", price_caliber("tencent", "a_share")),
+        "000001.SZ": ("baostock", price_caliber("baostock", "a_share")),
+    }
+    msg = mixed_caliber_warning(stamps)
+    assert msg is not None
+    assert "600519.SH" in msg and "000001.SZ" in msg
+    assert "split_dividend_additive" in msg and "split_dividend" in msg
+
+
+def test_tencent_only_basket_stays_silent() -> None:
+    """One additive source is not a mix, so nothing to warn about."""
+    assert (
+        mixed_caliber_warning(
+            {
+                "600519.SH": ("tencent", "split_dividend_additive"),
+                "000001.SZ": ("tencent", "split_dividend_additive"),
+            }
+        )
+        is None
+    )
+
+
 def test_non_equity_markets_stamp_na() -> None:
     assert price_caliber("binance", "crypto") == "na"
     # The market wins over the per-source table: yfinance serving BTC has
@@ -80,6 +129,7 @@ def test_every_chain_source_resolves() -> None:
                 "raw",
                 "split",
                 "split_dividend",
+                "split_dividend_additive",
                 "na",
                 "unknown",
             }
@@ -146,7 +196,21 @@ def test_provenance_stamps_adjustment_for_adjusted_source() -> None:
         loader_resolver=lambda src: _StubLoader,
         include_provenance=True,
     )
-    assert out["_provenance"]["600519.SH"]["adjustment"] == "split_dividend"
+    assert out["_provenance"]["600519.SH"]["adjustment"] == "split_dividend_additive"
+
+
+def test_provenance_marks_tencent_hk_as_unadjusted() -> None:
+    """HK rows served by tencent are unadjusted, and the field the caller reads
+    before comparing price levels has to say so (#1493)."""
+    out = fetch_market_data(
+        codes=["00939.HK"],
+        start_date="2024-01-01",
+        end_date="2024-01-03",
+        source="tencent",
+        loader_resolver=lambda src: _StubLoader,
+        include_provenance=True,
+    )
+    assert out["_provenance"]["00939.HK"]["adjustment"] == "raw"
 
 
 def test_provenance_stamps_adjustment_for_raw_source() -> None:

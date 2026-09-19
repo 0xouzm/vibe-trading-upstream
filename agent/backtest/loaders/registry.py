@@ -254,7 +254,12 @@ PRICE_CALIBER_BY_SOURCE: dict[str, str] = {
     "yahoo": "split_dividend",  # quote series split-adjusted at origin, scaled to adjclose
     "yfinance": "split_dividend",  # auto_adjust=True
     "eastmoney": "split_dividend",  # fqt=1 (forward-adjusted) on every kline call
-    "tencent": "split_dividend",  # fqkline qfq
+    # Tencent's qfq subtracts cash dividends from the price level instead of
+    # scaling by a ratio: between corporate actions qfq = raw + c, and c steps by
+    # the dividend at each ex-date (#1493, measured on 600519.SH where five
+    # constant offsets cover 500 bars). The level is therefore not on the same
+    # scale as the multiplicative sources above, so it gets its own caliber.
+    "tencent": "split_dividend_additive",  # fqkline qfq, additive in dividends
     "akshare": "split_dividend",  # adjust="qfq", including the stock_us_hist path
     "baostock": "split_dividend",  # adjustflag="2"
     "tushare": "split_dividend",  # adj_factor applied via cn_adjust (A-share/fund)
@@ -272,6 +277,11 @@ PRICE_CALIBER_BY_SOURCE: dict[str, str] = {
 PRICE_CALIBER_BY_SOURCE_MARKET: dict[tuple[str, str], str] = {
     # Tushare publishes no HK adjustment-factor series, so its HK path is raw.
     ("tushare", "hk_equity"): "raw",
+    # Tencent's HK series is unadjusted despite the qfq request parameter: its
+    # qfq and hfq replies are identical to its own day series on 00939.HK and
+    # 00700.HK, over a window where eastmoney's adjusted HK series differs from
+    # raw, so the actions exist and this source does not apply them (#1493).
+    ("tencent", "hk_equity"): "raw",
 }
 
 #: Markets with no corporate-action adjustment concept. Their sources stamp
@@ -280,14 +290,20 @@ _NA_CALIBER_MARKETS = frozenset({"crypto", "forex", "futures", "macro"})
 
 #: Calibers that participate in mixed-caliber comparison. "unknown" and "na"
 #: never do: the first is unmeasured, the second has nothing to adjust for.
-_COMPARABLE_CALIBERS = frozenset({"raw", "split", "split_dividend"})
+#: "split_dividend_additive" does participate — it is the whole point of the
+#: caliber: an additive level and a multiplicative one are two different scales,
+#: so a basket holding both must be warned about (#1493).
+_COMPARABLE_CALIBERS = frozenset(
+    {"raw", "split", "split_dividend", "split_dividend_additive"}
+)
 
 
 def price_caliber(source: str, market: str | None = None) -> str:
     """Return the adjustment caliber of ``source``'s served prices.
 
-    One of "raw", "split", "split_dividend", "na" (a market without
-    corporate actions), or "unknown" (an unmeasured source).
+    One of "raw", "split", "split_dividend", "split_dividend_additive" (dividend
+    adjustment applied to the level rather than by a ratio), "na" (a market
+    without corporate actions), or "unknown" (an unmeasured source).
     """
     if market in _NA_CALIBER_MARKETS:
         return "na"

@@ -81,10 +81,12 @@ def test_tencent_a_share_caliber_is_additive_not_multiplicative() -> None:
 
 
 def test_tencent_hk_series_is_unadjusted() -> None:
-    """Tencent's HK qfq and hfq are identical to its own day series (measured on
-    00939.HK and 00700.HK), so HK stamps raw. The actions are real — eastmoney's
-    adjusted HK series differs from raw over the same window — this source just
-    does not apply them."""
+    """Tencent serves no adjusted HK series at all: its fqkline reply carries only
+    "day" for HK symbols (never "qfqday"/"hfqday"), so the loader's ``qfqday or
+    day`` fallback silently serves unadjusted bars and the `,qfq` request
+    parameter changes nothing. The actions are real — eastmoney's adjusted HK
+    series differs from raw over the same window — this source just does not
+    apply them."""
     assert price_caliber("tencent", "hk_equity") == "raw"
 
 

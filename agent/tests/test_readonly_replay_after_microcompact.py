@@ -36,7 +36,12 @@ class _Registry:
 class _Context:
     @staticmethod
     def format_tool_result(call_id, name, result):
-        return {"role": "tool", "tool_call_id": call_id, "name": name, "content": result}
+        return {
+            "role": "tool",
+            "tool_call_id": call_id,
+            "name": name,
+            "content": result,
+        }
 
 
 class _Trace:
@@ -46,7 +51,9 @@ class _Trace:
     def write(self, event):
         self.events.append(event)
 
-    def write_tool_result(self, *, call_id, result, tool_name, status, elapsed_ms, iteration):
+    def write_tool_result(
+        self, *, call_id, result, tool_name, status, elapsed_ms, iteration
+    ):
         self.events.append(
             {
                 "type": "tool_result",

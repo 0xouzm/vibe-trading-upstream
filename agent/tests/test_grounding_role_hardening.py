@@ -544,73 +544,122 @@ def test_a_tail_risk_figure_a_tool_returned_is_grounded(tmp_path: Path) -> None:
     assert invented.valid is False
 
 
+def test_an_exact_metric_field_ref_is_tighter_than_a_call_ref(tmp_path: Path) -> None:
+    risk = (
+        "quantlib_call",
+        {"action": "call", "function": "var"},
+        {"ok": True, "result": {"var_95": -0.0157, "var_99": -0.0263}},
+        "q1",
+    )
+    prose = HDR + " VaR 95%: 1.57%。"
+    confidence = "95% | count | confidence"
+
+    exact = _ledger(tmp_path / "exact", MARKET_A, risk).validate_final_answer(
+        prose + _block(ROW, confidence, "1.57% | observed | VaR 95% | var.var_95")
+    )
+    wrong_field = _ledger(tmp_path / "wrong", MARKET_A, risk).validate_final_answer(
+        prose + _block(ROW, confidence, "1.57% | observed | VaR 95% | var.var_99")
+    )
+    call_scope = _ledger(tmp_path / "call", MARKET_A, risk).validate_final_answer(
+        prose + _block(ROW, confidence, "1.57% | observed | VaR 95% | q1")
+    )
+
+    assert exact.valid is True, exact.issues
+    assert _reasons(wrong_field) == ["not_in_referenced_call"]
+    assert call_scope.valid is True, call_scope.issues
+
+
+def test_es_and_var_fields_do_not_borrow_each_others_values(tmp_path: Path) -> None:
+    risk = (
+        "quantlib_call",
+        {"action": "call", "function": "var"},
+        {"ok": True, "result": {"var_95": -0.0157, "cvar_95": -0.0211}},
+        "q1",
+    )
+    prose = HDR + " ES 95%: 2.11%。"
+    block_head = (ROW, "95% | count | confidence")
+
+    es = _ledger(tmp_path / "es", MARKET_A, risk).validate_final_answer(
+        prose + _block(*block_head, "2.11% | observed | ES 95% | var.cvar_95")
+    )
+    wrong_measure = _ledger(tmp_path / "var", MARKET_A, risk).validate_final_answer(
+        prose + _block(*block_head, "2.11% | observed | ES 95% | var.var_95")
+    )
+
+    assert es.valid is True, es.issues
+    assert _reasons(wrong_measure) == ["not_in_referenced_call"]
+
+
+def test_repeated_field_refs_require_call_qualification(tmp_path: Path) -> None:
+    first = (
+        "quantlib_call",
+        {"action": "call", "function": "var"},
+        {"ok": True, "result": {"var_95": -0.0157}},
+        "q1",
+    )
+    second = (
+        "quantlib_call",
+        {"action": "call", "function": "var"},
+        {"ok": True, "result": {"var_95": -0.0999}},
+        "q2",
+    )
+    prose = HDR + " VaR 95%: 1.57%。"
+    confidence = "95% | count | confidence"
+
+    ambiguous = _ledger(
+        tmp_path / "ambiguous", MARKET_A, first, second
+    ).validate_final_answer(
+        prose + _block(ROW, confidence, "1.57% | observed | VaR 95% | var.var_95")
+    )
+    q1 = _ledger(tmp_path / "q1", MARKET_A, first, second).validate_final_answer(
+        prose
+        + _block(
+            ROW,
+            confidence,
+            "1.57% | observed | VaR 95% | q1::var.var_95",
+        )
+    )
+    wrong_call = _ledger(
+        tmp_path / "wrong", MARKET_A, first, second
+    ).validate_final_answer(
+        prose
+        + _block(
+            ROW,
+            confidence,
+            "1.57% | observed | VaR 95% | q2::var.var_95",
+        )
+    )
+
+    assert _reasons(ambiguous) == ["not_in_referenced_call"]
+    assert q1.valid is True, q1.issues
+    assert _reasons(wrong_call) == ["not_in_referenced_call"]
+
+
 @pytest.mark.parametrize(
-    ("leaf", "identity"),
+    "claim",
     [
-        ("var", ("var", None)),
-        ("var_95", ("var", 95)),
-        ("strategy_var_99", ("var", 99)),
-        ("cvar", ("es", None)),
-        ("cvar_95", ("es", 95)),
-        ("portfolio_cvar_95", ("es", 95)),
-        ("es_99", ("es", 99)),
-        ("expected_shortfall", ("es", None)),
-        ("sales_es", None),
-        ("var_2", None),
-        ("sharpe", None),
+        "CVaR 9.99%。",
+        "VaR 9.99%。",
+        "ES 9.99%。",
+        "VaR 37.2%: 1.57%。",
+        "VaR 12% higher than last month.",
+        "| Tail | VaR 9.99% |",
+        "VaR 95%: 1.57%, ES 9.99%。",
+        "VaR (99.9%) = 2.63%。",
+        "预期损失 2.3%。",
     ],
 )
-def test_a_tail_risk_leaf_reports_measure_and_confidence(leaf: str, identity) -> None:
-    from src.agent.grounding.evidence import _tail_risk_identity_for_path
-
-    assert _tail_risk_identity_for_path(leaf) == identity
-
-
-def test_a_confident_var_claim_only_matches_that_confidence(tmp_path: Path) -> None:
-    var = ("quantlib_call", {"action": "call", "function": "var"}, {"ok": True, "result": {"var_95": -0.0234}}, "q1")
-
-    same = _ledger(tmp_path, MARKET_A, var).validate_final_answer(HDR + " VaR 95%: 2.34%。")
-    other_level = _ledger(tmp_path / "b", MARKET_A, var).validate_final_answer(HDR + " VaR 99%: 2.34%。")
-    other_measure = _ledger(tmp_path / "c", MARKET_A, var).validate_final_answer(HDR + " ES 95%: 2.34%。")
-
-    assert same.valid is True, same.issues
-    assert _reasons(other_level) == ["no_evidence"]
-    assert _reasons(other_measure) == ["no_evidence"]
-    # The confidence figure itself is part of the frame, never a measurement.
-    assert all(issue["value"] != "95%" for result in (same, other_level) for issue in result.issues)
-
-
-def test_an_es_claim_matches_es_evidence_at_its_own_confidence(tmp_path: Path) -> None:
-    cvar = ("quantlib_call", {"action": "call", "function": "cvar"}, {"ok": True, "result": {"cvar_99": -0.0311}}, "q2")
-
-    same = _ledger(tmp_path, MARKET_A, cvar).validate_final_answer(HDR + " CVaR 99%: 3.11%。")
-    alias = _ledger(tmp_path / "b", MARKET_A, cvar).validate_final_answer(HDR + " ES 99% 为 3.11%。")
-    other_level = _ledger(tmp_path / "c", MARKET_A, cvar).validate_final_answer(HDR + " CVaR 95%: 3.11%。")
-    var_claim = _ledger(tmp_path / "d", MARKET_A, cvar).validate_final_answer(HDR + " 单日 VaR 为 3.11%。")
-
-    assert same.valid is True, same.issues
-    assert alias.valid is True, alias.issues
-    assert _reasons(other_level) == ["no_evidence"]
-    assert var_claim.valid is False
-
-
-def test_a_tail_risk_frame_stops_at_the_clause_end(tmp_path: Path) -> None:
+def test_tail_risk_prose_does_not_skip_undeclared_numbers(
+    tmp_path: Path, claim: str
+) -> None:
     risk = (
-        "portfolio_risk_xray",
-        {},
-        {"ok": True, "var_95": -0.0157, "max_drawdown": -0.05132},
-        "risk",
+        "quantlib_call",
+        {"action": "call", "function": "var"},
+        {"ok": True, "result": {"var_95": -0.0157, "var_99": -0.0263}},
+        "q1",
     )
-
-    both = _ledger(tmp_path, risk, message="Analiza el riesgo de la cartera").validate_final_answer(
-        "VaR 95%: 1,57%. Drawdown máximo −5,132%." + _block("95% | count | nivel de confianza")
-    )
-    wrong_drawdown = _ledger(tmp_path / "b", risk, message="Analiza el riesgo de la cartera").validate_final_answer(
-        "VaR 95%: 1,57%. Drawdown máximo −3,9%." + _block("95% | count | nivel de confianza")
-    )
-
-    assert both.valid is True, both.issues
-    assert wrong_drawdown.valid is False
+    result = _ledger(tmp_path, MARKET_A, risk).validate_final_answer(HDR + " " + claim)
+    assert result.valid is False
 
 
 # ---------------------------------------------------------------------------

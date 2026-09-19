@@ -25,7 +25,6 @@ from src.agent.grounding.evidence import (
     _is_price_kind,
     _metric_kind_for_path,
     _price_field_for_path,
-    _tail_risk_identity_for_path,
     _timestamp_matches_claim_date,
 )
 from src.agent.grounding.figures import (
@@ -467,11 +466,6 @@ class _PolicyMixin:
             if figure.shape not in ("measured", "bare"):
                 continue
             declaration = block.match(figure.value, figure.percent)
-            if figure.tail_risk_confidence and declaration is None:
-                # The confidence level of a tail-risk frame ("VaR 95%: 1.57%")
-                # qualifies the measurement; it is not one itself. A declared
-                # role wins: the model said what the number is.
-                continue
             symbol = self._figure_symbol(
                 content, figure, declaration, line_symbols, document_symbol, records
             )
@@ -656,13 +650,16 @@ class _PolicyMixin:
         symbol: str | None,
         figure: Figure | None,
     ) -> tuple[list[EvidenceRecord], list[float]] | None:
-        """The evidence one call, or every call of one tool, produced.
+        """The evidence named by an exact field, call+field, one call, or one tool.
 
-        A ``ref`` naming a call id or a tool name is the tightest scoping, and the
-        only one that can ground a non-price figure (revenue, IC, volume). Records
-        of another symbol are dropped when the figure's symbol is known; a
-        currency-marked figure keeps only money-denominated records, a percent
-        only the others, less metadata counts.
+        An exact evidence-field ref is accepted only when that field occurs in
+        one call. When it repeats across calls, ``call_id::field`` is the
+        unambiguous tightest scope. Otherwise a ``ref`` naming a call id or a
+        tool name keeps the existing call/tool scope, and the only one that can
+        ground a non-price figure (revenue, IC, volume). Records of another
+        symbol are dropped when the figure's symbol is known; a currency-marked
+        figure keeps only money-denominated records, a percent only the others,
+        less metadata counts.
 
         Args:
             ref: The declaration's ``ref``.
@@ -671,26 +668,79 @@ class _PolicyMixin:
                 operands of a derivation.
 
         Returns:
-            ``(records, metric values)``, or None when ``ref`` names no call or tool.
+            ``(records, metric values)``, or None when ``ref`` names no field,
+            call, or tool.
         """
         key = (ref or "").strip()
         if not key:
             return None
-        records = [
-            record
-            for record in self._evidence
-            if key in (record.call_id, record.tool)
-            and record.status == "observed"
-            and record.value is not None
-        ]
-        metrics = [
-            float(entry["value"])
-            for entry in self._analysis_metrics
-            if key in (entry.get("call_id"), entry.get("tool"))
-            and entry.get("value") is not None
-        ]
-        if not records and not metrics:
-            return None
+
+        # A composite ref names one exact field from one exact call. This is
+        # the unambiguous form when the same analysis field appears in more
+        # than one tool call during a run.
+        if "::" in key:
+            call_id, field = (part.strip() for part in key.split("::", 1))
+            if not call_id or not field:
+                return [], []
+            records = [
+                record
+                for record in self._evidence
+                if record.call_id == call_id
+                and record.field == field
+                and record.status == "observed"
+                and record.value is not None
+            ]
+            metrics = [
+                float(entry["value"])
+                for entry in self._analysis_metrics
+                if entry.get("call_id") == call_id
+                and entry.get("field") == field
+                and entry.get("value") is not None
+            ]
+        else:
+            field_records = [
+                record
+                for record in self._evidence
+                if record.field == key
+                and record.status == "observed"
+                and record.value is not None
+            ]
+            field_metric_entries = [
+                entry
+                for entry in self._analysis_metrics
+                if entry.get("field") == key and entry.get("value") is not None
+            ]
+            field_call_ids = {record.call_id for record in field_records if record.call_id} | {
+                str(entry.get("call_id")) for entry in field_metric_entries if entry.get("call_id")
+            }
+            field_scoped = bool(field_records or field_metric_entries)
+            if field_scoped and len(field_call_ids) > 1:
+                # A field-only ref that occurs in multiple calls is ambiguous.
+                # Fail closed rather than pooling values from different runs.
+                return [], []
+            if field_scoped:
+                records = field_records
+                metrics = [float(entry["value"]) for entry in field_metric_entries]
+            else:
+                records = [
+                    record
+                    for record in self._evidence
+                    if key in (record.call_id, record.tool)
+                    and record.status == "observed"
+                    and record.value is not None
+                ]
+                metrics = [
+                    float(entry["value"])
+                    for entry in self._analysis_metrics
+                    if key in (entry.get("call_id"), entry.get("tool"))
+                    and entry.get("value") is not None
+                ]
+                if not records and not metrics:
+                    # Preserve the legacy loose-ref contract: a ref such as a
+                    # symbol that names no field/call/tool falls back to the
+                    # ordinary evidence path. Ambiguous or composite field
+                    # refs return earlier as an explicit empty scope instead.
+                    return None
         if symbol:
             records = [
                 record for record in records if not record.symbol or record.symbol == symbol
@@ -855,41 +905,12 @@ class _PolicyMixin:
             return low * 0.9 <= value <= high * 1.1
         return low >= _INTEGER_PRICE_FLOOR and low * 0.5 <= value <= high * 2.0
 
-    @staticmethod
-    def _tail_risk_compatible(
-        field_name: str, measure: str, confidence: int | None
-    ) -> bool:
-        """Whether a tail-risk evidence field can ground a claim's identity.
-
-        The measure must agree; a confidence the claim states must be matched
-        exactly, while a claim stating none takes any evidence of its measure.
-        """
-        identity = _tail_risk_identity_for_path(field_name)
-        if identity is None or identity[0] != measure:
-            return False
-        return confidence is None or identity[1] == confidence
-
-    def _metric_pool(
-        self,
-        symbol: str | None,
-        *,
-        tail_risk: tuple[str, int | None] | None = None,
-    ) -> list[float]:
-        """Metric values from completed analysis results and metric-named leaves.
-
-        A tail-risk claim narrows the pool to evidence of its own measure and,
-        when the claim states one, its confidence: a ``var_95`` reading says
-        nothing about a "VaR 99%" or an "ES 95%" figure.
-        """
-        measure, confidence = tail_risk if tail_risk is not None else (None, None)
+    def _metric_pool(self, symbol: str | None) -> list[float]:
+        """Metric values from completed analysis results and metric-named leaves."""
         values = [
             float(entry["value"])
             for entry in self._analysis_metrics
             if entry.get("value") is not None
-            and (
-                measure is None
-                or self._tail_risk_compatible(str(entry.get("field") or ""), measure, confidence)
-            )
         ]
         values.extend(
             float(record.value)
@@ -898,10 +919,6 @@ class _PolicyMixin:
             and record.value is not None
             and _metric_kind_for_path(record.field) is not None
             and (not symbol or not record.symbol or record.symbol == symbol)
-            and (
-                measure is None
-                or self._tail_risk_compatible(record.field, measure, confidence)
-            )
         )
         return values
 
@@ -963,11 +980,7 @@ class _PolicyMixin:
         if figure.percent:
             # A percent is a ratio; no price or volume may answer it.
             direct: list[float] = []
-            scaled = (
-                []
-                if figure.column
-                else self._metric_pool(symbol, tail_risk=figure.tail_risk)
-            )
+            scaled = [] if figure.column else self._metric_pool(symbol)
         elif figure.column:
             direct, scaled = prices, []
         elif figure.currency:
@@ -976,12 +989,6 @@ class _PolicyMixin:
             direct, scaled = prices + self._row_pool(symbol), self._metric_pool(symbol)
         if not direct and not scaled:
             detail = "no matching tool evidence"
-            if figure.tail_risk is not None:
-                measure, confidence = figure.tail_risk
-                detail = "no {}{} evidence".format(
-                    measure.upper(),
-                    f" {confidence}%" if confidence is not None else "",
-                )
             return [
                 self._figure_issue(
                     "numeric_claim_unavailable",

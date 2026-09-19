@@ -15,10 +15,17 @@ RATES = build_rates(Decimal("7"), Decimal("8"))
 
 
 def test_build_rates_anchors_on_usd() -> None:
-    assert RATES == {"USD": Decimal("1"), "CNY": Decimal("7"), "HKD": Decimal("8")}
+    assert RATES == {
+        "USD": Decimal("1"),
+        "CNY": Decimal("7"),
+        "HKD": Decimal("8"),
+    }
 
 
-@pytest.mark.parametrize("bad", [Decimal("0"), Decimal("-1"), Decimal("NaN"), Decimal("Infinity")])
+@pytest.mark.parametrize(
+    "bad",
+    [Decimal("0"), Decimal("-1"), Decimal("NaN"), Decimal("Infinity")],
+)
 def test_build_rates_rejects_non_positive_or_non_finite_rates(bad: Decimal) -> None:
     with pytest.raises(PortfolioContractError, match="USD/CNY"):
         build_rates(bad, Decimal("8"))

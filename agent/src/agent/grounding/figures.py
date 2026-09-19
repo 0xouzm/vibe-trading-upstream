@@ -23,6 +23,10 @@ from typing import Iterable, Sequence
 
 from src.agent.grounding.identity import _CANONICAL_SYMBOL_RE
 
+#: Widest relative gap between a written figure and the value it rounds. Same band as the
+#: evidence tolerance (``policies._TOLERANCE``); the digits written narrow it further.
+ROUNDED_BAND = 0.005
+
 #: The five roles a declaration may carry (spec §2).
 ROLES = ("observed", "derived", "proposed", "cited", "count")
 
@@ -135,25 +139,44 @@ class FiguresBlock:
     malformed: tuple[tuple[int, str], ...]
     spans: tuple[tuple[int, int], ...] = ()
 
-    def match(self, value: float, percent: bool) -> Declaration | None:
+    def match(
+        self, value: float, percent: bool, digits: str | None = None
+    ) -> Declaration | None:
         """Return the declaration covering ``value``, or None.
 
-        Matching is numeric (tolerance 1e-9) and percent-ness must agree:
-        ``37%`` and ``0.37`` are different assertions.
+        Matching is numeric and percent-ness must agree: ``37%`` and ``0.37`` are
+        different assertions. An exact value (tolerance 1e-9) always wins. Failing
+        that, a figure written with decimals ("38,68") covers a declaration holding
+        the precise observation ("38.68005857871268") when it is that value correctly
+        rounded to the digits written: within half a unit of its last decimal, and
+        never further than :data:`ROUNDED_BAND` of the declared value. A figure written
+        without decimals is only ever an exact match, so a coarse "39" cannot borrow
+        38.68's declaration.
 
         Args:
             value: The prose figure's numeric value.
             percent: Whether the prose figure carries a percent sign.
+            digits: The prose figure's normalized digits ("38.68"), or None to
+                require an exact match.
 
         Returns:
-            The first matching declaration, or None.
+            The matching declaration (the nearest one when several round to the
+            same figure), or None.
         """
-        for declaration in self.declarations:
-            if declaration.percent != percent:
-                continue
+        candidates = [item for item in self.declarations if item.percent == percent]
+        for declaration in candidates:
             if abs(declaration.value - value) <= max(abs(value) * 1e-9, 1e-9):
                 return declaration
-        return None
+        if not digits or "." not in digits:
+            return None
+        half_unit = 0.5 * 10.0 ** -len(digits.split(".", 1)[1])
+        rounded = [
+            (abs(item.value - value), item)
+            for item in candidates
+            if abs(item.value - value) <= half_unit * (1 + 1e-9)
+            and abs(item.value - value) <= abs(item.value) * ROUNDED_BAND
+        ]
+        return min(rounded, key=lambda pair: pair[0])[1] if rounded else None
 
 
 @dataclass(frozen=True)
@@ -355,7 +378,44 @@ def _digit_run(text: str, index: int) -> str:
     return text[index:end]
 
 
-def _numbers(text: str) -> list[_Token]:
+# A dotted-thousands number with a decimal comma ("1.234,56", "1.234.567,89"): a number has
+# one decimal separator, so the dots group and the comma is the decimal. The lead group is
+# non-zero ("0.500,0" is a decimal followed by a list) and a fraction running into another
+# dotted number ("1.234,5.6") is a list, not a decimal.
+_DOTTED_DECIMAL_RE = re.compile(
+    r"(?<![\d.,])[+-]?[1-9]\d{0,2}(?:\.\d{3})+,\d+(?!\d|\.\d)"
+)
+
+
+def _is_long_decimal_comma(body: str, fraction: str) -> bool:
+    """Whether ``body,fraction`` can only be a decimal: four or more digits follow the comma.
+
+    A comma that groups thousands is always followed by exactly three digits, so a
+    longer run ("2,639499655314571") is unambiguous. The one lookalike is a pair of
+    years written without a space ("2023,2024"), which stays two numbers.
+    """
+    if len(fraction) < 4:
+        return False
+    years = (
+        len(body) == 4
+        and len(fraction) == 4
+        and body[:2] in ("19", "20")
+        and fraction[:2] in ("19", "20")
+    )
+    return not years
+
+
+def _is_whole_cell(text: str, start: int, stop: int) -> bool:
+    """Whether the number at ``[start, stop)`` is the entire content of its line or table cell."""
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", stop)
+    line_end = len(text) if line_end == -1 else line_end
+    before = text[line_start:start].rsplit("|", 1)[-1]
+    after = text[stop:line_end].split("|", 1)[0]
+    return not before.strip() and not after.strip()
+
+
+def _numbers(text: str, *, decimal_commas: bool | None = None) -> list[_Token]:
     """Every number in normalized text, with a decimal comma read as one (#1418).
 
     A comma is a decimal point when the integer part is exactly "0" ("0,666"),
@@ -364,12 +424,32 @@ def _numbers(text: str) -> list[_Token]:
     decimal comma anywhere and no unambiguous grouping ("1,234,567",
     "1,234.56") reads every single-comma number as a decimal, so "2,237" and
     "−5,132%" beside "1,57%" are 2.237 and −5.132%, not 2237 and −5132%.
+
+    Two shapes are decimal regardless of that document-level reading, because a
+    thousands grouping cannot look like them: a comma followed by four or more
+    digits ("2,639499655314571", "17,9318145214327%"), and dotted thousands followed
+    by a decimal comma ("1.234,56"). ``decimal_commas`` lets a caller that parses a
+    fragment of a larger document (a declaration cell) pass the reading of the whole
+    document instead of re-deriving it from the fragment.
     """
-    comma_decimals = _writes_decimal_commas(text)
+    comma_decimals = (
+        _writes_decimal_commas(text) if decimal_commas is None else decimal_commas
+    )
+    dotted = [
+        _Token(
+            match.start(),
+            match.end(),
+            match.group(0)[0] if match.group(0)[0] in "+-" else "",
+            match.group(0).lstrip("+-").replace(".", "").replace(",", "."),
+        )
+        for match in _DOTTED_DECIMAL_RE.finditer(text)
+    ]
     tokens: list[_Token] = []
     cursor = 0
     for match in _NUMBER_RE.finditer(text):
         if match.start() < cursor:
+            continue
+        if any(token.start <= match.start() < token.end for token in dotted):
             continue
         raw = match.group(0)
         sign = raw[0] if raw[0] in "+-" else ""
@@ -382,6 +462,7 @@ def _numbers(text: str) -> list[_Token]:
             if fraction and (
                 body == "0"
                 or comma_decimals
+                or _is_long_decimal_comma(body, fraction)
                 or (
                     len(fraction) <= 2
                     and (
@@ -394,19 +475,21 @@ def _numbers(text: str) -> list[_Token]:
                 body, end = f"{body}.{fraction}", stop
         tokens.append(_Token(match.start(), end, sign, body.replace(",", "")))
         cursor = end
-    return tokens
+    return sorted(tokens + dotted, key=lambda token: token.start)
 
 
 def _writes_decimal_commas(text: str) -> bool:
     """Whether a document writes decimal commas and never a thousands grouping.
 
     Evidence for a decimal comma is unambiguous on its own: a "0," integer part,
-    or a one- or two-digit fraction carrying a percent, pp/bp or currency mark
-    ("1,57%", "3,95 EUR"). An unmarked "1,50" could be a list and proves nothing.
-    Evidence for grouping is two or more comma groups or a grouped number with a
-    dot fraction.
+    a fraction of four or more digits, dotted thousands with a decimal comma
+    ("1.234,56"), or a one- or two-digit fraction carrying a percent, pp/bp or
+    currency mark ("1,57%", "3,95 EUR") or filling a whole declaration/table cell
+    ("2,64 | observed | ..."). An unmarked "1,50" inside a sentence could be a list
+    and proves nothing. Evidence for grouping is two or more comma groups or a
+    grouped number with a dot fraction.
     """
-    decimal, grouped = False, False
+    decimal, grouped = bool(_DOTTED_DECIMAL_RE.search(text)), False
     for match in _NUMBER_RE.finditer(text):
         body = match.group(0).lstrip("+-")
         if body.count(",") >= 2 or ("," in body and "." in body):
@@ -416,10 +499,14 @@ def _writes_decimal_commas(text: str) -> bool:
         elif body.isdigit() and text[match.end() : match.end() + 1] == ",":
             fraction = _digit_run(text, match.end() + 1)
             stop = match.end() + 1 + len(fraction)
-            if 1 <= len(fraction) <= 2 and (
-                _currency_before(text, match.start())
-                or _currency_after(text, stop)
-                or _percent_mark(text, stop)[0] > 0
+            if _is_long_decimal_comma(body, fraction) or (
+                1 <= len(fraction) <= 2
+                and (
+                    _currency_before(text, match.start())
+                    or _currency_after(text, stop)
+                    or _percent_mark(text, stop)[0] > 0
+                    or _is_whole_cell(text, match.start(), stop)
+                )
             ):
                 decimal = True
     return decimal and not grouped
@@ -521,7 +608,9 @@ def _is_currency_mark(word: str) -> bool:
     )
 
 
-def _parse_value(text: str) -> tuple[float, bool, str] | None:
+def _parse_value(
+    text: str, decimal_commas: bool | None = None
+) -> tuple[float, bool, str] | None:
     """Read a declared value: one number with its currency, magnitude and percent marks.
 
     Returns:
@@ -529,7 +618,7 @@ def _parse_value(text: str) -> tuple[float, bool, str] | None:
         exactly one number and its marks.
     """
     field = _normalize(text).text.strip()
-    tokens = _numbers(field)
+    tokens = _numbers(field, decimal_commas=decimal_commas)
     if len(tokens) != 1:
         return None
     token = tokens[0]
@@ -578,6 +667,9 @@ def parse_figures_block(content: str) -> FiguresBlock:
     raw = "".join(content[start:end] for _, _, _, (start, end) in blocks)
     declarations: list[Declaration] = []
     malformed: list[tuple[int, str]] = []
+    # The prose decides whether "2,639" is a decimal; a declaration cell must agree
+    # with it. ``None`` (no document evidence) lets the cell speak for itself.
+    document_reading = _writes_decimal_commas(_normalize(content).text) or None
     for number, line in enumerate(raw.splitlines(), start=1):
         stripped = line.strip().replace("｜", "|")
         if not stripped:
@@ -590,7 +682,7 @@ def parse_figures_block(content: str) -> FiguresBlock:
         parts = [part.strip() for part in parts]
         if _is_header_or_rule(parts):
             continue
-        parsed = _parse_value(parts[0]) if parts else None
+        parsed = _parse_value(parts[0], document_reading) if parts else None
         role = parts[1].casefold() if len(parts) > 1 else ""
         if parsed is None or role not in ROLES:
             malformed.append((number, line.strip()[:120]))

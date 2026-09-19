@@ -465,7 +465,7 @@ class _PolicyMixin:
         for figure in figures:
             if figure.shape not in ("measured", "bare"):
                 continue
-            declaration = block.match(figure.value, figure.percent)
+            declaration = block.match(figure.value, figure.percent, figure.digits)
             symbol = self._figure_symbol(
                 content, figure, declaration, line_symbols, document_symbol, records
             )
@@ -871,19 +871,68 @@ class _PolicyMixin:
         figure: Figure,
         direct: Sequence[float],
         scaled: Sequence[float],
+        *,
+        legacy_direct: bool = False,
     ) -> bool:
         """Whether a figure equals evidence, at its own scale or a metric's.
 
         ``direct`` is compared literally. ``scaled`` absorbs fraction vs percent
         (0.182 vs 18.2%) and the sign of a fall (drawdown -0.094 quoted as 9.4%).
+        Both are held to the digits the figure was written with
+        (:meth:`_within_written_precision`); ``legacy_direct`` keeps the flat evidence
+        band for ``direct`` when it is an undeclared price checked against prints.
         """
-        if _close_any(figure.value, direct):
+        if legacy_direct:
+            if _close_any(figure.value, direct):
+                return True
+            if figure.scale != 1.0 and _close_any(figure.value * figure.scale, direct):
+                return True
+        elif any(
+            self._within_written_precision(figure, figure.value, target)
+            for target in direct
+        ):
             return True
-        if figure.scale != 1.0 and _close_any(figure.value * figure.scale, direct):
+        elif figure.scale != 1.0 and any(
+            self._within_written_precision(
+                figure, figure.value * figure.scale, target, figure.scale
+            )
+            for target in direct
+        ):
             return True
-        candidates = {abs(figure.value), abs(figure.value) / 100.0}
         magnitudes = [abs(target) for target in scaled]
-        return any(_close_any(candidate, magnitudes) for candidate in candidates)
+        return any(
+            self._within_written_precision(figure, candidate, target, unit)
+            for candidate, unit in (
+                (abs(figure.value), 1.0),
+                (abs(figure.value) / 100.0, 0.01),
+            )
+            for target in magnitudes
+        )
+
+    @staticmethod
+    def _within_written_precision(
+        figure: Figure, candidate: float, target: float, unit: float = 1.0
+    ) -> bool:
+        """Whether a figure is ``target`` correctly rounded to the digits it was written with.
+
+        The evidence band is relative (:data:`_TOLERANCE`). A figure written with
+        decimals is held to half a unit of its last decimal as well, so "38,50" no
+        longer passes for 38.6784 (0.46% away) while "38,68" still does. A figure
+        written without decimals keeps the relative band alone: an integer's
+        precision is not known ("6,700" may be rounded to hundreds).
+
+        Args:
+            figure: The prose figure.
+            candidate: The figure's value in the units being compared.
+            target: The evidence value.
+            unit: How many compared units one written unit is (0.01 when a percent
+                is compared as a fraction).
+        """
+        band = abs(target) * _TOLERANCE
+        written = figure.digits or figure.text
+        if "." in written:
+            band = min(band, _written_half_unit(written) * unit * (1 + 1e-9))
+        return abs(candidate - target) <= max(band, 1e-9)
 
     def _check_observed(
         self,
@@ -945,7 +994,7 @@ class _PolicyMixin:
                     date=figure.date,
                 )
             ]
-        if self._matches_evidence(figure, direct, scaled):
+        if self._matches_evidence(figure, direct, scaled, legacy_direct=True):
             return []
         observed = sorted(direct or scaled)
         attributable = symbol is not None or len(
@@ -1247,7 +1296,10 @@ class _PolicyMixin:
             if not carried:
                 continue
             if all(
-                (block.match(figure.value, figure.percent) or _NO_DECLARATION).role
+                (
+                    block.match(figure.value, figure.percent, figure.digits)
+                    or _NO_DECLARATION
+                ).role
                 == "cited"
                 for figure in carried
             ):

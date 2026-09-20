@@ -42,6 +42,8 @@ class FakeChannel:
     async def start(self) -> None:
         if self.config.get("fail_start"):
             raise RuntimeError("start failed")
+        if self.config.get("hang_start"):
+            await asyncio.Event().wait()  # parks forever unless cancelled
         self._running = True
         FakeChannel.events.append(("start", self.tag))
 
@@ -51,6 +53,8 @@ class FakeChannel:
             raise TimeoutError("stop timed out")
         if self.config.get("hang_stop"):
             await asyncio.sleep(60)
+        if self.config.get("slow_stop"):
+            await asyncio.sleep(0.05)
         self._running = False
 
     async def send(self, message: Any) -> None:
@@ -311,5 +315,82 @@ def test_reload_is_contained_when_replacement_start_fails(
         assert manager.channels["fakea"].tag == "new"
         assert status["loaded"] is True
         assert status["running"] is False
+
+    asyncio.run(scenario())
+
+
+def test_stop_all_survives_a_concurrent_reload_removal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fails pre-fix: the live-dict iteration raised ``RuntimeError`` when the reload popped ``fakea`` mid-await."""
+
+    async def scenario() -> None:
+        manager = _build_manager(
+            monkeypatch,
+            {
+                "fakea": {"enabled": True, "tag": "a", "slow_stop": True},
+                "fakeb": {"enabled": True, "tag": "b", "slow_stop": True},
+            },
+        )
+        await manager.start_all()
+        stopper = asyncio.create_task(manager.stop_all())
+        await asyncio.sleep(0)  # let stop_all enter fakea's slow stop
+        reloader = asyncio.create_task(manager.reload_channel("fakea", None))
+        await asyncio.gather(stopper, reloader)  # must not raise
+
+        assert "fakea" not in manager.channels
+        assert ("stop", "b") in FakeChannel.events
+
+    asyncio.run(scenario())
+
+
+def test_start_all_without_channels_still_creates_dispatcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fails pre-fix: the empty-channels early return skipped dispatcher creation, so the reload never started the channel."""
+
+    async def scenario() -> None:
+        manager = _build_manager(monkeypatch, {})
+        await manager.start_all()
+        try:
+            assert manager._dispatch_task is not None
+            assert not manager._dispatch_task.done()
+
+            status = await manager.reload_channel(
+                "fakea", {"enabled": True, "tag": "late"}
+            )
+            assert manager.channels["fakea"].is_running is True
+            assert status["running"] is True
+        finally:
+            await manager.stop_all()
+
+    asyncio.run(scenario())
+
+
+def test_reload_does_not_await_a_blocking_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fails on a revert to inline start(): the reload would park on the hanging ``start()`` and ``wait_for`` would time out."""
+
+    async def scenario() -> None:
+        manager = _build_manager(
+            monkeypatch, {"fakea": {"enabled": True, "tag": "old"}}
+        )
+        await manager.start_all()
+        try:
+            status = await asyncio.wait_for(
+                manager.reload_channel(
+                    "fakea", {"enabled": True, "tag": "new", "hang_start": True}
+                ),
+                timeout=1.0,
+            )
+            assert status["loaded"] is True
+            # The replacement's start() is still parked.
+            assert status["running"] is False
+            assert manager._start_tasks  # the spawned task is tracked, not leaked
+        finally:
+            for task in manager._start_tasks:
+                task.cancel()
+            await manager.stop_all()
 
     asyncio.run(scenario())

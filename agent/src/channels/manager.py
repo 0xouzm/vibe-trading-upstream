@@ -234,12 +234,12 @@ class ChannelManager:
             return
 
         tasks = []
-        for name, channel in self.channels.items():
+        for name, channel in list(self.channels.items()):
             logger.info("Starting %s channel...", name)
             tasks.append(asyncio.create_task(self._start_channel(name, channel)))
 
         await asyncio.gather(*tasks, return_exceptions=True)
-        for name, channel in self.channels.items():
+        for name, channel in list(self.channels.items()):
             self._status.setdefault(name, {})
             self._status[name]["running"] = channel.is_running
 
@@ -253,7 +253,8 @@ class ChannelManager:
                 await self._dispatch_task
             self._dispatch_task = None
 
-        for name, channel in self.channels.items():
+        # Iterate a snapshot: a concurrent reload_channel may pop/insert entries.
+        for name, channel in list(self.channels.items()):
             try:
                 await channel.stop()
                 logger.info("Stopped %s channel", name)

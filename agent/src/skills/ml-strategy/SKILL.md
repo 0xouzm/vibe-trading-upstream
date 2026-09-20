@@ -150,6 +150,13 @@ def walk_forward_predict(
             if len(X_train) < 50:
                 continue
 
+            # A single-class window (e.g. a sustained one-directional trend)
+            # crashes fit()/predict_proba() on every model type below. Skip
+            # the retrain and keep serving the previous model, same as the
+            # too-few-samples case above.
+            if len(np.unique(y_train)) < 2:
+                continue
+
             # Standardization: fit only on training set
             scaler = StandardScaler()
             X_train = scaler.fit_transform(X_train)

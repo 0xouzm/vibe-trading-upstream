@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import threading
 from pathlib import Path
 
 import pytest
@@ -126,3 +127,51 @@ def test_update_channel_section_sequential_writes_accumulate(tmp_path):
     payload = _read(config_path)
     assert payload["channels"]["feishu"] == {"enabled": True, "app_id": "cli_app"}
     assert payload["channels"]["telegram"] == {"enabled": True, "token": "t"}
+
+
+def test_concurrent_writes_to_different_channels_both_survive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two threads patching different channels at once must not lose a patch.
+
+    The barrier forces both readers to overlap when the write lock is absent;
+    with the lock, the first reader times out at the barrier and the second runs
+    after the first write, so both sections land.
+    """
+    config_path = tmp_path / "agent.json"
+    config_path.write_text(json.dumps({"channels": {}}), encoding="utf-8")
+
+    import src.config.writer as writer
+
+    real_read = writer._read_config_file
+    barrier = threading.Barrier(2, timeout=1.0)
+
+    def synchronized_read(path: Path) -> dict:
+        payload = real_read(path)
+        try:
+            barrier.wait()
+        except threading.BrokenBarrierError:
+            # Expected when the write lock serialized the two readers.
+            pass
+        return payload
+
+    monkeypatch.setattr(writer, "_read_config_file", synchronized_read)
+
+    def patch_channel(channel: str) -> None:
+        update_channel_section(
+            channel, {"token": f"{channel}-token"}, config_path=config_path
+        )
+
+    threads = [
+        threading.Thread(target=patch_channel, args=("feishu",)),
+        threading.Thread(target=patch_channel, args=("telegram",)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+
+    payload = _read(config_path)
+    assert payload["channels"]["feishu"] == {"token": "feishu-token"}
+    assert payload["channels"]["telegram"] == {"token": "telegram-token"}

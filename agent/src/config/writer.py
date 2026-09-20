@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Sequence
@@ -22,6 +23,12 @@ from src.config.paths import get_config_path
 
 class ConfigNotWritableError(RuntimeError):
     """Raised when the active agent config cannot be written as JSON."""
+
+
+# Serializes the read-modify-write of the whole agent.json across channels and
+# across entry points (web PUT, Feishu QR login). The body is synchronous, so
+# this is a threading lock, not an asyncio lock.
+_WRITE_LOCK = threading.Lock()
 
 
 def _resolve_config_path(config_path: Path | None) -> Path:
@@ -72,37 +79,38 @@ def update_channel_section(
             section.
     """
     path = _resolve_config_path(config_path)
-    if path.suffix.lower() != ".json":
-        raise ConfigNotWritableError(
-            "Agent config is not writable as JSON: "
-            f"expected a .json file, got {path}. "
-            "Point the runtime at ~/.vibe-trading/agent.json to persist "
-            "channel credentials."
-        )
-
-    payload: dict[str, Any] = {}
-    if path.exists():
-        try:
-            payload = _read_config_file(path)
-        except (OSError, ValueError) as exc:
+    with _WRITE_LOCK:
+        if path.suffix.lower() != ".json":
             raise ConfigNotWritableError(
-                f"Agent config at {path} could not be read for update: {exc}"
-            ) from exc
+                "Agent config is not writable as JSON: "
+                f"expected a .json file, got {path}. "
+                "Point the runtime at ~/.vibe-trading/agent.json to persist "
+                "channel credentials."
+            )
 
-    channels = payload.setdefault("channels", {})
-    if not isinstance(channels, dict):
-        raise ConfigNotWritableError("agent config 'channels' must be an object")
-    section = channels.setdefault(channel, {})
-    if not isinstance(section, dict):
-        raise ConfigNotWritableError(
-            f"agent config 'channels.{channel}' must be an object"
-        )
+        payload: dict[str, Any] = {}
+        if path.exists():
+            try:
+                payload = _read_config_file(path)
+            except (OSError, ValueError) as exc:
+                raise ConfigNotWritableError(
+                    f"Agent config at {path} could not be read for update: {exc}"
+                ) from exc
 
-    section.update(updates)
-    for key in clears:
-        section.pop(key, None)
+        channels = payload.setdefault("channels", {})
+        if not isinstance(channels, dict):
+            raise ConfigNotWritableError("agent config 'channels' must be an object")
+        section = channels.setdefault(channel, {})
+        if not isinstance(section, dict):
+            raise ConfigNotWritableError(
+                f"agent config 'channels.{channel}' must be an object"
+            )
 
-    _write_json_atomically(path, payload)
+        section.update(updates)
+        for key in clears:
+            section.pop(key, None)
+
+        _write_json_atomically(path, payload)
     return path
 
 

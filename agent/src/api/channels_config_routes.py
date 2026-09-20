@@ -12,6 +12,9 @@ Security properties owned here: secret values never cross the wire (masked via
 ``split_values_secrets``), and a section that fails validation or the
 enable-transition credential probe is rejected with 422 *before* anything is
 written to disk.
+
+Plugin channels discovered via entry points are intentionally not surfaced
+here; they remain file-configured.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import asyncio
 import logging
 import sys as _sys
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -40,11 +44,24 @@ from src.config.paths import get_config_path
 
 logger = logging.getLogger(__name__)
 
-# Helper modules in src/channels/ that are not adapters; discovery enumerates them.
-_NON_CHANNEL_MODULES = frozenset({"targets", "config_meta"})
-
 _PROBE_CODES = frozenset({"ok", "invalid_credentials", "network", "unsupported"})
 _VERIFY_BLOCK_CODES = frozenset({"invalid_credentials", "network"})
+
+# Bound the fallback stop so a wedged adapter cannot stall the reset + restart.
+_FALLBACK_STOP_TIMEOUT_S = 10.0
+
+# Per-channel lifecycle keys the manager consumes from the section; they are
+# not adapter model fields but are legitimate config content (#341 lineage).
+_MANAGER_OVERRIDE_KEYS = frozenset(
+    {
+        "send_progress",
+        "send_tool_hints",
+        "show_reasoning",
+        "sendProgress",
+        "sendToolHints",
+        "showReasoning",
+    }
+)
 
 # Per-channel PUT/test serialization + one lock around runtime reset/rebuild.
 _channel_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -70,7 +87,12 @@ class ChannelConfigUpdateRequest(BaseModel):
 
 
 class ChannelTestRequest(BaseModel):
-    """Optional unsaved partial config for an ephemeral connection test."""
+    """Optional unsaved partial config for an ephemeral connection test.
+
+    ``clear_<field>: true`` flags arrive as extra keys, matching the PUT body.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     config: dict[str, Any] | None = None
 
@@ -86,8 +108,8 @@ def _host():
 
 
 def _known_channel_names() -> set[str]:
-    """Return discovered channel adapter names, minus non-channel helpers."""
-    return set(discover_channel_names()) - _NON_CHANNEL_MODULES
+    """Return the discovered built-in channel adapter names."""
+    return set(discover_channel_names())
 
 
 def _is_secret_key(name: str, key: str) -> bool:
@@ -110,6 +132,15 @@ def _patch_of(name: str, body: dict[str, Any]) -> dict[str, Any]:
         for key, value in body.items()
         if not (_is_secret_key(name, key) and isinstance(value, str) and not value.strip())
     }
+
+
+def _clear_flags(extra: dict[str, Any] | None) -> list[str]:
+    """Return the ``clear_<field>`` targets from a request's extra keys."""
+    return [
+        key[len("clear_") :]
+        for key, value in (extra or {}).items()
+        if key.startswith("clear_") and len(key) > len("clear_") and value
+    ]
 
 
 def _supports_connection_test(name: str) -> bool:
@@ -154,6 +185,19 @@ def _fresh_entry(name: str) -> dict[str, Any]:
     return _channel_entry(name, _stored_section(name), status_map)
 
 
+def _display_config_path(path: Path) -> str:
+    """Return a display-only config path: home-relative when possible.
+
+    The absolute path discloses the local username and directory layout to any
+    read-authorized caller; the UI only needs to show the operator which file
+    to edit by hand.
+    """
+    try:
+        return "~/" + path.relative_to(Path.home()).as_posix()
+    except ValueError:
+        return path.name
+
+
 def _scrub_detail(name: str, text: Any, section: dict[str, Any]) -> str:
     """Mask every secret value of *section* found in *text* (defense in depth)."""
     cleaned = str(text or "")
@@ -176,7 +220,11 @@ def _reject_validation(fields: list[str]) -> HTTPException:
     """Build the frozen 422 ``validation_error`` envelope."""
     return HTTPException(
         status_code=422,  # literal per repo convention (the starlette constant is deprecated)
-        detail={"code": "validation_error", "fields": fields},
+        detail={
+            "code": "validation_error",
+            "fields": fields,
+            "message": "invalid fields: " + ", ".join(fields),
+        },
     )
 
 
@@ -225,6 +273,13 @@ async def _hot_apply(name: str, section: dict[str, Any] | None) -> str:
             exc_info=True,
         )
         async with _runtime_lock:
+            try:
+                await asyncio.wait_for(runtime.stop(), timeout=_FALLBACK_STOP_TIMEOUT_S)
+            except Exception:  # noqa: BLE001 - a wedged stop must not block the rebuild
+                logger.warning(
+                    "Stopping the failed runtime timed out; resetting anyway",
+                    exc_info=True,
+                )
             _state.reset_channel_runtime()
             await host._get_channel_runtime().start(start_manager=True)
         return "reset"
@@ -234,25 +289,41 @@ async def _apply_update(name: str, payload: ChannelConfigUpdateRequest) -> dict[
     """Validate → optional enable-transition probe → write → hot apply."""
     stored = _stored_section(name)
     patch = _patch_of(name, payload.config)
-    clears = [
-        key[len("clear_"):]
-        for key, value in (payload.model_extra or {}).items()
-        if key.startswith("clear_") and len(key) > len("clear_") and value
-    ]
+    clears = _clear_flags(payload.model_extra)
     merged = {**stored, **patch}
     for key in clears:
         merged.pop(key, None)
 
     cls, instance = _build_ephemeral(name, merged)
 
+    unknown = sorted(
+        key
+        for key in patch
+        if key not in set(cls.default_config()) and key not in _MANAGER_OVERRIDE_KEYS
+    )
+    if unknown:
+        raise _reject_validation(unknown)
+
     enabling = bool(merged.get("enabled")) and not bool(stored.get("enabled"))
     if enabling and cls.supports_connection_test and not payload.skip_verify:
-        probe = await instance.test_connection()
+        try:
+            probe = await instance.test_connection()
+        except Exception as exc:  # noqa: BLE001 - a raising probe is a network-class failure
+            probe = {
+                "ok": False,
+                "code": "network",
+                "detail": f"{type(exc).__name__}: {exc}",
+            }
         if not probe.get("ok"):
             code = probe.get("code")
+            message = _scrub_detail(name, probe.get("detail", ""), merged)[:200]
             raise HTTPException(
                 status_code=422,
-                detail={"code": code if code in _VERIFY_BLOCK_CODES else "network", "fields": []},
+                detail={
+                    "code": code if code in _VERIFY_BLOCK_CODES else "network",
+                    "fields": [],
+                    "message": message or "connection probe failed",
+                },
             )
 
     try:
@@ -268,10 +339,12 @@ async def _apply_update(name: str, payload: ChannelConfigUpdateRequest) -> dict[
     return {"channel": _fresh_entry(name), "applied": applied}
 
 
-async def _run_test(name: str, body: dict[str, Any] | None) -> dict[str, Any]:
+async def _run_test(name: str, body: dict[str, Any] | None, clears: list[str]) -> dict[str, Any]:
     """Probe credentials on an ephemeral instance; never persists anything."""
     stored = _stored_section(name)
     merged = {**stored, **_patch_of(name, body or {})}
+    for key in clears:
+        merged.pop(key, None)
     tested_saved_config = not body
     sdk_fallback = bool(inspect_channel(name).to_dict().get("available", False))
 
@@ -357,7 +430,7 @@ def register_channels_config_routes(
 
         path = get_config_path()
         channels: dict[str, Any] = {}
-        for name in sorted(set(availability) - _NON_CHANNEL_MODULES):
+        for name in sorted(availability):
             section = disk.get(name)
             status_map = dict(availability[name])
             live_entry = live.get(name)
@@ -367,7 +440,7 @@ def register_channels_config_routes(
                 name, section if isinstance(section, dict) else {}, status_map
             )
         return {
-            "config_path": str(path),
+            "config_path": _display_config_path(path),
             "writable": path.suffix.lower() == ".json",
             "runtime_running": running,
             "channels": channels,
@@ -393,4 +466,4 @@ def register_channels_config_routes(
         if name not in _known_channel_names():
             raise HTTPException(status_code=404, detail=f"Unknown channel: {name}")
         async with _channel_locks[name]:
-            return await _run_test(name, payload.config)
+            return await _run_test(name, payload.config, _clear_flags(payload.model_extra))

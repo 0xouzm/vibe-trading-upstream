@@ -1,6 +1,6 @@
 """API contracts for the web IM channel-config surface (Task 5).
 
-Covers the frozen contract from ``.omo/plans/im-channel-web-config.md``:
+Covers the contract from https://github.com/HKUDS/Vibe-Trading/issues/1519:
 ``GET /channels/config``, ``PUT /channels/config/{name}`` and
 ``POST /channels/{name}/test`` — secret masking, the 422-before-write ordering
 (bad credentials never reach disk), hot-apply modes (hot_swapped / reset /
@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 import api_server
 from src.api import channels_config_routes as routes
 from src.api import state as api_state
-from src.channels.dingtalk import DINGTALK_AVAILABLE
+from src.channels.dingtalk import DINGTALK_AVAILABLE, DingTalkChannel
 
 CLIENT_ID = "ding-client-id-1234567890"
 STORED_SECRET = "stored-secret-abcdefghij"
@@ -69,12 +69,17 @@ class FakeRuntime:
         self._running = running
         self.manager = manager if manager is not None else FakeManager()
         self.start_calls: list[bool] = []
+        self.stop_calls: list[bool] = []
 
     def status(self) -> dict[str, Any]:
         return {"running": self._running, "channels": {}}
 
     async def start(self, *, start_manager: bool = True) -> None:
         self.start_calls.append(start_manager)
+
+    async def stop(self) -> None:
+        self.stop_calls.append(True)
+        self._running = False
 
 
 def _write_agent_config(
@@ -163,7 +168,7 @@ def test_get_masks_secrets_and_reports_writable(tmp_path: Path, monkeypatch) -> 
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["config_path"] == str(path)
+    assert payload["config_path"] == path.name
     assert payload["writable"] is True
     assert payload["runtime_running"] is False
 
@@ -210,7 +215,7 @@ def test_get_reports_not_writable_for_yaml_config(tmp_path: Path, monkeypatch) -
     assert response.status_code == 200
     payload = response.json()
     assert payload["writable"] is False
-    assert payload["config_path"] == str(path)
+    assert payload["config_path"] == path.name
     assert payload["channels"]["dingtalk"]["values"]["client_id"] == CLIENT_ID
     assert STORED_SECRET not in response.text
 
@@ -226,6 +231,13 @@ def test_get_reports_runtime_running_from_live_status(tmp_path: Path, monkeypatc
     payload = client.get("/channels/config").json()
 
     assert payload["runtime_running"] is True
+
+
+def test_display_config_path_relativizes_home() -> None:
+    home = Path.home()
+
+    assert routes._display_config_path(home / "sub" / "agent.json") == "~/sub/agent.json"
+    assert routes._display_config_path(Path("/not-under-home/agent.json")) == "agent.json"
 
 
 # --------------------------------------------------------------------------- #
@@ -301,6 +313,49 @@ def test_put_enable_with_bad_credentials_is_blocked_before_write(
     assert STORED_SECRET not in response.text
 
 
+def test_put_enable_rejection_carries_scrubbed_message(tmp_path: Path, monkeypatch) -> None:
+    client, path = _client(
+        tmp_path, monkeypatch, channels={"dingtalk": _dingtalk_section()}
+    )
+    before = path.read_bytes()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text=f"appSecret {STORED_SECRET} is invalid")
+
+    requests = _inject_mock_transport(monkeypatch, handler)
+
+    response = client.put("/channels/config/dingtalk", json={"config": {"enabled": True}})
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "invalid_credentials"
+    assert isinstance(detail["message"], str)
+    assert detail["message"]
+    assert len(requests) == 1
+    assert path.read_bytes() == before
+    assert STORED_SECRET not in response.text
+
+
+def test_put_enable_probe_exception_becomes_422_network(tmp_path: Path, monkeypatch) -> None:
+    client, path = _client(
+        tmp_path, monkeypatch, channels={"dingtalk": _dingtalk_section()}
+    )
+    before = path.read_bytes()
+
+    async def raising_probe(self) -> dict[str, Any]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(DingTalkChannel, "test_connection", raising_probe)
+
+    response = client.put("/channels/config/dingtalk", json={"config": {"enabled": True}})
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "network"
+    assert "boom" in detail["message"]
+    assert path.read_bytes() == before
+
+
 def test_put_enable_skip_verify_writes_without_probe(tmp_path: Path, monkeypatch) -> None:
     client, path = _client(
         tmp_path, monkeypatch, channels={"dingtalk": _dingtalk_section()}
@@ -356,6 +411,38 @@ def test_put_clear_flag_removes_stored_secret(tmp_path: Path, monkeypatch) -> No
     entry = response.json()["channel"]
     assert entry["secrets"].get("client_secret", {"set": False})["set"] is False
     assert STORED_SECRET not in response.text
+
+
+def test_put_rejects_unknown_config_keys(tmp_path: Path, monkeypatch) -> None:
+    client, path = _client(
+        tmp_path, monkeypatch, channels={"dingtalk": _dingtalk_section()}
+    )
+    before = path.read_bytes()
+
+    response = client.put(
+        "/channels/config/dingtalk",
+        json={"config": {"definitely_unknown_key": 1, "__proto__": 1}},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "validation_error"
+    assert {"definitely_unknown_key", "__proto__"} <= set(detail["fields"])
+    assert path.read_bytes() == before
+
+
+def test_put_accepts_manager_override_keys(tmp_path: Path, monkeypatch) -> None:
+    client, path = _client(
+        tmp_path, monkeypatch, channels={"dingtalk": _dingtalk_section()}
+    )
+
+    response = client.put(
+        "/channels/config/dingtalk", json={"config": {"send_progress": True}}
+    )
+
+    assert response.status_code == 200
+    on_disk = json.loads(path.read_text(encoding="utf-8"))["channels"]["dingtalk"]
+    assert on_disk["send_progress"] is True
 
 
 def test_put_yaml_config_returns_config_not_writable(tmp_path: Path, monkeypatch) -> None:
@@ -416,8 +503,15 @@ def test_put_reload_failure_falls_back_to_reset_and_restart(
     client, _ = _client(
         tmp_path, monkeypatch, channels={"dingtalk": _dingtalk_section()}, runtime=runtime
     )
-    resets: list[bool] = []
-    monkeypatch.setattr(api_state, "reset_channel_runtime", lambda: resets.append(True))
+    new_runtime = FakeRuntime(running=False)
+
+    def _stub_get_channel_runtime() -> FakeRuntime:
+        # Mirror the real accessor's caching contract: the rebuilt singleton is
+        # observable on the host module, which is what `_hot_apply` leaves behind.
+        monkeypatch.setattr(api_server, "_channel_runtime", new_runtime)
+        return new_runtime
+
+    monkeypatch.setattr(api_server, "_get_channel_runtime", _stub_get_channel_runtime)
 
     response = client.put(
         "/channels/config/dingtalk", json={"config": {"client_id": "fallback-id"}}
@@ -425,9 +519,36 @@ def test_put_reload_failure_falls_back_to_reset_and_restart(
 
     assert response.status_code == 200
     assert response.json()["applied"] == "reset"
-    assert resets == [True]
-    # The fallback restarts through the same path /channels/start uses.
-    assert runtime.start_calls == [True]
+    # The orphaned runtime is stopped before the reset + restart...
+    assert runtime.stop_calls == [True]
+    # ...and the old runtime is never restarted in its orphaned state.
+    assert runtime.start_calls == []
+    assert new_runtime.start_calls == [True]
+    assert api_server._channel_runtime is new_runtime
+
+
+def test_put_reload_failure_survives_a_wedged_stop(tmp_path: Path, monkeypatch) -> None:
+    class WedgedStopRuntime(FakeRuntime):
+        """A runtime whose stop() fails, standing in for a wedged adapter."""
+
+        async def stop(self) -> None:
+            raise RuntimeError("wedged")
+
+    runtime = WedgedStopRuntime(running=True, manager=FakeManager(fail=True))
+    client, _ = _client(
+        tmp_path, monkeypatch, channels={"dingtalk": _dingtalk_section()}, runtime=runtime
+    )
+    new_runtime = FakeRuntime(running=False)
+    monkeypatch.setattr(api_server, "_get_channel_runtime", lambda: new_runtime)
+
+    response = client.put(
+        "/channels/config/dingtalk", json={"config": {"client_id": "fallback-id"}}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["applied"] == "reset"
+    # A failed stop must not block the rebuild.
+    assert new_runtime.start_calls == [True]
 
 
 def test_concurrent_puts_serialize_per_channel(tmp_path: Path, monkeypatch) -> None:
@@ -535,6 +656,31 @@ def test_post_test_reports_invalid_credentials(tmp_path: Path, monkeypatch) -> N
     assert body["tested_saved_config"] is True
     # The echoed secret is scrubbed (adapter layer + route defense in depth).
     assert STORED_SECRET not in response.text
+    assert path.read_bytes() == before
+
+
+def test_post_test_honors_pending_secret_clear(tmp_path: Path, monkeypatch) -> None:
+    client, path = _client(
+        tmp_path, monkeypatch, channels={"dingtalk": _dingtalk_section()}
+    )
+    before = path.read_bytes()
+
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("a cleared credential must not reach the transport")
+
+    requests = _inject_mock_transport(monkeypatch, handler)
+
+    response = client.post(
+        "/channels/dingtalk/test", json={"config": {}, "clear_client_secret": True}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["code"] == "invalid_credentials"
+    assert body["detail"] == "missing credentials"
+    # The stored secret was excluded from the probe, so nothing was sent.
+    assert requests == []
     assert path.read_bytes() == before
 
 

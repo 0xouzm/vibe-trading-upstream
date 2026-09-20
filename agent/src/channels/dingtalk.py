@@ -23,6 +23,7 @@ from src.security.network import validate_resolved_url, validate_url_target
 
 DINGTALK_MAX_REMOTE_MEDIA_BYTES = 20 * 1024 * 1024
 DINGTALK_MAX_REMOTE_MEDIA_REDIRECTS = 3
+DINGTALK_ACCESS_TOKEN_URL = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
 
 try:
     from dingtalk_stream import (
@@ -174,6 +175,19 @@ class DingTalkConfig(BaseModel):
     allow_remote_media_redirects: bool = False
     remote_media_redirect_allowed_hosts: list[str] = Field(default_factory=list)
     group_user_isolation: bool = False  # If True, each user in group chat gets their own session
+    force_ipv4: bool = False  # Bind outbound API calls to IPv4 (stable egress IP for app IP whitelists)
+
+
+def _build_http_transport(config: "DingTalkConfig") -> httpx.AsyncHTTPTransport | None:
+    """Return an IPv4-bound transport when ``force_ipv4`` is set, else None.
+
+    DingTalk's robot-send API enforces the app's egress-IP whitelist; on
+    dual-stack networks the rotating IPv6 prefix keeps falling out of it, so
+    operators can pin the egress to the (typically stable) IPv4 address.
+    """
+    if config.force_ipv4:
+        return httpx.AsyncHTTPTransport(local_address="0.0.0.0")
+    return None
 
 
 class DingTalkChannel(BaseChannel):
@@ -189,6 +203,7 @@ class DingTalkChannel(BaseChannel):
 
     name = "dingtalk"
     display_name = "DingTalk"
+    supports_connection_test = True
     _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
     _AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg", ".m4a", ".aac"}
     _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
@@ -205,6 +220,7 @@ class DingTalkChannel(BaseChannel):
         self.config: DingTalkConfig = config
         self._client: Any = None
         self._http: httpx.AsyncClient | None = None
+        self._stream_task: asyncio.Task | None = None
 
         # Access Token management for sending messages
         self._access_token: str | None = None
@@ -227,8 +243,10 @@ class DingTalkChannel(BaseChannel):
                 return
 
             self._running = True
+            self._stream_task = asyncio.current_task()
             self._http = httpx.AsyncClient(
-                timeout=httpx.Timeout(10.0, connect=10.0, read=30.0, write=30.0, pool=10.0)
+                timeout=httpx.Timeout(10.0, connect=10.0, read=30.0, write=30.0, pool=10.0),
+                transport=_build_http_transport(self.config),
             )
 
             self.logger.info(
@@ -260,6 +278,7 @@ class DingTalkChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop the DingTalk bot."""
         self._running = False
+        await self._cancel_stream_task()
         # Close the shared HTTP client
         if self._http:
             await self._http.aclose()
@@ -268,6 +287,26 @@ class DingTalkChannel(BaseChannel):
         for task in self._background_tasks:
             task.cancel()
         self._background_tasks.clear()
+
+    async def _cancel_stream_task(self) -> None:
+        """Terminate the Stream Mode task.
+
+        The SDK ``start()`` loop catches the first ``CancelledError`` and
+        sleeps before reconnecting, so a second cancellation is delivered
+        during that sleep; otherwise a stopped channel keeps a zombie
+        WebSocket that fights the replacement instance for the gateway.
+        """
+        task = self._stream_task
+        self._stream_task = None
+        if task is None or task.done() or task is asyncio.current_task():
+            return
+        task.cancel()
+        await asyncio.sleep(0.05)
+        if not task.done():
+            task.cancel()
+        done, _ = await asyncio.wait({task}, timeout=5)
+        if not done:
+            self.logger.warning("Stream task survived cancellation; connection may linger")
 
     async def _get_access_token(self) -> str | None:
         """Get or refresh Access Token."""
@@ -295,6 +334,88 @@ class DingTalkChannel(BaseChannel):
         except Exception:
             self.logger.exception("Failed to get access token")
             return None
+
+    def _scrub_detail(self, text: str) -> str:
+        """Return diagnostic text with any credential value replaced.
+
+        Transport and rejection messages can echo the request or credential by
+        accident; every value this channel holds as a secret is masked before the
+        text reaches a result envelope.
+        """
+        cleaned = text
+        for secret in (self.config.client_secret, self.config.client_id):
+            if secret:
+                cleaned = cleaned.replace(secret, "***")
+        return cleaned
+
+    @staticmethod
+    def _response_detail(resp: httpx.Response) -> str:
+        """Return a bounded ``HTTP <status>`` detail without echoing secrets."""
+        body = (resp.text or "").strip()
+        if not body:
+            return f"HTTP {resp.status_code}"
+        return f"HTTP {resp.status_code}: {body[:200]}"
+
+    async def test_connection(self) -> dict[str, Any]:
+        """Validate the DingTalk credentials with a standalone token request.
+
+        Uses a fresh ``httpx.AsyncClient`` rather than ``self._http`` (which only
+        exists after :meth:`start`), so an unsaved credential set can be checked
+        before the channel is started. A successful access token is discarded: it
+        is never returned, logged, or cached.
+
+        Returns:
+            A JSON-serializable envelope with ``ok`` and a ``code`` of ``ok`` /
+            ``invalid_credentials`` / ``network``, plus an ``sdk_available``
+            flag. Any ``detail`` is scrubbed of credential values.
+        """
+        if not self.config.client_id or not self.config.client_secret:
+            return {"ok": False, "code": "invalid_credentials", "detail": "missing credentials"}
+
+        payload = {"appKey": self.config.client_id, "appSecret": self.config.client_secret}
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0, connect=10.0),
+                transport=_build_http_transport(self.config),
+            ) as client:
+                resp = await client.post(DINGTALK_ACCESS_TOKEN_URL, json=payload)
+        except httpx.HTTPError as exc:
+            return {
+                "ok": False,
+                "code": "network",
+                "detail": self._scrub_detail(str(exc) or type(exc).__name__),
+                "sdk_available": DINGTALK_AVAILABLE,
+            }
+
+        if resp.status_code == 200:
+            try:
+                access_token = resp.json().get("accessToken")
+            except ValueError:
+                access_token = None
+            if not access_token:
+                return {
+                    "ok": False,
+                    "code": "invalid_credentials",
+                    "detail": "no access token in response",
+                    "sdk_available": DINGTALK_AVAILABLE,
+                }
+            return {"ok": True, "code": "ok", "sdk_available": DINGTALK_AVAILABLE}
+
+        if 400 <= resp.status_code < 500:
+            return {
+                "ok": False,
+                "code": "invalid_credentials",
+                "detail": self._scrub_detail(self._response_detail(resp)),
+                "sdk_available": DINGTALK_AVAILABLE,
+            }
+
+        return {
+            "ok": False,
+            "code": "network",
+            "detail": self._scrub_detail(self._response_detail(resp)),
+            "sdk_available": DINGTALK_AVAILABLE,
+        }
 
     @staticmethod
     def _is_http_url(value: str) -> bool:
@@ -722,6 +843,7 @@ class DingTalkChannel(BaseChannel):
                     "conversation_type": conversation_type,
                 },
                 session_key=session_key,
+                is_dm=not is_group,
             )
         except Exception:
             self.logger.exception("Error publishing message")

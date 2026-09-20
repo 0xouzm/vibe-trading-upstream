@@ -5,8 +5,6 @@ import json
 import mimetypes
 import os
 import time
-import zipfile
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urljoin, urlparse
@@ -16,14 +14,15 @@ from pydantic import Field
 
 from src.channels.bus.events import OutboundMessage
 from src.channels.bus.queue import MessageBus
+from src.channels import dingtalk_media, dingtalk_probe
 from src.channels.base import BaseChannel
+from src.channels.dingtalk_probe import build_http_transport as _build_http_transport
 from src.channels.utils import safe_filename
 from pydantic import BaseModel
 from src.security.network import validate_resolved_url, validate_url_target
 
 DINGTALK_MAX_REMOTE_MEDIA_BYTES = 20 * 1024 * 1024
 DINGTALK_MAX_REMOTE_MEDIA_REDIRECTS = 3
-DINGTALK_ACCESS_TOKEN_URL = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
 
 try:
     from dingtalk_stream import (
@@ -178,18 +177,6 @@ class DingTalkConfig(BaseModel):
     force_ipv4: bool = False  # Bind outbound API calls to IPv4 (stable egress IP for app IP whitelists)
 
 
-def _build_http_transport(config: "DingTalkConfig") -> httpx.AsyncHTTPTransport | None:
-    """Return an IPv4-bound transport when ``force_ipv4`` is set, else None.
-
-    DingTalk's robot-send API enforces the app's egress-IP whitelist; on
-    dual-stack networks the rotating IPv6 prefix keeps falling out of it, so
-    operators can pin the egress to the (typically stable) IPv4 address.
-    """
-    if config.force_ipv4:
-        return httpx.AsyncHTTPTransport(local_address="0.0.0.0")
-    return None
-
-
 class DingTalkChannel(BaseChannel):
     """
     DingTalk channel using Stream Mode.
@@ -204,9 +191,6 @@ class DingTalkChannel(BaseChannel):
     name = "dingtalk"
     display_name = "DingTalk"
     supports_connection_test = True
-    _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
-    _AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg", ".m4a", ".aac"}
-    _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
     _ZIP_BEFORE_UPLOAD_EXTS = {".htm", ".html"}
 
     @classmethod
@@ -335,115 +319,15 @@ class DingTalkChannel(BaseChannel):
             self.logger.exception("Failed to get access token")
             return None
 
-    def _scrub_detail(self, text: str) -> str:
-        """Return diagnostic text with any credential value replaced.
-
-        Transport and rejection messages can echo the request or credential by
-        accident; every value this channel holds as a secret is masked before the
-        text reaches a result envelope.
-        """
-        cleaned = text
-        for secret in (self.config.client_secret, self.config.client_id):
-            if secret:
-                cleaned = cleaned.replace(secret, "***")
-        return cleaned
-
-    @staticmethod
-    def _response_detail(resp: httpx.Response) -> str:
-        """Return a bounded ``HTTP <status>`` detail without echoing secrets."""
-        body = (resp.text or "").strip()
-        if not body:
-            return f"HTTP {resp.status_code}"
-        return f"HTTP {resp.status_code}: {body[:200]}"
-
     async def test_connection(self) -> dict[str, Any]:
         """Validate the DingTalk credentials with a standalone token request.
 
-        Uses a fresh ``httpx.AsyncClient`` rather than ``self._http`` (which only
-        exists after :meth:`start`), so an unsaved credential set can be checked
-        before the channel is started. A successful access token is discarded: it
-        is never returned, logged, or cached.
-
-        Returns:
-            A JSON-serializable envelope with ``ok`` and a ``code`` of ``ok`` /
-            ``invalid_credentials`` / ``network``, plus an ``sdk_available``
-            flag. Any ``detail`` is scrubbed of credential values.
+        Delegates to :func:`src.channels.dingtalk_probe.test_connection`; see
+        that function for the full contract (codes, scrubbing, token discard).
         """
-        if not self.config.client_id or not self.config.client_secret:
-            return {"ok": False, "code": "invalid_credentials", "detail": "missing credentials"}
-
-        payload = {"appKey": self.config.client_id, "appSecret": self.config.client_secret}
-
-        try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(10.0, connect=10.0),
-                transport=_build_http_transport(self.config),
-            ) as client:
-                resp = await client.post(DINGTALK_ACCESS_TOKEN_URL, json=payload)
-        except httpx.HTTPError as exc:
-            return {
-                "ok": False,
-                "code": "network",
-                "detail": self._scrub_detail(str(exc) or type(exc).__name__),
-                "sdk_available": DINGTALK_AVAILABLE,
-            }
-
-        if resp.status_code == 200:
-            try:
-                access_token = resp.json().get("accessToken")
-            except ValueError:
-                access_token = None
-            if not access_token:
-                return {
-                    "ok": False,
-                    "code": "invalid_credentials",
-                    "detail": "no access token in response",
-                    "sdk_available": DINGTALK_AVAILABLE,
-                }
-            return {"ok": True, "code": "ok", "sdk_available": DINGTALK_AVAILABLE}
-
-        if 400 <= resp.status_code < 500:
-            return {
-                "ok": False,
-                "code": "invalid_credentials",
-                "detail": self._scrub_detail(self._response_detail(resp)),
-                "sdk_available": DINGTALK_AVAILABLE,
-            }
-
-        return {
-            "ok": False,
-            "code": "network",
-            "detail": self._scrub_detail(self._response_detail(resp)),
-            "sdk_available": DINGTALK_AVAILABLE,
-        }
-
-    @staticmethod
-    def _is_http_url(value: str) -> bool:
-        return urlparse(value).scheme in ("http", "https")
-
-    def _guess_upload_type(self, media_ref: str) -> str:
-        ext = Path(urlparse(media_ref).path).suffix.lower()
-        if ext in self._IMAGE_EXTS:
-            return "image"
-        if ext in self._AUDIO_EXTS:
-            return "voice"
-        if ext in self._VIDEO_EXTS:
-            return "video"
-        return "file"
-
-    def _guess_filename(self, media_ref: str, upload_type: str) -> str:
-        name = os.path.basename(urlparse(media_ref).path)
-        return name or {"image": "image.jpg", "voice": "audio.amr", "video": "video.mp4"}.get(upload_type, "file.bin")
-
-    @staticmethod
-    def _zip_bytes(filename: str, data: bytes) -> tuple[bytes, str, str]:
-        stem = Path(filename).stem or "attachment"
-        safe_name = filename or "attachment.bin"
-        zip_name = f"{stem}.zip"
-        buffer = BytesIO()
-        with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr(safe_name, data)
-        return buffer.getvalue(), zip_name, "application/zip"
+        return await dingtalk_probe.test_connection(
+            self.config, sdk_available=DINGTALK_AVAILABLE
+        )
 
     def _normalize_upload_payload(
         self,
@@ -457,7 +341,7 @@ class DingTalkChannel(BaseChannel):
                 "does not accept raw HTML attachments, zipping {} before upload",
                 filename,
             )
-            return self._zip_bytes(filename, data)
+            return dingtalk_media.zip_bytes(filename, data)
         return data, filename, content_type
 
     def _validate_remote_media_url(self, media_ref: str) -> bool:
@@ -607,12 +491,13 @@ class DingTalkChannel(BaseChannel):
         if not media_ref:
             return None, None, None
 
-        if self._is_http_url(media_ref):
+        if dingtalk_media.is_http_url(media_ref):
             data, raw_content_type = await self._fetch_remote_media_bytes(media_ref)
             if data is None:
                 return None, None, None
             content_type = (raw_content_type or "").split(";")[0].strip()
-            filename = self._guess_filename(media_ref, self._guess_upload_type(media_ref))
+            upload_type = dingtalk_media.guess_upload_type(media_ref)
+            filename = dingtalk_media.guess_filename(media_ref, upload_type)
             return data, filename, content_type or None
 
         try:
@@ -736,8 +621,8 @@ class DingTalkChannel(BaseChannel):
         if not media_ref:
             return True
 
-        upload_type = self._guess_upload_type(media_ref)
-        if upload_type == "image" and self._is_http_url(media_ref):
+        upload_type = dingtalk_media.guess_upload_type(media_ref)
+        if upload_type == "image" and dingtalk_media.is_http_url(media_ref):
             ok = await self._send_batch_message(
                 token,
                 chat_id,
@@ -753,7 +638,7 @@ class DingTalkChannel(BaseChannel):
             self.logger.error("media read failed: {}", media_ref)
             return False
 
-        filename = filename or self._guess_filename(media_ref, upload_type)
+        filename = filename or dingtalk_media.guess_filename(media_ref, upload_type)
         data, filename, content_type = self._normalize_upload_payload(filename, data, content_type)
         file_type = Path(filename).suffix.lower().lstrip(".")
         if not file_type:
@@ -806,7 +691,8 @@ class DingTalkChannel(BaseChannel):
                 continue
             self.logger.error("media send failed for {}", media_ref)
             # Send visible fallback so failures are observable by the user.
-            filename = self._guess_filename(media_ref, self._guess_upload_type(media_ref))
+            upload_type = dingtalk_media.guess_upload_type(media_ref)
+            filename = dingtalk_media.guess_filename(media_ref, upload_type)
             await self._send_markdown_text(
                 token,
                 msg.chat_id,

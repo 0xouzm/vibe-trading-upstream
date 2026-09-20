@@ -55,6 +55,14 @@ def test_an_omitted_non_equity_value_is_unknown_not_zero() -> None:
     assert mcp.portfolio_summary(envelope)["non_equity_values"]["crypto_value"] is None
 
 
+def test_portfolio_summary_rejects_an_unmapped_buying_power_shape() -> None:
+    envelope = rh.portfolio()
+    envelope["structured_content"]["data"]["buying_power"] = ["5000.00"]
+
+    with pytest.raises(mcp.RobinhoodShapeError, match="buying_power is not an object"):
+        mcp.portfolio_summary(envelope)
+
+
 def test_position_rows_map_symbol_quantity_and_cost() -> None:
     rows = mcp.position_rows(
         rh.positions(

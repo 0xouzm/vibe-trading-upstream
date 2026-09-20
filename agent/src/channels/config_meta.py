@@ -1,0 +1,168 @@
+"""Field metadata for channel config forms with fail-safe secret masking.
+
+A generic web form renders any channel's configuration from this module
+without per-channel frontend code. Hand-written :data:`FIELD_HINTS` supply
+i18n-friendly metadata (labels are owned by the frontend via ``help_key``);
+channels without hints fall back to their adapter's ``default_config()`` with
+type inference and a fail-safe secret heuristic.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from typing import Any
+from typing import TypedDict
+
+from src.channels.registry import load_channel_class
+
+logger = logging.getLogger(__name__)
+
+SECRET_KEY_RE = re.compile(r"secret|token|password|api_key", re.IGNORECASE)
+
+_HELP_KEY_PREFIX = "settings.channels.fields"
+_EXCLUDED_KEYS = frozenset({"enabled"})
+
+
+class FieldHint(TypedDict):
+    """UI metadata for one channel config field.
+
+    Attributes:
+        key: Config key as the adapter serializes it (aliases already applied).
+        type: Widget type: ``text``, ``password``, ``bool`` or ``list``.
+        secret: Whether the value must never cross the wire in ``values``.
+        required: Whether the form must not submit an empty value.
+        help_key: i18n key for the frontend label, or ``None`` when the
+            channel has no hand-written label.
+    """
+
+    key: str
+    type: str
+    secret: bool
+    required: bool
+    help_key: str | None
+
+
+def _dingtalk_hints() -> list[FieldHint]:
+    """Return the hand-written DingTalk field hints (``enabled`` excluded)."""
+    specs = (
+        ("client_id", "text", False, True),
+        ("client_secret", "password", True, True),
+        ("allow_from", "list", False, False),
+        ("allow_remote_media_redirects", "bool", False, False),
+        ("remote_media_redirect_allowed_hosts", "list", False, False),
+        ("group_user_isolation", "bool", False, False),
+        ("force_ipv4", "bool", False, False),
+    )
+    return [
+        {
+            "key": key,
+            "type": widget,
+            "secret": secret,
+            "required": required,
+            "help_key": f"{_HELP_KEY_PREFIX}.dingtalk.{key}",
+        }
+        for key, widget, secret, required in specs
+    ]
+
+
+FIELD_HINTS: dict[str, list[FieldHint]] = {
+    "dingtalk": _dingtalk_hints(),
+}
+
+
+def _infer_type(key: str, value: Any, *, secret: bool) -> str:
+    """Infer a widget type; secret keys always become ``password``."""
+    if secret:
+        return "password"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, list):
+        return "list"
+    return "text"
+
+
+def _derive_hints(name: str) -> list[FieldHint]:
+    """Derive hints from an adapter's ``default_config()``, or ``[]`` if unknown."""
+    try:
+        config = load_channel_class(name).default_config()
+    except Exception:  # noqa: BLE001 - unknown names and missing SDKs degrade
+        logger.debug("No config metadata for channel '%s'", name, exc_info=True)
+        return []
+    if not isinstance(config, dict):
+        return []
+
+    hints: list[FieldHint] = []
+    for key, value in config.items():
+        if key in _EXCLUDED_KEYS:
+            continue
+        secret = bool(SECRET_KEY_RE.search(key))
+        hints.append(
+            {
+                "key": key,
+                "type": _infer_type(key, value, secret=secret),
+                "secret": secret,
+                "required": False,
+                "help_key": None,
+            }
+        )
+    return hints
+
+
+def channel_field_hints(name: str) -> list[FieldHint]:
+    """Return UI field metadata for one channel.
+
+    Hand-written hints win when present; otherwise the adapter's
+    ``default_config()`` is inspected. Unknown or unloadable channels return an
+    empty list, and ``enabled`` is always excluded (it is the toggle rendered
+    separately).
+
+    Args:
+        name: Channel module name, e.g. ``dingtalk`` or ``telegram``.
+
+    Returns:
+        Field hints in the adapter's serialized config-key order.
+    """
+    hand_written = FIELD_HINTS.get(name)
+    if hand_written is not None:
+        return list(hand_written)
+    return _derive_hints(name)
+
+
+def _mask(value: Any) -> dict[str, Any]:
+    """Return the ``{set, masked}`` descriptor for one secret value."""
+    is_set = bool(value)
+    return {
+        "set": is_set,
+        "masked": "****" + str(value)[-4:] if is_set else "",
+    }
+
+
+def split_values_secrets(
+    name: str, section: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Split a raw config section into non-secret values and masked secrets.
+
+    A key is treated as a secret when it matches :data:`SECRET_KEY_RE` or is
+    marked secret in :func:`channel_field_hints`. The strip from ``values`` is
+    unconditional, so an unknown channel's ``webhook_secret`` never leaks.
+
+    Args:
+        name: Channel module name.
+        section: Raw config section as loaded from disk.
+
+    Returns:
+        ``(values, secrets)`` where ``values`` holds non-secret keys verbatim
+        and each secret is ``{"set": bool, "masked": "****" + last4}``.
+    """
+    secret_hint_keys = {
+        hint["key"] for hint in channel_field_hints(name) if hint["secret"]
+    }
+    values: dict[str, Any] = {}
+    secrets: dict[str, dict[str, Any]] = {}
+    for key, value in section.items():
+        if SECRET_KEY_RE.search(key) or key in secret_hint_keys:
+            secrets[key] = _mask(value)
+        else:
+            values[key] = value
+    return values, secrets

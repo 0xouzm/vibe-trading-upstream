@@ -421,7 +421,90 @@
       "stoppedToast": "IM-Kanäle gestoppt",
       "refreshFailed": "IM-Kanäle konnten nicht aktualisiert werden",
       "startFailed": "IM-Kanäle konnten nicht gestartet werden",
-      "stopFailed": "IM-Kanäle konnten nicht gestoppt werden"
+      "stopFailed": "IM-Kanäle konnten nicht gestoppt werden",
+      "config": {
+        "toggleConfig": "{{name}} konfigurieren",
+        "keepCurrent": "Aktuellen Wert behalten ({{masked}})",
+        "secretNotSet": "Nicht gesetzt",
+        "clearSecret": "Löschen",
+        "required": "Erforderlich",
+        "listPlaceholder": "Wert eingeben und mit Enter hinzufügen",
+        "removeValue": "{{value}} entfernen",
+        "save": "Konfiguration speichern",
+        "hotApply": "Speichern wirkt sofort – kein Neustart nötig.",
+        "saved": "Kanal-Konfiguration gespeichert",
+        "saveFailed": "Kanal-Konfiguration konnte nicht gespeichert werden: {{message}}",
+        "test": "Verbindung testen",
+        "testing": "Wird getestet…",
+        "testOk": "Verbindung bestätigt",
+        "testFailed": "Verbindungstest fehlgeschlagen: {{message}}",
+        "testCodeOk": "Der Anbieter hat diese Zugangsdaten akzeptiert.",
+        "testCodeInvalidCredentials": "Der Anbieter hat diese Zugangsdaten abgelehnt.",
+        "testCodeNetwork": "Der Anbieter war nicht erreichbar.",
+        "testCodeUnsupported": "Dieser Kanal unterstützt keine Verbindungstests.",
+        "testedSavedConfig": "Getestet wurde die gespeicherte Konfiguration.",
+        "testedDraftConfig": "Getestet wurden die aktuellen Formularwerte (noch nicht gespeichert).",
+        "enable": "Kanal aktivieren",
+        "enableHint": "Deaktivieren behält die gespeicherten Zugangsdaten – jederzeit wieder aktivierbar.",
+        "enabledToast": "Kanal aktiviert",
+        "disabledToast": "Kanal deaktiviert",
+        "enableFailed": "Kanal konnte nicht aktiviert werden: {{message}}",
+        "disableFailed": "Kanal konnte nicht deaktiviert werden: {{message}}",
+        "enableRejected": "Der Anbieter hat diese Zugangsdaten abgelehnt, daher wurde der Kanal nicht aktiviert.",
+        "enableRejectedDetail": "Antwort des Anbieters: {{detail}}",
+        "enableAnyway": "Trotzdem aktivieren",
+        "enableAnywayHint": "Trotzdem aktivieren überspringt die Prüfung der Zugangsdaten – der Kanal kann möglicherweise keine Verbindung herstellen.",
+        "notWritable": "Die Kanal-Konfiguration liegt in einer YAML-Datei ({{path}}), die die Web-Oberfläche nicht bearbeiten kann. Bearbeite die Datei direkt, um Zugangsdaten zu ändern.",
+        "notWritableChip": "Nur lesbar (YAML)",
+        "sdkMissing": "Laufzeit-SDK nicht installiert – {{hint}}",
+        "sdkMissingNoHint": "Laufzeit-SDK nicht installiert; der Kanal lässt sich konfigurieren, startet aber möglicherweise nicht.",
+        "noFields": "Dieser Kanal hat keine konfigurierbaren Felder.",
+        "loadFailed": "Kanal-Konfiguration konnte nicht geladen werden."
+      },
+      "fields": {
+        "dingtalk": {
+          "client_id": {
+            "label": "Client ID (AppKey)",
+            "help": "Der AppKey der App von der Seite „Zugangsdaten“ der DingTalk-Entwicklerkonsole."
+          },
+          "client_secret": {
+            "label": "Client Secret (AppSecret)",
+            "help": "Das AppSecret der App. Wird serverseitig gespeichert und nie an den Browser zurückgegeben."
+          },
+          "allow_from": {
+            "label": "Erlaubte Absender",
+            "help": "Optionale Positivliste von DingTalk-Absender-IDs, die mit dem Agenten sprechen dürfen („*“ erlaubt alle). Nicht gekoppelte Absender erhalten einen Kopplungscode per Direktnachricht."
+          },
+          "allow_remote_media_redirects": {
+            "label": "Medien-Weiterleitungen erlauben",
+            "help": "Beim Herunterladen von Nachrichtenmedien den Weiterleitungen des Anbieters folgen. Standardmäßig aus."
+          },
+          "remote_media_redirect_allowed_hosts": {
+            "label": "Erlaubte Redirect-Hosts",
+            "help": "Hosts, die bei aktivierten Medien-Weiterleitungen erlaubt sind. Eine leere Liste blockiert alle hostübergreifenden Weiterleitungen."
+          },
+          "group_user_isolation": {
+            "label": "Sitzungen pro Gruppenmitglied",
+            "help": "Jedem Gruppenmitglied eine eigene Agent-Sitzung geben statt einer gemeinsamen."
+          },
+          "force_ipv4": {
+            "label": "IPv4 erzwingen",
+            "help": "Bindet DingTalk-API-Aufrufe an IPv4. Nützlich, wenn die Ausgangs-IP-Whitelist eine stabile IPv4-Adresse enthält, sich das IPv6-Präfix aber ständig ändert."
+          }
+        }
+      },
+      "guides": {
+        "dingtalk": {
+          "title": "DingTalk-Einrichtungsanleitung",
+          "intro": "DingTalk-Bots nutzen den Stream-Modus, daher ist keine öffentliche Callback-URL nötig.",
+          "step1": "Erstelle eine App in der DingTalk-Entwicklerkonsole (open-dev.dingtalk.com).",
+          "step2": "Füge der App die Bot-Funktion hinzu und aktiviere den Stream-Modus.",
+          "step3": "Kopiere den AppKey der App in Client ID und das AppSecret in Client Secret.",
+          "step4": "Veröffentliche die App, damit sie in deiner Organisation verfügbar ist.",
+          "step5": "Kehre hierher zurück, klicke auf „Verbindung testen“ und aktiviere den Kanal.",
+          "docsLabel": "DingTalk-Entwicklerkonsole öffnen"
+        }
+      }
     },
     "generation": "Generierung",
     "dataSourceSettings": "Datenquellen-Einstellungen",

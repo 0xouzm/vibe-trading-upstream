@@ -421,7 +421,90 @@
       "stoppedToast": "Canais de IM parados",
       "refreshFailed": "Falha ao atualizar canais de mensagens instantâneas",
       "startFailed": "Falha ao iniciar canais de IM",
-      "stopFailed": "Falha ao parar canais de mensagens instantâneas"
+      "stopFailed": "Falha ao parar canais de mensagens instantâneas",
+      "config": {
+        "toggleConfig": "Configurar {{name}}",
+        "keepCurrent": "Manter o valor atual ({{masked}})",
+        "secretNotSet": "Não definido",
+        "clearSecret": "Limpar",
+        "required": "Obrigatório",
+        "listPlaceholder": "Digite um valor e pressione Enter para adicionar",
+        "removeValue": "Remover {{value}}",
+        "save": "Salvar configuração",
+        "hotApply": "Salvar é aplicado imediatamente — não é preciso reiniciar.",
+        "saved": "Configuração do canal salva",
+        "saveFailed": "Falha ao salvar a configuração do canal: {{message}}",
+        "test": "Testar conexão",
+        "testing": "Testando…",
+        "testOk": "Conexão verificada",
+        "testFailed": "Falha no teste de conexão: {{message}}",
+        "testCodeOk": "O provedor aceitou estas credenciais.",
+        "testCodeInvalidCredentials": "O provedor rejeitou estas credenciais.",
+        "testCodeNetwork": "Não foi possível alcançar o provedor.",
+        "testCodeUnsupported": "Este canal não oferece teste de conexão.",
+        "testedSavedConfig": "Foi testada a configuração salva.",
+        "testedDraftConfig": "Foram testados os valores atuais do formulário (ainda não salvos).",
+        "enable": "Ativar canal",
+        "enableHint": "Desativar mantém as credenciais salvas — você pode reativar quando quiser.",
+        "enabledToast": "Canal ativado",
+        "disabledToast": "Canal desativado",
+        "enableFailed": "Falha ao ativar o canal: {{message}}",
+        "disableFailed": "Falha ao desativar o canal: {{message}}",
+        "enableRejected": "O provedor rejeitou estas credenciais, então o canal não foi ativado.",
+        "enableRejectedDetail": "Resposta do provedor: {{detail}}",
+        "enableAnyway": "Ativar mesmo assim",
+        "enableAnywayHint": "Ativar mesmo assim ignora a verificação de credenciais — o canal pode não conseguir conectar.",
+        "notWritable": "A configuração do canal fica em um arquivo YAML ({{path}}), que a interface web não pode editar. Edite o arquivo diretamente para alterar as credenciais.",
+        "notWritableChip": "Somente leitura (YAML)",
+        "sdkMissing": "SDK de execução não instalado — {{hint}}",
+        "sdkMissingNoHint": "O SDK de execução não está instalado; o canal pode ser configurado, mas talvez não inicie.",
+        "noFields": "Este canal não tem campos configuráveis.",
+        "loadFailed": "Não foi possível carregar a configuração do canal."
+      },
+      "fields": {
+        "dingtalk": {
+          "client_id": {
+            "label": "Client ID (AppKey)",
+            "help": "O AppKey do app, na página de credenciais do console de desenvolvedor do DingTalk."
+          },
+          "client_secret": {
+            "label": "Client Secret (AppSecret)",
+            "help": "O AppSecret do app. Fica no servidor e nunca é devolvido ao navegador."
+          },
+          "allow_from": {
+            "label": "Remetentes permitidos",
+            "help": "Lista opcional de IDs de remetentes do DingTalk autorizados a falar com o agente (\"*\" libera todos). Remetentes não emparelhados recebem um código de emparelhamento por mensagem direta."
+          },
+          "allow_remote_media_redirects": {
+            "label": "Permitir redirecionamentos de mídia",
+            "help": "Seguir redirecionamentos do provedor ao baixar mídia das mensagens. Desativado por padrão."
+          },
+          "remote_media_redirect_allowed_hosts": {
+            "label": "Hosts de redirecionamento permitidos",
+            "help": "Hosts permitidos quando os redirecionamentos de mídia estão ativos. Uma lista vazia bloqueia todo redirecionamento entre hosts."
+          },
+          "group_user_isolation": {
+            "label": "Sessões por usuário em grupos",
+            "help": "Dar a cada membro do grupo sua própria sessão do agente em vez de uma compartilhada."
+          },
+          "force_ipv4": {
+            "label": "Forçar IPv4",
+            "help": "Vincula as chamadas da API do DingTalk ao IPv4. Útil quando a lista de IPs de saída tem um IPv4 estável, mas o prefixo IPv6 muda constantemente."
+          }
+        }
+      },
+      "guides": {
+        "dingtalk": {
+          "title": "Guia de configuração do DingTalk",
+          "intro": "Os bots do DingTalk usam o modo Stream, então não é necessária uma URL de callback pública.",
+          "step1": "Crie um app no console de desenvolvedor do DingTalk (open-dev.dingtalk.com).",
+          "step2": "Adicione a capacidade de bot ao app e ative o modo Stream.",
+          "step3": "Copie o AppKey do app para o Client ID e o AppSecret para o Client Secret.",
+          "step4": "Publique o app para que ele fique disponível na sua organização.",
+          "step5": "Volte aqui, clique em “Testar conexão” e ative o canal.",
+          "docsLabel": "Abrir o console de desenvolvedor do DingTalk"
+        }
+      }
     },
     "generation": "Geração",
     "dataSourceSettings": "Configurações de fonte de dados",

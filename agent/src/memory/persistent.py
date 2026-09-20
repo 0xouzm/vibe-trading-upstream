@@ -630,7 +630,12 @@ class PersistentMemory:
         if self._index_path.exists():
             lines = self._index_path.read_text(encoding="utf-8").split("\n")
             updated = False
-            target_prefix = f"- [{title}]("
+            # Match on the filename, not just the title: two different
+            # memory_types produce two different files for the same title
+            # (add() names the file "{memory_type}_{slug}.md"), and matching
+            # on title alone made the second add() silently clobber the
+            # first entry's index row even though both files exist on disk.
+            target_prefix = f"- [{title}]({filename})"
             for i, line in enumerate(lines):
                 if line.startswith(target_prefix):
                     lines[i] = new_line

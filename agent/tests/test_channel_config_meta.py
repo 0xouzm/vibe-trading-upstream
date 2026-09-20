@@ -16,15 +16,9 @@ from src.channels.config_meta import (
 )
 from src.channels.registry import discover_channel_names, load_channel_class
 
-# Helper modules that live beside the adapters but export no ``BaseChannel``:
-# ``targets`` is a scheduled-delivery registry, ``config_meta`` is this module.
-_NON_CHANNEL_MODULES = frozenset({"targets", "config_meta"})
-
-# Every discovered adapter that is a real channel. The sweep below locks this
-# surface at 16.
-ADAPTER_NAMES: list[str] = sorted(
-    name for name in discover_channel_names() if name not in _NON_CHANNEL_MODULES
-)
+# Discovery already excludes the helper modules (``registry._INTERNAL``), so
+# this is the real channel surface. The sweep below locks it at 16.
+ADAPTER_NAMES: list[str] = sorted(discover_channel_names())
 
 
 def _dummy_value(value: object) -> object:
@@ -166,9 +160,20 @@ def test_unknown_channel_masks_secret_keys_and_strips_them_from_values() -> None
     )
     assert values == {"name": "n"}
     assert secrets == {
-        "webhook_secret": {"set": True, "masked": "****2345"},
-        "bot_token": {"set": True, "masked": "****x"},
+        "webhook_secret": {"set": True, "masked": "****"},
+        "bot_token": {"set": True, "masked": "****"},
     }
+
+
+def test_short_secret_masking_boundary() -> None:
+    """Secrets of 8 characters or fewer disclose nothing; 9 disclose the last 4."""
+    for length in range(1, 9):
+        _, secrets = split_values_secrets(
+            "no_such_channel", {"token": "1234567890"[:length]}
+        )
+        assert secrets["token"] == {"set": True, "masked": "****"}, length
+    _, secrets = split_values_secrets("no_such_channel", {"token": "123456789"})
+    assert secrets["token"] == {"set": True, "masked": "****6789"}
 
 
 def test_empty_secret_is_unset_and_unmasked() -> None:
@@ -186,6 +191,27 @@ def test_non_secret_values_pass_through_verbatim() -> None:
     assert secrets == {}
 
 
+def test_proxy_url_userinfo_is_stripped_from_values() -> None:
+    """URL userinfo is stripped from non-secret values; other strings stay put."""
+    values, secrets = split_values_secrets(
+        "telegram",
+        {
+            "proxy": "http://user:pw@proxy.local:8080",
+            "webhook_url": "https://example.com/hook",
+            "note": "plain text",
+            "bad_proxy": "http://user:pw@host:notaport",
+            "token": "abc",
+        },
+    )
+    assert values["proxy"] == "http://proxy.local:8080"
+    assert "user" not in values["proxy"]
+    assert "pw" not in values["proxy"]
+    assert values["webhook_url"] == "https://example.com/hook"
+    assert values["note"] == "plain text"
+    assert values["bad_proxy"] == "http://user:pw@host:notaport"
+    assert secrets["token"] == {"set": True, "masked": "****"}
+
+
 def test_hint_marked_secret_is_masked_for_known_channel() -> None:
     """A hint-declared secret is masked and never reaches values."""
     values, secrets = split_values_secrets(
@@ -196,14 +222,49 @@ def test_hint_marked_secret_is_masked_for_known_channel() -> None:
 
 
 def test_secret_key_regex_is_case_insensitive() -> None:
-    assert SECRET_KEY_RE.search("API_KEY")
-    assert SECRET_KEY_RE.search("WebhookSecret")
-    assert SECRET_KEY_RE.search("bot_token")
-    assert SECRET_KEY_RE.search("db_password")
-    assert not SECRET_KEY_RE.search("allow_from")
+    """Credential-shaped keys match case-insensitively; identifiers do not."""
+    for key in (
+        "API_KEY",
+        "WebhookSecret",
+        "bot_token",
+        "db_password",
+        "encrypt_key",
+        "ENCRYPT_KEY",
+        "signing_key",
+        "private_key",
+        "credential",
+        "proxy_username",
+        "apikey",
+    ):
+        assert SECRET_KEY_RE.search(key), key
+    for key in ("allow_from", "client_id", "imap_username", "domain"):
+        assert not SECRET_KEY_RE.search(key), key
 
 
 # --- (e) security sweep over every discovered adapter ---------------------- #
+
+_EXPECTED_SECRET_KEYS: dict[str, set[str]] = {
+    "dingtalk": {"client_secret"},
+    "discord": {"token", "proxy_password", "proxy_username"},
+    "email": {"imap_password", "smtp_password"},
+    "feishu": {"app_secret", "verification_token", "encrypt_key"},
+    "matrix": {"password", "access_token"},
+    "mochat": {"claw_token"},
+    "msteams": {"app_password"},
+    "napcat": {"access_token"},
+    "qq": {"secret"},
+    "signal": set(),
+    "slack": {"bot_token", "app_token", "user_token_read_only"},
+    "telegram": {"token", "webhook_secret_token"},
+    "wecom": {"secret"},
+    "weixin": {"token"},
+    "whatsapp": set(),
+    "websocket": {"token", "token_issue_secret"},
+}
+
+_IDENTIFIER_KEYS = frozenset(
+    {"client_id", "app_id", "bot_id", "phone_number", "imap_username", "smtp_username"}
+)
 
 
 def test_discovered_adapter_surface_is_locked() -> None:
@@ -225,6 +286,30 @@ def test_split_never_leaks_secret_keys_in_values(name: str) -> None:
     assert [key for key in values if SECRET_KEY_RE.search(key)] == []
     assert set(values) | set(secrets) == set(section)
     assert not (set(values) & set(secrets))
+
+
+@pytest.mark.parametrize("name", ADAPTER_NAMES)
+def test_every_adapter_credential_key_lands_in_secrets(name: str) -> None:
+    """Every credential-shaped field lands in ``secrets``, never in ``values``."""
+    section = _section_for(name)
+    if section is None:
+        pytest.skip(f"{name} adapter is not loadable in this environment")
+    values, secrets = split_values_secrets(name, section)
+    expected = _EXPECTED_SECRET_KEYS[name]
+    assert expected <= set(secrets)
+    assert set(expected) & set(values) == set()
+
+
+@pytest.mark.parametrize("name", ADAPTER_NAMES)
+def test_identifier_fields_stay_visible(name: str) -> None:
+    """Identifier-shaped fields stay in ``values``, not ``secrets``."""
+    section = _section_for(name)
+    if section is None:
+        pytest.skip(f"{name} adapter is not loadable in this environment")
+    values, secrets = split_values_secrets(name, section)
+    for key in _IDENTIFIER_KEYS & set(section):
+        assert key in values, f"{name}.{key} must stay visible"
+        assert key not in secrets, f"{name}.{key} must not be masked"
 
 
 # --- (f) unknown channel ---------------------------------------------------- #

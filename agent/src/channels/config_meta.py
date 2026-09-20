@@ -5,6 +5,12 @@ without per-channel frontend code. Hand-written :data:`FIELD_HINTS` supply
 i18n-friendly metadata (labels are owned by the frontend via ``help_key``);
 channels without hints fall back to their adapter's ``default_config()`` with
 type inference and a fail-safe secret heuristic.
+
+Secret detection is the extended :data:`SECRET_KEY_RE` family plus per-channel
+hint flags, so credential-shaped keys such as Feishu's ``encrypt_key`` and
+Discord's ``proxy_username`` never cross the wire in ``values``. URL userinfo
+(``user:password@``) is stripped from non-secret values before they are
+returned.
 """
 
 from __future__ import annotations
@@ -13,12 +19,16 @@ import logging
 import re
 from typing import Any
 from typing import TypedDict
+from urllib.parse import urlsplit, urlunsplit
 
 from src.channels.registry import load_channel_class
 
 logger = logging.getLogger(__name__)
 
-SECRET_KEY_RE = re.compile(r"secret|token|password|api_key", re.IGNORECASE)
+SECRET_KEY_RE = re.compile(
+    r"secret|token|password|api_?key|encrypt_?key|signing_?key|credential|private|proxy_?username",
+    re.IGNORECASE,
+)
 
 _HELP_KEY_PREFIX = "settings.channels.fields"
 _EXCLUDED_KEYS = frozenset({"enabled"})
@@ -132,10 +142,27 @@ def channel_field_hints(name: str) -> list[FieldHint]:
 def _mask(value: Any) -> dict[str, Any]:
     """Return the ``{set, masked}`` descriptor for one secret value."""
     is_set = bool(value)
-    return {
-        "set": is_set,
-        "masked": "****" + str(value)[-4:] if is_set else "",
-    }
+    if not is_set:
+        return {"set": False, "masked": ""}
+    text = str(value)
+    return {"set": True, "masked": "****" if len(text) <= 8 else "****" + text[-4:]}
+
+
+def _strip_url_userinfo(value: Any) -> Any:
+    """Return a URL string without embedded credentials; non-URLs pass through."""
+    if not isinstance(value, str) or "://" not in value:
+        return value
+    try:
+        parts = urlsplit(value)
+        if parts.username is None and parts.password is None:
+            return value
+        host = parts.hostname or ""
+        port = parts.port  # raises ValueError on a malformed port
+        if port is not None:
+            host = f"{host}:{port}"
+        return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
+    except ValueError:
+        return value
 
 
 def split_values_secrets(
@@ -152,8 +179,10 @@ def split_values_secrets(
         section: Raw config section as loaded from disk.
 
     Returns:
-        ``(values, secrets)`` where ``values`` holds non-secret keys verbatim
-        and each secret is ``{"set": bool, "masked": "****" + last4}``.
+        ``(values, secrets)`` where ``values`` holds non-secret keys with any
+        URL userinfo stripped, and each secret is
+        ``{"set": bool, "masked": "****"}`` (a suffix is disclosed only for
+        values longer than 8 characters).
     """
     secret_hint_keys = {
         hint["key"] for hint in channel_field_hints(name) if hint["secret"]
@@ -164,5 +193,5 @@ def split_values_secrets(
         if SECRET_KEY_RE.search(key) or key in secret_hint_keys:
             secrets[key] = _mask(value)
         else:
-            values[key] = value
+            values[key] = _strip_url_userinfo(value)
     return values, secrets

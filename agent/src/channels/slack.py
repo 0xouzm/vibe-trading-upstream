@@ -18,7 +18,12 @@ from src.channels.bus.queue import MessageBus
 from src.channels.base import BaseChannel
 from src.channels.utils import get_media_dir
 from pydantic import BaseModel
-from src.channels.pairing import is_approved
+from src.channels.pairing import (
+    PAIRING_CODE_META_KEY,
+    format_pairing_reply,
+    generate_code,
+    is_approved,
+)
 from src.channels.utils import safe_filename, split_message
 
 
@@ -368,11 +373,18 @@ class SlackChannel(BaseChannel):
 
         if not self._is_allowed(sender_id, chat_id, channel_type):
             if channel_type == "im" and self.config.dm.enabled:
-                await self._handle_message(
-                    sender_id=sender_id,
-                    chat_id=chat_id,
-                    content="",
-                    is_dm=True,
+                # is_allowed() is overridden below to always return True
+                # (Slack does its own channel-aware check via _is_allowed
+                # above), so BaseChannel._handle_message's own pairing-code
+                # branch never fires. Issue the code directly here instead.
+                code = generate_code(self.name, str(sender_id))
+                await self.send(
+                    OutboundMessage(
+                        channel=self.name,
+                        chat_id=str(chat_id),
+                        content=format_pairing_reply(code),
+                        metadata={PAIRING_CODE_META_KEY: code},
+                    )
                 )
             return
 

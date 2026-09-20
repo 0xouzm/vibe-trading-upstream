@@ -1026,6 +1026,10 @@ Built-in adapters는 `websocket`, `telegram`, `slack`, `discord`, `matrix`, `wha
 
 명령어는 대소문자를 구분하지 않으며, 전체 메시지로 전송해야 합니다 (예: `hello /new`은 초기화가 아닌 일반 메시지로 처리됩니다).
 
+**Web UI에서 설정**: Settings 페이지의 **IM Channels** 패널에서는 파일을 직접 편집하지 않고도 채널을 설정할 수 있습니다. 채널을 펼치면 설정 패널이 열립니다. 필드는 백엔드 메타데이터에서 렌더링되고, secret 값은 브라우저에 절대 반환되지 않으며 마스킹된 형태(`****` + 마지막 4자리)로만 표시됩니다. DingTalk이 첫 번째로 완전한 가이드를 제공하는 채널입니다: [open-dev.dingtalk.com](https://open-dev.dingtalk.com/)에서 앱 생성 → 봇 기능 추가 후 Stream Mode 활성화(공개 콜백 URL 불필요) → AppKey를 Client ID에, AppSecret을 Client Secret에 복사 → 앱 게시. **Test connection**은 저장 전에 폼의 현재 입력값만으로 연결을 시도하고 정확한 결과 코드(`ok`, `invalid_credentials`, `network`, `unsupported`)를 반환합니다. **Enable**은 즉시 적용됩니다: 실행 중인 채널 런타임은 프로세스 재시작 없이 해당 어댑터만 핫 스왑하며, 활성화 시 자격 증명을 자동 검증합니다(검증 실패 후 명시적으로 **Enable anyway**를 선택한 경우에만 스킵). 비활성화해도 저장된 자격 증명은 유지되므로 재활성화 시 재입력이 필요 없습니다.
+
+저장은 `~/.vibe-trading/agent.json`의 `channels.<name>` 섹션을 원자적으로 업데이트합니다. YAML 설정 파일은 Web UI에서 읽기 전용입니다(브라우저 편집에는 JSON이 필요하며, 패널은 오류 대신 그 사실을 표시합니다). 전용 가이드가 없는 채널은 기본 설정에서 파생된 일반 폼을 렌더링합니다.
+
 </details>
 
 ---

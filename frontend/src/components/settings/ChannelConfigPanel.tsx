@@ -19,6 +19,7 @@ import {
   type ChannelConfigEntry,
   type ChannelFieldHint,
   type ChannelPutBody,
+  type ChannelTestBody,
   type ChannelTestResult,
 } from "@/lib/api";
 
@@ -26,10 +27,6 @@ const fieldClass =
   "w-full rounded-md border bg-background px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60";
 const labelClass = "text-sm font-medium";
 const hintClass = "text-xs text-muted-foreground";
-// `errorFromResponse` collapses a structured `detail` object to its string
-// form, so the HTTP status is the reliable signal and probing for a `code` is
-// best-effort only.
-const OPAQUE_DETAIL = "[object Object]";
 
 type FormValue = string | boolean | string[];
 
@@ -42,18 +39,8 @@ interface ApiFailure {
 /** Read a failed request into status/code/message without trusting its shape. */
 function describeApiFailure(error: unknown): ApiFailure {
   const status = error instanceof ApiError ? error.status : null;
-  const rawMessage = error instanceof Error ? error.message : "";
-  const message = rawMessage === OPAQUE_DETAIL ? "" : rawMessage;
-  let code: string | null = null;
-  if (error && typeof error === "object") {
-    const carrier = error as { code?: unknown; detail?: unknown };
-    if (typeof carrier.code === "string") {
-      code = carrier.code;
-    } else if (carrier.detail && typeof carrier.detail === "object" && "code" in carrier.detail) {
-      const detailCode = (carrier.detail as { code?: unknown }).code;
-      if (typeof detailCode === "string") code = detailCode;
-    }
-  }
+  const message = error instanceof Error ? error.message : "";
+  const code = error instanceof ApiError && error.code ? error.code : null;
   return { status, code, message };
 }
 
@@ -274,10 +261,11 @@ export function ChannelConfigPanel({
     try {
       // Pristine forms exercise the saved config (empty body); a dirty form
       // tests exactly what is on screen, including a typed-but-unsaved secret.
-      const result = await api.testChannel(
-        name,
-        isDirty ? { config: buildPatch() } : undefined,
-      );
+      const body: ChannelTestBody = { config: buildPatch() };
+      for (const field of entry.fields) {
+        if (field.secret && clears[field.key]) body[`clear_${field.key}`] = true;
+      }
+      const result = await api.testChannel(name, isDirty ? body : undefined);
       setTestResult(result);
       if (result.ok) toast.success(t("settings.channels.config.testOk"));
       else toast.error(testCodeText[result.code]);
@@ -547,7 +535,7 @@ export function ChannelConfigPanel({
           </button>
           <button
             type="submit"
-            disabled={formDisabled}
+            disabled={formDisabled || !isDirty}
             className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

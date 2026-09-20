@@ -80,7 +80,7 @@ function dingtalkEntry(overrides: Record<string, unknown> = {}) {
 
 function channelsConfig(overrides: Record<string, unknown> = {}) {
   return {
-    config_path: "/home/user/.vibe-trading/agent.json",
+    config_path: "~/.vibe-trading/agent.json",
     writable: true,
     runtime_running: false,
     channels: { dingtalk: dingtalkEntry() },
@@ -215,7 +215,9 @@ describe("ChannelSettings config panel", () => {
   });
 
   it("offers Enable anyway when the enable transition is rejected with 422", async () => {
-    apiMock.putChannelConfig.mockRejectedValueOnce(new ApiError("invalid_credentials", 422));
+    apiMock.putChannelConfig.mockRejectedValueOnce(
+      new ApiError("HTTP 401: invalid appKey/appSecret", 422, "invalid_credentials"),
+    );
     await renderExpanded();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Enable channel" }));
@@ -224,7 +226,7 @@ describe("ChannelSettings config panel", () => {
     expect(screen.getByText(
       "The provider rejected these credentials, so the channel was not enabled.",
     )).toBeInTheDocument();
-    expect(screen.getByText("Provider response: invalid_credentials")).toBeInTheDocument();
+    expect(screen.getByText("Provider response: HTTP 401: invalid appKey/appSecret")).toBeInTheDocument();
 
     fireEvent.click(anyway);
 
@@ -283,6 +285,34 @@ describe("ChannelSettings config panel", () => {
     const [, secondBody] = apiMock.putChannelConfig.mock.calls[1] as [string, Record<string, unknown>];
     expect(secondBody.clear_client_secret).toBe(true);
     expect((secondBody.config as Record<string, unknown>).client_secret).toBeUndefined();
+  });
+
+  it("disables Save until the form is dirty", async () => {
+    await renderExpanded();
+
+    const save = screen.getByRole("button", { name: "Save configuration" });
+    expect(save).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText("Keep current (****abcd)"), {
+      target: { value: "typed-secret" },
+    });
+    expect(save).toBeEnabled();
+  });
+
+  it("tests with a pending secret clear excluded", async () => {
+    await renderExpanded();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Clear" }));
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+
+    await waitFor(() => expect(apiMock.testChannel).toHaveBeenCalledTimes(1));
+    const [name, body] = apiMock.testChannel.mock.calls[0] as [string, { config?: Record<string, unknown> }];
+    expect(name).toBe("dingtalk");
+    expect(body).toMatchObject({
+      config: expect.objectContaining({ client_id: "ding_appkey" }),
+      clear_client_secret: true,
+    });
+    expect(body.config?.client_secret).toBeUndefined();
   });
 
   it("disables every control and explains a non-writable YAML config", async () => {

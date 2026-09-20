@@ -10,11 +10,13 @@ const BASE = "";
 
 export class ApiError extends Error {
   status: number;
+  code?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -294,16 +296,25 @@ export interface PortfolioSettingsResponse {
 
 async function errorFromResponse(res: Response): Promise<ApiError> {
   let detail = `HTTP ${res.status}`;
+  let code: string | undefined;
   try {
     const body = await res.json();
     // Options endpoints report errors under an `error` key
     // ({status:"error", error} / {ok:false, error}) rather than detail/message.
-    detail = body.detail || body.message || body.error || detail;
+    const raw = body.detail ?? body.message ?? body.error;
+    if (typeof raw === "string" && raw) {
+      detail = raw;
+    } else if (raw && typeof raw === "object") {
+      const structured = raw as { code?: unknown; message?: unknown };
+      if (typeof structured.code === "string" && structured.code) code = structured.code;
+      if (typeof structured.message === "string" && structured.message) detail = structured.message;
+      else if (code) detail = code;
+    }
   } catch { /* ignore */ }
   if (res.status === 401 || res.status === 403) {
     detail = getAuthRequiredMessage();
   }
-  return new ApiError(detail, res.status);
+  return new ApiError(detail, res.status, code);
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -886,6 +897,7 @@ export interface ChannelConfigEntry {
 }
 
 export interface ChannelsConfigResponse {
+  /** Display-only path (home-relative `~/...` or a bare basename), never absolute. */
   config_path: string;
   writable: boolean;
   runtime_running: boolean;
@@ -907,9 +919,11 @@ export interface ChannelPutResult {
   applied: "hot_swapped" | "reset" | "deferred";
 }
 
-export interface ChannelTestBody {
+export type ChannelTestBody = {
   config?: Record<string, unknown>;
-}
+} & {
+  [clearFlag: `clear_${string}`]: boolean | undefined;
+};
 
 export interface ChannelTestResult {
   ok: boolean;

@@ -125,6 +125,23 @@ def _stored_section(name: str) -> dict[str, Any]:
     return dict(section) if isinstance(section, dict) else {}
 
 
+def _effective_section(name: str, section: dict[str, Any]) -> dict[str, Any]:
+    """Return the stored section backfilled with adapter defaults.
+
+    A never-configured channel has no on-disk section; without defaults the
+    generic form seeds empty strings and typed fields (``int``, ``Literal``)
+    reject the untouched form on Test/Save. Secret masking is unaffected:
+    defaults are empty, so ``secrets`` still reflects only the stored state.
+    """
+    try:
+        defaults = load_channel_class(name).default_config()
+    except Exception:  # noqa: BLE001 - an unloadable adapter keeps the raw section
+        return section
+    if not isinstance(defaults, dict):
+        return section
+    return {**defaults, **section}
+
+
 def _patch_of(name: str, body: dict[str, Any]) -> dict[str, Any]:
     """Filter a body patch: an empty string on a secret key keeps the stored value."""
     return {
@@ -162,7 +179,7 @@ def _live_status(name: str) -> dict[str, Any]:
 
 def _channel_entry(name: str, section: dict[str, Any], status_map: dict[str, Any]) -> dict[str, Any]:
     """Build one channel's GET-shape entry; secrets are masked, never returned."""
-    values, secrets = split_values_secrets(name, section)
+    values, secrets = split_values_secrets(name, _effective_section(name, section))
     available = bool(status_map.get("available", False))
     return {
         "display_name": str(status_map.get("display_name") or name),

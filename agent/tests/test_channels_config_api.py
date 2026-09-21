@@ -233,6 +233,71 @@ def test_get_reports_runtime_running_from_live_status(tmp_path: Path, monkeypatc
     assert payload["runtime_running"] is True
 
 
+def test_get_backfills_adapter_defaults_for_unconfigured_channel(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An empty on-disk section still yields the adapter's default values.
+
+    Regression (found by live QQ E2E): a never-configured channel returned
+    empty ``values``, so the generic form seeded "" into typed fields
+    (``msg_format`` Literal, ``download_chunk_size`` int) and any Test/Save
+    died on validation_error before the fix.
+    """
+    client, _ = _client(tmp_path, monkeypatch, channels={})
+
+    qq = client.get("/channels/config").json()["channels"]["qq"]
+
+    assert qq["values"]["msg_format"] == "plain"
+    assert qq["values"]["download_chunk_size"] == 262144
+    assert qq["values"]["download_max_bytes"] == 209715200
+    assert qq["values"]["app_id"] == ""
+    assert qq["values"]["enabled"] is False
+    # Secret masking still reflects stored state only: nothing is configured.
+    assert qq["secrets"]["secret"] == {"set": False, "masked": ""}
+
+
+def test_pristine_form_roundtrip_validates_for_typed_fields(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """GET values echoed back as a form patch must pass Test validation.
+
+    Mirrors the frontend's ``buildPatch`` for a pristine (never-configured)
+    QQ form: every non-secret field is sent back as the string/list/bool the
+    generic widgets hold. Before the defaults backfill this produced
+    ``validation_error: msg_format, download_chunk_size, download_max_bytes``.
+    """
+    client, _ = _client(tmp_path, monkeypatch, channels={})
+    entry = client.get("/channels/config").json()["channels"]["qq"]
+
+    patch: dict[str, Any] = {}
+    for field in entry["fields"]:
+        if field["secret"]:
+            continue
+        value = entry["values"].get(field["key"])
+        if field["type"] == "list":
+            patch[field["key"]] = value if isinstance(value, list) else []
+        elif field["type"] == "bool":
+            patch[field["key"]] = bool(value)
+        else:
+            patch[field["key"]] = "" if value is None else str(value)
+    patch["app_id"] = "1905653354"
+    patch["secret"] = "form-typed-secret-xyz987654321"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"access_token": "probe-token-do-not-leak"})
+
+    requests = _inject_mock_transport(monkeypatch, handler)
+
+    response = client.post("/channels/qq/test", json={"config": patch})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True, body
+    assert body["code"] == "ok"
+    assert len(requests) == 1
+    assert "form-typed-secret-xyz987654321" not in response.text
+
+
 def test_display_config_path_relativizes_home() -> None:
     home = Path.home()
 

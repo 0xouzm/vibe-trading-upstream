@@ -1161,9 +1161,10 @@ class WeixinChannel(BaseChannel):
                     # Network/transport errors: do NOT fall back to text —
                     # the text send would also likely fail, and the outer
                     # except will re-raise so ChannelManager retries properly.
-                    self.logger.opt(exception=True).warning(
-                        "Network error sending media {}",
+                    self.logger.warning(
+                        "Network error sending media %s",
                         media_path,
+                        exc_info=True,
                     )
                     raise
                 except httpx.HTTPStatusError as http_err:

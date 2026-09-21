@@ -686,7 +686,7 @@ class SignalChannel(BaseChannel):
             text = f"Error in {action}: {e}"
             if snippet:
                 text += f" | payload={snippet}"
-            self.logger.opt(exception=True).error(text)
+            self.logger.error("%s", text, exc_info=True)
 
     async def _handle_receive_notification(self, params: dict[str, Any]) -> None:
         """Handle incoming message notification from signal-cli."""

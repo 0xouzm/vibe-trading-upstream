@@ -673,14 +673,12 @@ def test_adjusted_volume_wins_over_a_plain_volume_key():
     assert frame is not None
     assert float(frame["volume"].iloc[0]) == pytest.approx(200.0)
 
-def test_plain_quartet_still_reports_an_adjusted_only_volume():
-    """Volume is not a price level, so neither family may strand the other's name.
+def test_an_unadjusted_bar_does_not_take_the_adjusted_volume():
+    """Split-adjusted volume is not on the scale of unadjusted prices.
 
-    When a payload publishes both price families and names its volume only
-    ``adj_volume``, the unadjusted quartet wins (the documented preference)
-    and the volume lookup then followed the chosen table alone — so the bar
-    resolved with a real price and a NaN volume, which ``_result_to_frame`` keeps
-    because it only drops NaN price rows.
+    With both price families present and only ``adj_volume`` named, the
+    unadjusted quartet wins (the documented preference) and its volume stays
+    NaN instead of borrowing the adjusted family's (#1527 follow-up).
     """
     result = {
         "data": [
@@ -703,4 +701,31 @@ def test_plain_quartet_still_reports_an_adjusted_only_volume():
 
     assert frame is not None
     assert float(frame["close"].iloc[0]) == pytest.approx(1.1)
-    assert float(frame["volume"].iloc[0]) == pytest.approx(200.0)
+    assert frame["volume"].isna().all()
+
+
+def test_a_response_mixing_families_yields_no_bars():
+    """Per-record choice built one series from an unadjusted row and an
+    adjusted-only row: closes 11.0 then 1.1, two price levels in one series."""
+    result = {
+        "data": [
+            {"date": "2024-01-02", "open": 10.0, "high": 11.5, "low": 9.5, "close": 11.0, "volume": 5},
+            {"date": "2024-01-03", "adj_open": 1.0, "adj_high": 1.2, "adj_low": 0.9, "adj_close": 1.1},
+        ]
+    }
+
+    assert qv._result_to_frame(result, "2024-01-01", "2024-01-05") is None
+
+
+def test_a_response_whose_rows_carry_both_families_uses_the_unadjusted_one():
+    result = {
+        "data": [
+            {"date": d, "open": 10.0, "high": 11.0, "low": 9.0, "close": c,
+             "adj_open": 1.0, "adj_high": 1.1, "adj_low": 0.9, "adj_close": c / 10}
+            for d, c in (("2024-01-02", 10.5), ("2024-01-03", 10.7))
+        ]
+    }
+
+    frame = qv._result_to_frame(result, "2024-01-01", "2024-01-05")
+
+    assert list(frame["close"]) == pytest.approx([10.5, 10.7])

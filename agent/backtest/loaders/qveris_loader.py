@@ -590,8 +590,37 @@ def _interval_value(param: dict[str, Any], interval: str) -> str:
     return "daily" if interval.upper() == "1D" else interval
 
 
+def _response_field_set(records: list[dict[str, Any]]) -> dict[str, tuple[str, ...]] | None:
+    """Return the one alias table every usable record in a response supports.
+
+    Choosing per record let one payload carry an unadjusted row and an
+    adjusted-only row, and the series then mixed the two price levels (#1527).
+    Records with no complete quartet are skipped as before; if the rest do not
+    share a family the response yields no bars rather than a mixed series.
+    """
+    complete = [
+        [table for table in (_FIELD_ALIASES, _ADJUSTED_FIELD_ALIASES) if _resolve_field_set_in(keys, table)]
+        for keys in ({str(key).lower() for key in record} for record in records)
+    ]
+    complete = [tables for tables in complete if tables]
+    for table in (_FIELD_ALIASES, _ADJUSTED_FIELD_ALIASES):
+        if complete and all(table in tables for tables in complete):
+            return table
+    if complete:
+        logger.warning("QVeris response mixes unadjusted and adjusted records; no bars built from it")
+    return None
+
+
+def _resolve_field_set_in(keys: set[str], table: dict[str, tuple[str, ...]]) -> bool:
+    return all(any(alias in keys for alias in table[field]) for field in _PRICE_QUARTET)
+
+
 def _result_to_frame(result: Any, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
-    rows = [_normalize_record(record) for record in _iter_ohlcv_records(result)]
+    records = list(_iter_ohlcv_records(result))
+    table = _response_field_set(records)
+    if table is None:
+        return None
+    rows = [_normalize_record(record, table) for record in records]
     cleaned = [row for row in rows if row is not None]
     if not cleaned:
         return None
@@ -693,7 +722,7 @@ def _resolve_field_set(keys: Iterable[str]) -> dict[str, tuple[str, ...]] | None
     adjusted fields.
     """
     for table in (_FIELD_ALIASES, _ADJUSTED_FIELD_ALIASES):
-        if all(any(alias in keys for alias in table[field]) for field in _PRICE_QUARTET):
+        if _resolve_field_set_in(set(keys), table):
             return table
     return None
 
@@ -702,23 +731,19 @@ def _record_has_ohlc(record: dict[str, Any]) -> bool:
     return _resolve_field_set({str(key).lower() for key in record}) is not None
 
 
-def _normalize_record(record: dict[str, Any]) -> dict[str, Any] | None:
+def _normalize_record(record: dict[str, Any], table: dict[str, tuple[str, ...]]) -> dict[str, Any] | None:
+    """Build one bar from ``record`` using the response's alias ``table``.
+
+    An unadjusted bar never takes ``adj_volume``: split-adjusted volume is not
+    on the scale of unadjusted prices, so a missing unadjusted volume stays NaN.
+    """
     lowered = {str(key).lower(): value for key, value in record.items()}
     date = _first_value(lowered, _DATE_KEYS)
     if date is None:
         return None
-    table = _resolve_field_set(lowered)
-    if table is None:
-        return None
     row = {"trade_date": date}
     for field in _OHLCV_COLUMNS:
         row[field] = _first_value(lowered, table[field])
-    if row["volume"] is None:
-        # Volume carries no adjustment claim, so it is the one column resolved
-        # across both families: the chosen table first (so which name wins is
-        # unchanged), the other only to fill the gap the choice would leave.
-        fallback = _ADJUSTED_FIELD_ALIASES if table is _FIELD_ALIASES else _FIELD_ALIASES
-        row["volume"] = _first_value(lowered, fallback["volume"])
     if any(row[field] is None for field in _PRICE_QUARTET):
         return None
     return row

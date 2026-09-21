@@ -135,6 +135,17 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A backtest aborted when a funding debit left cash below zero** (#1542).
+  CompositeEngine and CryptoEngine subtract crypto funding from capital with
+  no floor, and the next open then fitted at no scale, not even an empty plan:
+  the open-basket search kept the full-scale plan and the run died with
+  "planned order … exceeds available capital", and a rebalance raised
+  "insufficient capital for position rebalance". Such an open is now skipped
+  and reported once as `insufficient_capital`, the bar's reductions still
+  run, and a close whose loss exceeds its margin still aborts the bar (#1274).
+- Block trades, margin trading and financial statements no longer read
+  Eastmoney rejecting a stale query (code 9501) as an empty result; all six
+  datacenter callers share `eastmoney_client.datacenter_rejection`.
 - **24 alphas emitted a value computed from a missing bar** (#1463, #1523,
   #1534, #1452). A comparison over an operand that is NaN because its window
   holds the gap is False, and the #1463 sweep, which nudged the bar by a tick,

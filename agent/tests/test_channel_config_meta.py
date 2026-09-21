@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from src.channels import config_meta as _config_meta
 from src.channels.config_meta import (
     SECRET_KEY_RE,
     channel_field_hints,
@@ -188,6 +189,9 @@ def test_fallback_derives_types_and_secret_flags(name: str) -> None:
     for key, value in config.items():
         if key == "enabled":
             continue
+        if isinstance(value, dict):
+            assert key not in by_key
+            continue
         hint = by_key[key]
         assert hint["required"] is False
         assert hint["help_key"] is None
@@ -202,6 +206,59 @@ def test_fallback_derives_types_and_secret_flags(name: str) -> None:
                 assert hint["type"] == "list"
             else:
                 assert hint["type"] == "text"
+
+
+def test_dict_valued_defaults_are_excluded_from_derived_hints(monkeypatch) -> None:
+    """Dict-valued fields stay out of derived hints (hermetic stub pin).
+
+    The generic form edits text/password/bool/list widgets only; a dict
+    field derived as ``text`` rendered as "[object Object]" once the GET
+    defaults backfill reached pristine forms. Excluded from hints, still
+    present in ``values``, secret masking untouched.
+    """
+
+    class _Stub:
+        @staticmethod
+        def default_config() -> dict:
+            return {
+                "enabled": False,
+                "bot_token": "",
+                "dm": {},
+                "policies": {"mention": {}},
+                "name": "",
+            }
+
+    monkeypatch.setattr(_config_meta, "load_channel_class", lambda name: _Stub)
+
+    hints = channel_field_hints("stub_dict_channel")
+    assert {hint["key"] for hint in hints} == {"bot_token", "name"}
+    by_key = {hint["key"]: hint for hint in hints}
+    assert by_key["bot_token"]["type"] == "password"
+    assert by_key["bot_token"]["secret"] is True
+
+    values, secrets = split_values_secrets("stub_dict_channel", _Stub.default_config())
+    assert {"dm", "policies"} <= set(values)
+    assert "bot_token" in secrets
+
+
+def test_dict_valued_defaults_are_excluded_for_real_adapters() -> None:
+    """Same rule against a real adapter shape (signal's dm/group policy maps).
+
+    whatsapp ``lid_mappings``, napcat ``group_policy_overrides`` and mochat
+    ``mention``/``groups`` are the same class; signal is the loadable
+    representative here.
+    """
+    config = _section_for("signal")
+    if config is None:
+        pytest.skip("signal adapter unloadable in this environment")
+    dict_keys = {key for key, value in config.items() if isinstance(value, dict)}
+    assert dict_keys, "signal should expose dict-valued defaults"
+
+    hint_keys = {hint["key"] for hint in channel_field_hints("signal")}
+    assert not (dict_keys & hint_keys)
+
+    values, _ = split_values_secrets("signal", config)
+    assert dict_keys <= set(values)
 
 
 def test_unloadable_adapter_is_handled_gracefully() -> None:

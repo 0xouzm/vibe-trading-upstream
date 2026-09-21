@@ -756,6 +756,32 @@ def test_post_test_non_object_json_200_returns_envelope_not_500(
     assert STORED_SECRET not in response.text
 
 
+def test_post_test_rejects_unknown_config_keys(tmp_path: Path, monkeypatch) -> None:
+    """POST /test shares PUT's unknown-key rejection instead of silently
+    dropping the keys through pydantic ``extra="ignore"`` into the probe."""
+    client, path = _client(
+        tmp_path, monkeypatch, channels={"dingtalk": _dingtalk_section()}
+    )
+    before = path.read_bytes()
+
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("an unknown key must be rejected before any probe")
+
+    requests = _inject_mock_transport(monkeypatch, handler)
+
+    response = client.post(
+        "/channels/dingtalk/test",
+        json={"config": {"definitely_unknown_key": 1, "__proto__": 1}},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "validation_error"
+    assert {"definitely_unknown_key", "__proto__"} <= set(detail["fields"])
+    assert requests == []
+    assert path.read_bytes() == before
+
+
 def test_post_test_honors_pending_secret_clear(tmp_path: Path, monkeypatch) -> None:
     client, path = _client(
         tmp_path, monkeypatch, channels={"dingtalk": _dingtalk_section()}

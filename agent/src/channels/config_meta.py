@@ -131,6 +131,14 @@ def _derive_hints(name: str) -> list[FieldHint]:
     for key, value in config.items():
         if key in _EXCLUDED_KEYS:
             continue
+        if isinstance(value, dict):
+            # The generic form edits text/password/bool/list widgets only;
+            # a dict-valued field cannot be represented and would render as
+            # "[object Object]". Such fields stay file-configured (their
+            # values still travel in GET ``values``, the form just omits
+            # them). Secret masking is unaffected: derived hints only mark
+            # what SECRET_KEY_RE already catches unconditionally.
+            continue
         secret = bool(SECRET_KEY_RE.search(key))
         hints.append(
             {

@@ -338,6 +338,15 @@ def test_accrued_interest_rejects_settlement_outside_the_period():
         accrued_interest(100, 0.05, 2, last, dt.date(2024, 8, 1), nxt)
 
 
+@pytest.mark.parametrize("settlement", [dt.date(2024, 1, 15), dt.date(2024, 4, 1), dt.date(2024, 7, 15)])
+def test_accrued_interest_rejects_an_unknown_day_count_at_every_settlement(settlement):
+    # The coupon-date shortcuts return before year_fraction; they must not
+    # accept a convention year_fraction would reject mid-period (#1509).
+    last, nxt = dt.date(2024, 1, 15), dt.date(2024, 7, 15)
+    with pytest.raises(ValueError, match="unknown day_count"):
+        accrued_interest(100, 0.05, 2, last, settlement, nxt, day_count="bogus")
+
+
 def test_accrued_interest_rejects_unordered_coupon_dates():
     with pytest.raises(ValueError, match="last_coupon must precede next_coupon"):
         accrued_interest(

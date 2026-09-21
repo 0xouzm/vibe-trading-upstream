@@ -159,7 +159,8 @@ def accrued_interest(
 
     Raises:
         ValueError: If ``freq`` is not positive, if the coupon dates are not
-            ordered, or if ``settlement`` falls outside the coupon period.
+            ordered, if ``settlement`` falls outside the coupon period, or if
+            ``day_count`` is not a recognised convention.
     """
     if freq <= 0:
         raise ValueError(f"freq must be positive, got {freq}")
@@ -167,6 +168,12 @@ def accrued_interest(
         raise ValueError("last_coupon must precede next_coupon")
     if not last_coupon <= settlement <= next_coupon:
         raise ValueError("settlement must fall inside [last_coupon, next_coupon]")
+    # Checked here as well as in year_fraction: the endpoint returns below never
+    # reach year_fraction, so an unknown convention would otherwise pass there.
+    if day_count not in DAY_COUNT_CONVENTIONS:
+        raise ValueError(
+            f"unknown day_count {day_count!r}; expected one of {DAY_COUNT_CONVENTIONS}"
+        )
 
     # 30/360 and 30E/360 clip the day-of-month, so distinct calendar dates
     # (e.g. Jan 30 -> Jan 31) can still year_fraction to 0.0. last_coupon <

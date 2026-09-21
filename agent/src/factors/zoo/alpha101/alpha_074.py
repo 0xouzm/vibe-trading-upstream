@@ -70,4 +70,6 @@ def compute(panel: dict) -> pd.DataFrame:
     mix = high * 0.0261661 + vwap * (1.0 - 0.0261661)
     rhs = rank(ts_corr(rank(mix), rank(volume), 11))
     out = (lhs < rhs).astype(float) * -1.0
-    return out
+    # A NaN comparison is False, not NaN, so lhs/rhs's warmup NaN falls
+    # through to a fabricated finite value instead of propagating NaN.
+    return out.where(lhs.notna() & rhs.notna())

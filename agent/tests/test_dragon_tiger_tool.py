@@ -152,6 +152,65 @@ class TestExecuteSuccess:
         assert requests[2]["sortColumns"] == "SELL"
 
 
+def _seat(name: str, amount: float, trade_id: str, side: str) -> dict[str, Any]:
+    return {
+        "OPERATEDEPT_NAME": name,
+        "BUY": amount if side == "BUY" else 0.0,
+        "SELL": amount if side == "SELL" else 0.0,
+        "NET": amount if side == "BUY" else -amount,
+        "EXPLANATION": f"reason {trade_id}",
+        "TRADE_ID": trade_id,
+    }
+
+
+def _seats_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"success": True, "result": {"data": rows}}
+
+
+class TestSeatsByReason:
+    """600721 on 2026-09-21 was listed under three TRADE_IDs; each report
+    returns every reason's top 5 in one list sorted by amount."""
+
+    def _run(self, buy: list[dict[str, Any]], sell: list[dict[str, Any]]) -> dict[str, Any]:
+        payloads = [_appearance_payload(), _seats_payload(buy), _seats_payload(sell)]
+        with patch.object(eastmoney_client, "throttled_get_json", side_effect=payloads):
+            return json.loads(DragonTigerTool().execute(date="2026-09-21", code="600721"))["data"]
+
+    def test_rank_restarts_within_each_reason(self) -> None:
+        buy = [_seat("A", 9.0, "t1", "BUY"), _seat("B", 8.0, "t2", "BUY"), _seat("C", 7.0, "t1", "BUY")]
+        sell = [_seat("D", 6.0, "t2", "SELL"), _seat("E", 5.0, "t1", "SELL")]
+
+        seats = self._run(buy, sell)["seats"]
+
+        ranks = [(s["trade_id"], s["side"], s["seat"], s["rank"]) for s in seats]
+        assert ranks == [
+            ("t1", "BUY", "A", 1),
+            ("t1", "BUY", "C", 2),
+            ("t1", "SELL", "E", 1),
+            ("t2", "BUY", "B", 1),
+            ("t2", "SELL", "D", 1),
+        ]
+
+    def test_cap_drops_whole_reasons_not_the_sell_side(self) -> None:
+        buy, sell = [], []
+        for tid in ("t1", "t2", "t3", "t4"):
+            buy += [_seat(f"{tid}-b{i}", 100.0 - i, tid, "BUY") for i in range(5)]
+            sell += [_seat(f"{tid}-s{i}", 100.0 - i, tid, "SELL") for i in range(5)]
+
+        data = self._run(buy, sell)
+
+        assert len(data["seats"]) == 30
+        assert {s["trade_id"] for s in data["seats"]} == {"t1", "t2", "t3"}
+        for tid in ("t1", "t2", "t3"):
+            sides = [s["side"] for s in data["seats"] if s["trade_id"] == tid]
+            assert sides.count("BUY") == 5 and sides.count("SELL") == 5
+        assert data["seat_reasons_omitted"] == 1
+
+    def test_no_omission_marker_when_everything_fits(self) -> None:
+        data = self._run([_seat("A", 1.0, "t1", "BUY")], [_seat("B", 1.0, "t1", "SELL")])
+        assert "seat_reasons_omitted" not in data
+
+
 class TestExecuteError:
     def test_missing_date_returns_error_envelope(self) -> None:
         out = json.loads(DragonTigerTool().execute())

@@ -137,13 +137,44 @@ def _appearance_row(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _seats_by_reason(
+    buy_rows: list[dict[str, Any]], sell_rows: list[dict[str, Any]]
+) -> list[list[dict[str, Any]]]:
+    """Group seat rows by listing reason, each group ranked per side.
+
+    A security listed for several reasons on one day (one ``TRADE_ID`` each)
+    has a top-5 buy and sell list per reason, and each report returns all of
+    them in one list sorted by amount — a rank over that list mixes reasons.
+
+    Args:
+        buy_rows: Buy-side report rows, largest ``BUY`` first.
+        sell_rows: Sell-side report rows, largest ``SELL`` first.
+
+    Returns:
+        One list per reason, in the order the reasons first appear: its buy
+        seats ranked 1..n, then its sell seats ranked 1..n.
+    """
+    reasons: dict[Any, dict[str, list[dict[str, Any]]]] = {}
+    for side, rows in (("BUY", buy_rows), ("SELL", sell_rows)):
+        for row in rows:
+            reasons.setdefault(row.get("TRADE_ID"), {"BUY": [], "SELL": []})[side].append(row)
+    return [
+        [
+            _seat_row(row, side=side, rank=rank)
+            for side in ("BUY", "SELL")
+            for rank, row in enumerate(sides[side], start=1)
+        ]
+        for sides in reasons.values()
+    ]
+
+
 def _seat_row(raw: dict[str, Any], *, side: str, rank: int) -> dict[str, Any]:
     """Project a raw seat row to a compact, named record.
 
     Args:
         raw: One live Eastmoney buy- or sell-side seat row.
         side: The side represented by the report that returned ``raw``.
-        rank: One-based position in the report's descending order.
+        rank: One-based position within its side and listing reason (TRADE_ID).
 
     Returns:
         A flat dict describing one brokerage seat's buy/sell footprint.
@@ -293,15 +324,19 @@ class DragonTigerTool(BaseTool):
                 sort_columns="SELL",
                 sort_types="-1",
             )
-            seats = [
-                _seat_row(row, side="BUY", rank=rank)
-                for rank, row in enumerate(buy_rows, start=1)
-            ]
-            seats.extend(
-                _seat_row(row, side="SELL", rank=rank)
-                for rank, row in enumerate(sell_rows, start=1)
-            )
+            # Capped by whole reason, so a long day never keeps a reason's buy
+            # side and drops its sell side.
+            groups = _seats_by_reason(buy_rows, sell_rows)
+            seats: list[dict[str, Any]] = []
+            kept = 0
+            for group in groups:
+                if seats and len(seats) + len(group) > _MAX_SEATS:
+                    break
+                seats.extend(group)
+                kept += 1
             data["seats"] = seats[:_MAX_SEATS]
+            if kept < len(groups):
+                data["seat_reasons_omitted"] = len(groups) - kept
         return data
 
     @staticmethod

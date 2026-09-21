@@ -51,7 +51,7 @@ def _ledger(tmp_path: Path, payload: dict, tool: str = "risk_tool") -> Grounding
     [
         ("3,17%", ["3.17"]),
         ("17,9318145214327%", ["17.9318145214327"]),
-        ("2,639499655314571", ["2.639499655314571"]),
+        ("2,639499655314571", ["2", "639499655314571"]),
         ("0,7239869355", ["0.7239869355"]),
         ("-18,41%", ["-18.41"]),
         ("3.17%", ["3.17"]),
@@ -64,7 +64,10 @@ def _ledger(tmp_path: Path, payload: dict, tool: str = "risk_tool") -> Grounding
         ("-1.234,56", ["-1234.56"]),
         ("1.234.567,89", ["1234567.89"]),
         ("Vol 3,17% y 1.234,56 ARS", ["3.17", "1234.56"]),
-        # Not decimals: a year pair and a dotted list keep their separate readings.
+        # Not decimals: unmarked long comma pairs, a year pair and dotted lists
+        # keep their separate readings.
+        ("1400,1777 元", ["1400", "1777"]),
+        ("成交量 1000,2500 手", ["1000", "2500"]),
         ("2023,2024", ["2023", "2024"]),
         ("0.500,0.600", ["0.500", "0.600"]),
         ("1.234,5.6", ["1.234", "5.6"]),
@@ -94,6 +97,13 @@ def test_a_declaration_cell_holding_only_a_decimal_comma_is_one_figure(
         )
     )
     assert result.valid is True, result.issues
+
+
+def test_a_lone_list_like_cell_does_not_flip_the_document_to_decimal_commas() -> None:
+    text = "| 5,20 |\nValores correctos: 234,567 y 1,410."
+    assert _digits(text) == ["5", "20", "234567", "1410"]
+
+
 
 
 def test_a_long_precision_spanish_percentage_is_verified_not_fragmented(

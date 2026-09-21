@@ -192,6 +192,33 @@ def test_http_200_error_body_reports_invalid_credentials(
     assert SECRET not in json.dumps(result)
 
 
+@pytest.mark.parametrize("body", [b"null", b"[1, 2]", b'"oops"'])
+def test_http_200_non_object_json_body_reports_invalid_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    body: bytes,
+) -> None:
+    """A 200 with valid non-object JSON must classify, never raise.
+
+    Middleboxes and proxied error pages produce exactly such bodies; without
+    the isinstance guard in ``token_probe`` the ``.get`` raised
+    ``AttributeError``, which the unguarded ``/test`` route turned into a
+    bare 500.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body)
+
+    _inject_mock_transport(monkeypatch, handler)
+
+    result = _run(_make_channel(tmp_path).test_connection())
+
+    assert result["ok"] is False
+    assert result["code"] == "invalid_credentials"
+    assert result["sdk_available"] is QQ_AVAILABLE
+    assert SECRET not in json.dumps(result)
+
+
 @pytest.mark.parametrize(
     ("app_id", "secret"),
     [("", ""), (APP_ID, ""), ("", SECRET)],
@@ -213,6 +240,8 @@ def test_missing_credentials_short_circuit_without_network(
     assert result["ok"] is False
     assert result["code"] == "invalid_credentials"
     assert result["detail"] == "missing credentials"
+    # The short-circuit envelope is self-contained like every other branch.
+    assert result["sdk_available"] is QQ_AVAILABLE
 
 
 # --------------------------------------------------------------------------- #

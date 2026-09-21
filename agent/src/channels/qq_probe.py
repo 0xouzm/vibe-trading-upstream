@@ -48,6 +48,7 @@ async def test_connection(config: QQConfig, *, sdk_available: bool) -> dict[str,
             "ok": False,
             "code": "invalid_credentials",
             "detail": "missing credentials",
+            "sdk_available": sdk_available,
         }
 
     return await probe_token_endpoint(

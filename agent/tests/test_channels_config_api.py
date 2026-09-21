@@ -724,6 +724,38 @@ def test_post_test_reports_invalid_credentials(tmp_path: Path, monkeypatch) -> N
     assert path.read_bytes() == before
 
 
+@pytest.mark.parametrize("body", [b"null", b"[1, 2]", b'"oops"'])
+def test_post_test_non_object_json_200_returns_envelope_not_500(
+    tmp_path: Path, monkeypatch, body: bytes
+) -> None:
+    """A token endpoint answering 200 with non-object JSON must not 500.
+
+    Regression for the shared probe's ``.get`` on a non-dict body: the
+    ``/test`` route does not wrap ``test_connection`` in try/except, so an
+    ``AttributeError`` here surfaced as a bare 500 instead of an honest
+    ``invalid_credentials`` envelope.
+    """
+    client, path = _client(
+        tmp_path, monkeypatch, channels={"dingtalk": _dingtalk_section()}
+    )
+    before = path.read_bytes()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body)
+
+    requests = _inject_mock_transport(monkeypatch, handler)
+
+    response = client.post("/channels/dingtalk/test", json={})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["code"] == "invalid_credentials"
+    assert len(requests) == 1
+    assert path.read_bytes() == before
+    assert STORED_SECRET not in response.text
+
+
 def test_post_test_honors_pending_secret_clear(tmp_path: Path, monkeypatch) -> None:
     client, path = _client(
         tmp_path, monkeypatch, channels={"dingtalk": _dingtalk_section()}

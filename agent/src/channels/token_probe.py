@@ -10,6 +10,31 @@ can be checked before the channel is started.
 Secrets are scrubbed from every ``detail`` before it reaches a result
 envelope, and a successfully fetched token is discarded: it is never
 returned, logged, or cached.
+
+Adding another token-endpoint channel (checklist):
+
+1. ``<name>_probe.py``: endpoint URL, payload shape, ``token_key``; import
+   the adapter's config type under ``TYPE_CHECKING`` only, so a credential
+   check never pulls the channel's SDK.
+2. ``registry._INTERNAL``: add ``"<name>_probe"`` so channel discovery keeps
+   treating the module as internal rather than as an adapter.
+3. Adapter: ``supports_connection_test = True`` plus a thin
+   ``test_connection`` delegate that passes ``sdk_available``.
+4. ``config_meta.FIELD_HINTS``: hand-written field hints (optional — without
+   them the generic form derives fields from ``default_config()``).
+5. Frontend ``GUIDE_DEFS`` entry plus ``fields.<name>.*`` /
+   ``guides.<name>.*`` i18n keys in every locale (optional, guided setup).
+6. Tests mirroring ``test_qq_connection_test.py`` and one README sentence.
+
+Contract notes:
+
+- A 200 whose body is valid JSON but not an object (``null``, a list, a
+  string — middleboxes and proxied error pages produce these) classifies as
+  ``invalid_credentials``; the probe never raises on response shape.
+- ``detail`` echoes at most 200 characters of a rejection body, scrubbed of
+  the caller-declared secrets only.
+- Success means a truthy value under ``token_key``; the value's type is not
+  otherwise constrained (real endpoints return non-empty strings).
 """
 
 from __future__ import annotations
@@ -89,9 +114,13 @@ async def probe_token_endpoint(
 
     if resp.status_code == 200:
         try:
-            token = resp.json().get(token_key)
+            body = resp.json()
         except ValueError:
-            token = None
+            body = None
+        # A 200 with valid non-object JSON (null/list/string, e.g. from a
+        # middlebox) must classify, never raise: .get on a non-dict would
+        # surface as a bare 500 on the unguarded /test route.
+        token = body.get(token_key) if isinstance(body, dict) else None
         if not token:
             return {
                 "ok": False,

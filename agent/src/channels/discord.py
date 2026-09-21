@@ -78,7 +78,16 @@ if DISCORD_AVAILABLE:
             proxy: str | None = None,
             proxy_auth: aiohttp.BasicAuth | None = None,
         ) -> None:
-            super().__init__(intents=intents, proxy=proxy, proxy_auth=proxy_auth)
+            # Applies to every channel.send()/edit() that doesn't pass its own
+            # allowed_mentions (streaming edits, overflow chunks, etc.) -- without
+            # it, a literal @everyone/@here or role mention in outbound text
+            # (e.g. echoed back from an LLM response) actually pings.
+            super().__init__(
+                intents=intents,
+                proxy=proxy,
+                proxy_auth=proxy_auth,
+                allowed_mentions=discord.AllowedMentions(everyone=False, roles=False),
+            )
             self._channel = channel
             self.tree = app_commands.CommandTree(self)
             self._register_app_commands()
@@ -324,7 +333,12 @@ if DISCORD_AVAILABLE:
             reply_to: str | None,
         ) -> tuple[discord.PartialMessage | None, discord.AllowedMentions]:
             """Build reply context for outbound messages."""
-            mention_settings = discord.AllowedMentions(replied_user=False)
+            # An explicit allowed_mentions kwarg overrides the client-level
+            # default, so this must suppress everyone/roles too, not just
+            # the reply ping.
+            mention_settings = discord.AllowedMentions(
+                everyone=False, roles=False, replied_user=False
+            )
             if not reply_to:
                 return None, mention_settings
             try:

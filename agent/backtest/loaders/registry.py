@@ -284,6 +284,14 @@ PRICE_CALIBER_BY_SOURCE_MARKET: dict[tuple[str, str], str] = {
     # eastmoney, whose adjusted HK series does differ from its raw one, so the
     # actions exist and are simply not served here (#1493).
     ("tencent", "hk_equity"): "raw",
+    # Eastmoney's A-share fqt=1 is additive in the same way, with the same
+    # offsets: 600519.SH fqt=1 - fqt=0 takes five values (-103.46 / -79.58 /
+    # -51.98 / -28.02 / 0) over 500 bars against 367 distinct ratios, and
+    # 601398.SH five against 253 (measured 2026-09-21). akshare's
+    # stock_zh_a_hist(adjust="qfq") requests that endpoint with fqt=1. Their HK
+    # and US series are not measured and keep the per-source label.
+    ("eastmoney", "a_share"): "split_dividend_additive",
+    ("akshare", "a_share"): "split_dividend_additive",
 }
 
 #: Markets with no corporate-action adjustment concept. Their sources stamp

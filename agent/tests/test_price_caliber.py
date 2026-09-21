@@ -104,6 +104,26 @@ def test_tencent_a_share_basket_warns_against_multiplicative_sources() -> None:
     assert "split_dividend_additive" in msg and "split_dividend" in msg
 
 
+def test_eastmoney_and_akshare_a_share_are_additive_too() -> None:
+    """The same endpoint family: eastmoney fqt=1 has tencent's five offsets on
+    600519.SH, and akshare's stock_zh_a_hist(adjust="qfq") calls it."""
+    assert price_caliber("eastmoney", "a_share") == "split_dividend_additive"
+    assert price_caliber("akshare", "a_share") == "split_dividend_additive"
+    # unmeasured markets keep the per-source label
+    assert price_caliber("eastmoney", "hk_equity") == "split_dividend"
+    assert price_caliber("akshare", "us_equity") == "split_dividend"
+
+
+def test_tencent_and_eastmoney_a_share_basket_is_not_a_mix() -> None:
+    """Both additive with the same offsets: warning them apart was a false positive."""
+    stamps = {
+        "600519.SH": ("tencent", price_caliber("tencent", "a_share")),
+        "000001.SZ": ("eastmoney", price_caliber("eastmoney", "a_share")),
+    }
+    assert mixed_caliber_warning(stamps) is None
+    assert additive_caliber_warning(stamps) is not None
+
+
 def test_tencent_only_basket_stays_silent() -> None:
     """One additive source is not a mix, so nothing to warn about."""
     assert (

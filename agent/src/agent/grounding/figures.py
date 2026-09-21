@@ -387,34 +387,6 @@ _DOTTED_DECIMAL_RE = re.compile(
 )
 
 
-def _is_long_decimal_comma(body: str, fraction: str) -> bool:
-    """Whether ``body,fraction`` can only be a decimal: four or more digits follow the comma.
-
-    A comma that groups thousands is always followed by exactly three digits, so a
-    longer run ("2,639499655314571") is unambiguous. The one lookalike is a pair of
-    years written without a space ("2023,2024"), which stays two numbers.
-    """
-    if len(fraction) < 4:
-        return False
-    years = (
-        len(body) == 4
-        and len(fraction) == 4
-        and body[:2] in ("19", "20")
-        and fraction[:2] in ("19", "20")
-    )
-    return not years
-
-
-def _is_whole_cell(text: str, start: int, stop: int) -> bool:
-    """Whether the number at ``[start, stop)`` is the entire content of its line or table cell."""
-    line_start = text.rfind("\n", 0, start) + 1
-    line_end = text.find("\n", stop)
-    line_end = len(text) if line_end == -1 else line_end
-    before = text[line_start:start].rsplit("|", 1)[-1]
-    after = text[stop:line_end].split("|", 1)[0]
-    return not before.strip() and not after.strip()
-
-
 def _numbers(text: str, *, decimal_commas: bool | None = None) -> list[_Token]:
     """Every number in normalized text, with a decimal comma read as one (#1418).
 
@@ -425,12 +397,12 @@ def _numbers(text: str, *, decimal_commas: bool | None = None) -> list[_Token]:
     "1,234.56") reads every single-comma number as a decimal, so "2,237" and
     "−5,132%" beside "1,57%" are 2.237 and −5.132%, not 2237 and −5132%.
 
-    Two shapes are decimal regardless of that document-level reading, because a
-    thousands grouping cannot look like them: a comma followed by four or more
-    digits ("2,639499655314571", "17,9318145214327%"), and dotted thousands followed
-    by a decimal comma ("1.234,56"). ``decimal_commas`` lets a caller that parses a
-    fragment of a larger document (a declaration cell) pass the reading of the whole
-    document instead of re-deriving it from the fragment.
+    Dotted thousands followed by a decimal comma ("1.234,56") are unambiguous.
+    Long comma fractions are only decimal when the number itself carries a local
+    marker (for example "17,9318145214327%"); an unmarked "1400,1777" remains two
+    numbers rather than being guessed as 1400.1777. ``decimal_commas`` lets a caller
+    that parses a fragment of a larger document (a declaration cell) pass the reading
+    of the whole document instead of re-deriving it from the fragment.
     """
     comma_decimals = (
         _writes_decimal_commas(text) if decimal_commas is None else decimal_commas
@@ -462,13 +434,12 @@ def _numbers(text: str, *, decimal_commas: bool | None = None) -> list[_Token]:
             if fraction and (
                 body == "0"
                 or comma_decimals
-                or _is_long_decimal_comma(body, fraction)
+                or _percent_mark(text, stop)[0] > 0
                 or (
                     len(fraction) <= 2
                     and (
                         _currency_before(text, match.start())
                         or _currency_after(text, stop)
-                        or _percent_mark(text, stop)[0] > 0
                     )
                 )
             ):
@@ -482,12 +453,12 @@ def _writes_decimal_commas(text: str) -> bool:
     """Whether a document writes decimal commas and never a thousands grouping.
 
     Evidence for a decimal comma is unambiguous on its own: a "0," integer part,
-    a fraction of four or more digits, dotted thousands with a decimal comma
-    ("1.234,56"), or a one- or two-digit fraction carrying a percent, pp/bp or
-    currency mark ("1,57%", "3,95 EUR") or filling a whole declaration/table cell
-    ("2,64 | observed | ..."). An unmarked "1,50" inside a sentence could be a list
-    and proves nothing. Evidence for grouping is two or more comma groups or a
-    grouped number with a dot fraction.
+    dotted thousands with a decimal comma ("1.234,56"), a fraction of any length
+    carrying a percent/pp/bp mark ("17,9318145214327%"), or a one- or two-digit
+    fraction carrying a currency mark ("3,95 EUR"). An unmarked "1,50" or a lone
+    table cell such as "| 5,20 |" proves nothing and cannot switch the rest of the
+    document into decimal-comma mode. Evidence for grouping is two or more comma
+    groups or a grouped number with a dot fraction.
     """
     decimal, grouped = bool(_DOTTED_DECIMAL_RE.search(text)), False
     for match in _NUMBER_RE.finditer(text):
@@ -499,13 +470,11 @@ def _writes_decimal_commas(text: str) -> bool:
         elif body.isdigit() and text[match.end() : match.end() + 1] == ",":
             fraction = _digit_run(text, match.end() + 1)
             stop = match.end() + 1 + len(fraction)
-            if _is_long_decimal_comma(body, fraction) or (
+            if _percent_mark(text, stop)[0] > 0 or (
                 1 <= len(fraction) <= 2
                 and (
                     _currency_before(text, match.start())
                     or _currency_after(text, stop)
-                    or _percent_mark(text, stop)[0] > 0
-                    or _is_whole_cell(text, match.start(), stop)
                 )
             ):
                 decimal = True

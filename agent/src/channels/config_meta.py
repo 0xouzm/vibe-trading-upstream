@@ -76,8 +76,33 @@ def _dingtalk_hints() -> list[FieldHint]:
     ]
 
 
+def _qq_hints() -> list[FieldHint]:
+    """Return the hand-written QQ field hints (``enabled`` excluded)."""
+    specs = (
+        ("app_id", "text", False, True),
+        ("secret", "password", True, True),
+        ("allow_from", "list", False, False),
+        ("msg_format", "text", False, False),
+        ("ack_message", "text", False, False),
+        ("media_dir", "text", False, False),
+        ("download_chunk_size", "text", False, False),
+        ("download_max_bytes", "text", False, False),
+    )
+    return [
+        {
+            "key": key,
+            "type": widget,
+            "secret": secret,
+            "required": required,
+            "help_key": f"{_HELP_KEY_PREFIX}.qq.{key}",
+        }
+        for key, widget, secret, required in specs
+    ]
+
+
 FIELD_HINTS: dict[str, list[FieldHint]] = {
     "dingtalk": _dingtalk_hints(),
+    "qq": _qq_hints(),
 }
 
 

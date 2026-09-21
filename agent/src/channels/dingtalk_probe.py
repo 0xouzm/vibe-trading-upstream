@@ -3,7 +3,10 @@
 The probe validates an (possibly unsaved) credential set against the token
 endpoint without touching the channel's shared HTTP client. Everything here
 is stateless: functions take the ``DingTalkConfig`` explicitly so the module
-never imports the adapter at runtime (only under ``TYPE_CHECKING``).
+never imports the adapter at runtime (only under ``TYPE_CHECKING``). The
+request/classification logic lives in :mod:`src.channels.token_probe`, the
+shared building block for token-endpoint probes; this module keeps the
+DingTalk-specific endpoint, payload shape and IPv4-pinning transport.
 """
 
 from __future__ import annotations
@@ -11,6 +14,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import httpx
+
+from src.channels.token_probe import probe_token_endpoint, scrub_secrets
+from src.channels.token_probe import response_detail as response_detail  # re-export
 
 if TYPE_CHECKING:
     from src.channels.dingtalk import DingTalkConfig
@@ -37,19 +43,7 @@ def scrub_detail(config: DingTalkConfig, text: str) -> str:
     accident; every value the config holds as a secret is masked before the
     text reaches a result envelope.
     """
-    cleaned = text
-    for secret in (config.client_secret, config.client_id):
-        if secret:
-            cleaned = cleaned.replace(secret, "***")
-    return cleaned
-
-
-def response_detail(resp: httpx.Response) -> str:
-    """Return a bounded ``HTTP <status>`` detail without echoing secrets."""
-    body = (resp.text or "").strip()
-    if not body:
-        return f"HTTP {resp.status_code}"
-    return f"HTTP {resp.status_code}: {body[:200]}"
+    return scrub_secrets(text, (config.client_secret, config.client_id))
 
 
 async def test_connection(
@@ -78,47 +72,11 @@ async def test_connection(
             "detail": "missing credentials",
         }
 
-    payload = {"appKey": config.client_id, "appSecret": config.client_secret}
-
-    try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(10.0, connect=10.0),
-            transport=build_http_transport(config),
-        ) as client:
-            resp = await client.post(DINGTALK_ACCESS_TOKEN_URL, json=payload)
-    except httpx.HTTPError as exc:
-        return {
-            "ok": False,
-            "code": "network",
-            "detail": scrub_detail(config, str(exc) or type(exc).__name__),
-            "sdk_available": sdk_available,
-        }
-
-    if resp.status_code == 200:
-        try:
-            access_token = resp.json().get("accessToken")
-        except ValueError:
-            access_token = None
-        if not access_token:
-            return {
-                "ok": False,
-                "code": "invalid_credentials",
-                "detail": "no access token in response",
-                "sdk_available": sdk_available,
-            }
-        return {"ok": True, "code": "ok", "sdk_available": sdk_available}
-
-    if 400 <= resp.status_code < 500:
-        return {
-            "ok": False,
-            "code": "invalid_credentials",
-            "detail": scrub_detail(config, response_detail(resp)),
-            "sdk_available": sdk_available,
-        }
-
-    return {
-        "ok": False,
-        "code": "network",
-        "detail": scrub_detail(config, response_detail(resp)),
-        "sdk_available": sdk_available,
-    }
+    return await probe_token_endpoint(
+        url=DINGTALK_ACCESS_TOKEN_URL,
+        payload={"appKey": config.client_id, "appSecret": config.client_secret},
+        token_key="accessToken",
+        secrets=(config.client_secret, config.client_id),
+        sdk_available=sdk_available,
+        transport=build_http_transport(config),
+    )

@@ -1,8 +1,8 @@
 """Tests for channel config field metadata and fail-safe secret masking.
 
-Covers the uiHints registry (hand-written for DingTalk, derived elsewhere) and
-the security acceptance criterion: no key matching :data:`SECRET_KEY_RE` ever
-survives in the non-secret ``values`` half.
+Covers the uiHints registry (hand-written for DingTalk and QQ, derived
+elsewhere) and the security acceptance criterion: no key matching
+:data:`SECRET_KEY_RE` ever survives in the non-secret ``values`` half.
 """
 
 from __future__ import annotations
@@ -102,6 +102,70 @@ def test_dingtalk_field_hints_exact_snapshot() -> None:
             "secret": False,
             "required": False,
             "help_key": "settings.channels.fields.dingtalk.force_ipv4",
+        },
+    ]
+    assert "enabled" not in {hint["key"] for hint in hints}
+
+
+def test_qq_field_hints_exact_snapshot() -> None:
+    """QQ hints match the frozen contract, with ``enabled`` excluded."""
+    hints = channel_field_hints("qq")
+    assert hints == [
+        {
+            "key": "app_id",
+            "type": "text",
+            "secret": False,
+            "required": True,
+            "help_key": "settings.channels.fields.qq.app_id",
+        },
+        {
+            "key": "secret",
+            "type": "password",
+            "secret": True,
+            "required": True,
+            "help_key": "settings.channels.fields.qq.secret",
+        },
+        {
+            "key": "allow_from",
+            "type": "list",
+            "secret": False,
+            "required": False,
+            "help_key": "settings.channels.fields.qq.allow_from",
+        },
+        {
+            "key": "msg_format",
+            "type": "text",
+            "secret": False,
+            "required": False,
+            "help_key": "settings.channels.fields.qq.msg_format",
+        },
+        {
+            "key": "ack_message",
+            "type": "text",
+            "secret": False,
+            "required": False,
+            "help_key": "settings.channels.fields.qq.ack_message",
+        },
+        {
+            "key": "media_dir",
+            "type": "text",
+            "secret": False,
+            "required": False,
+            "help_key": "settings.channels.fields.qq.media_dir",
+        },
+        {
+            "key": "download_chunk_size",
+            "type": "text",
+            "secret": False,
+            "required": False,
+            "help_key": "settings.channels.fields.qq.download_chunk_size",
+        },
+        {
+            "key": "download_max_bytes",
+            "type": "text",
+            "secret": False,
+            "required": False,
+            "help_key": "settings.channels.fields.qq.download_max_bytes",
         },
     ]
     assert "enabled" not in {hint["key"] for hint in hints}

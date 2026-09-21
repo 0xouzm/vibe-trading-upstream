@@ -9,7 +9,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 - **Gildata (恒生聚源) joins the A-share fallback chain as a token-gated
   source**. The new `gildata` loader talks to the vendor's raw-api MCP
-  endpoint (one JSON-RPC POST per call, token on the URL query string) and
+  endpoint (one JSON-RPC POST per call, token in the Authorization header) and
   serves A-share daily OHLCV through the `StockDailyQuote` tool with
   `restorationStatus=1` — forward, split-AND-dividend adjusted bars, stamped
   `split_dividend` in the price-caliber table after being measured against a

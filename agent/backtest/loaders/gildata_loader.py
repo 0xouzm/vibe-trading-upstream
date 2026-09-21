@@ -1,7 +1,7 @@
 """Gildata (恒生聚源) loader: token-gated A-share OHLCV via the raw-api MCP endpoint.
 
 Gildata serves its market data over MCP streamable-HTTP: every tool call is one
-JSON-RPC POST to a single endpoint whose token rides the URL query string::
+JSON-RPC POST to a single endpoint, with the token in the Authorization header::
 
     POST https://api.gildata.com/mcp-servers/aidata-assistant-srv-rawapi?format=json
          Authorization: Bearer <GILDATA_TOKEN>

@@ -7,11 +7,15 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock
 
-from slack_sdk.socket_mode.request import SocketModeRequest
+from tests.slack_stubs import install_slack_stubs
 
-from src.channels.bus.events import OutboundMessage
-from src.channels.pairing import PAIRING_CODE_META_KEY
-from src.channels.slack import SlackChannel, SlackConfig
+install_slack_stubs()
+
+from slack_sdk.socket_mode.request import SocketModeRequest  # noqa: E402
+
+from src.channels.bus.events import OutboundMessage  # noqa: E402
+from src.channels.pairing import PAIRING_CODE_META_KEY  # noqa: E402
+from src.channels.slack import SlackChannel, SlackConfig  # noqa: E402
 
 
 def _channel() -> SlackChannel:

@@ -18,6 +18,7 @@ import pandas as pd
 from src.factors.base import (
     decay_linear,
     delta,
+    observed_over,
     rank,
     safe_div,
     scale,
@@ -72,4 +73,7 @@ def compute(panel: dict) -> pd.DataFrame:
     out = (lhs < rhs).astype(float) * -1.0
     # A NaN comparison is False, not NaN, so lhs/rhs's warmup NaN falls
     # through to a fabricated finite value instead of propagating NaN.
-    return out.where(lhs.notna() & rhs.notna())
+    # Mask on the inputs' reach, not the operands' NaN: a constant window's
+    # correlation is undefined on complete data and keeps its verdict (#1452).
+    # volume: adv30 + sum 37 + corr 15; close: corr 15; high/vwap: corr 11.
+    return out.where(observed_over((volume, 80), (close, 15), (high, 11), (vwap, 11)))

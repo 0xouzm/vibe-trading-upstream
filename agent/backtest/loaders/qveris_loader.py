@@ -51,12 +51,40 @@ _DATE_KEYS = (
     "time",
     "period",
 )
+#: The four fields that must all be present for a record to become a bar.
+_PRICE_QUARTET = ("open", "high", "low", "close")
+
+#: Aliases for an unadjusted bar.
 _FIELD_ALIASES = {
     "open": ("open", "o", "1. open"),
     "high": ("high", "h", "2. high"),
     "low": ("low", "l", "3. low"),
-    "close": ("close", "c", "adj_close", "adjusted_close", "4. close"),
+    "close": ("close", "c", "4. close"),
     "volume": ("volume", "vol", "v", "5. volume", "6. volume"),
+}
+
+#: Volume names that make no adjustment claim, shared by both tables. The
+#: family split exists to stop unadjusted and adjusted *price levels* sharing a
+#: bar; volume is not a price level, so an adjusted bar must still report a
+#: volume the payload calls ``volume`` (``6. volume`` is Alpha Vantage's label
+#: for the adjusted series' volume) instead of silently reporting NaN. The
+#: unadjusted tuple is referenced rather than copied so the two cannot drift and
+#: the unadjusted path stays byte-identical.
+_PLAIN_VOLUME_ALIASES = _FIELD_ALIASES["volume"]
+
+#: Aliases for an adjusted bar, resolved as a complete alternate set rather
+#: than field by field. ``adj_close`` used to sit in the unadjusted ``close``
+#: aliases while it had no ``adj_open``/``adj_high``/``adj_low`` siblings,
+#: which cut both ways (#1494): a record carrying only adjusted fields failed
+#: the OHLC check on every row, so a billed call produced no bars, while a
+#: record carrying unadjusted open/high/low with only ``adj_close`` was
+#: accepted as one bar mixing unadjusted and adjusted price levels.
+_ADJUSTED_FIELD_ALIASES = {
+    "open": ("adj_open", "adjusted_open"),
+    "high": ("adj_high", "adjusted_high"),
+    "low": ("adj_low", "adjusted_low"),
+    "close": ("adj_close", "adjusted_close"),
+    "volume": ("adj_volume", "adjusted_volume") + _PLAIN_VOLUME_ALIASES,
 }
 
 
@@ -656,14 +684,22 @@ def _looks_like_date(value: Any) -> bool:
     return True
 
 
+def _resolve_field_set(keys: Iterable[str]) -> dict[str, tuple[str, ...]] | None:
+    """Return the alias table that supplies one complete price quartet.
+
+    The unadjusted table wins when a record carries both sets, which is the
+    preference the previous single-table lookup had. ``None`` means neither
+    table is complete, so a bar is never assembled from a mix of unadjusted and
+    adjusted fields.
+    """
+    for table in (_FIELD_ALIASES, _ADJUSTED_FIELD_ALIASES):
+        if all(any(alias in keys for alias in table[field]) for field in _PRICE_QUARTET):
+            return table
+    return None
+
+
 def _record_has_ohlc(record: dict[str, Any]) -> bool:
-    lowered = {str(key).lower() for key in record}
-    return all(any(alias in lowered for alias in aliases) for aliases in (
-        _FIELD_ALIASES["open"],
-        _FIELD_ALIASES["high"],
-        _FIELD_ALIASES["low"],
-        _FIELD_ALIASES["close"],
-    ))
+    return _resolve_field_set({str(key).lower() for key in record}) is not None
 
 
 def _normalize_record(record: dict[str, Any]) -> dict[str, Any] | None:
@@ -671,10 +707,19 @@ def _normalize_record(record: dict[str, Any]) -> dict[str, Any] | None:
     date = _first_value(lowered, _DATE_KEYS)
     if date is None:
         return None
+    table = _resolve_field_set(lowered)
+    if table is None:
+        return None
     row = {"trade_date": date}
-    for field, aliases in _FIELD_ALIASES.items():
-        row[field] = _first_value(lowered, aliases)
-    if any(row[field] is None for field in ("open", "high", "low", "close")):
+    for field in _OHLCV_COLUMNS:
+        row[field] = _first_value(lowered, table[field])
+    if row["volume"] is None:
+        # Volume carries no adjustment claim, so it is the one column resolved
+        # across both families: the chosen table first (so which name wins is
+        # unchanged), the other only to fill the gap the choice would leave.
+        fallback = _ADJUSTED_FIELD_ALIASES if table is _FIELD_ALIASES else _FIELD_ALIASES
+        row["volume"] = _first_value(lowered, fallback["volume"])
+    if any(row[field] is None for field in _PRICE_QUARTET):
         return None
     return row
 

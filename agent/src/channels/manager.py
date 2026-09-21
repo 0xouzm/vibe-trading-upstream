@@ -33,6 +33,10 @@ _BOOL_CAMEL_ALIASES: dict[str, str] = {
 }
 
 
+# Inbound messages whose reply fingerprint is kept for duplicate suppression.
+_MAX_REPLY_FINGERPRINTS = 4096
+
+
 class ChannelManager:
     """Manages chat channels and coordinates message routing.
 
@@ -266,20 +270,18 @@ class ChannelManager:
         if not fingerprint:
             return False
 
-        origin_message_id = metadata.get("origin_message_id")
-        if isinstance(origin_message_id, str) and origin_message_id:
-            key = (msg.channel, msg.chat_id, origin_message_id)
-            if self._origin_reply_fingerprints.get(key) == fingerprint:
-                return True
-            self._origin_reply_fingerprints[key] = fingerprint
-
+        # Telegram and NapCat message ids are ints; they dedupe like strings.
         message_id = metadata.get("message_id")
-        if isinstance(message_id, str) and message_id:
-            key = (msg.channel, msg.chat_id, message_id)
-            if self._origin_reply_fingerprints.get(key) == fingerprint:
-                return True
-            self._origin_reply_fingerprints[key] = fingerprint
-
+        if message_id is None or message_id == "" or isinstance(message_id, bool):
+            return False
+        key = (msg.channel, msg.chat_id, str(message_id))
+        if self._origin_reply_fingerprints.get(key) == fingerprint:
+            return True
+        self._origin_reply_fingerprints[key] = fingerprint
+        # Oldest first (insertion order): a long-running process keeps only the
+        # most recent inbound messages' fingerprints.
+        while len(self._origin_reply_fingerprints) > _MAX_REPLY_FINGERPRINTS:
+            del self._origin_reply_fingerprints[next(iter(self._origin_reply_fingerprints))]
         return False
 
     async def _dispatch_outbound(self) -> None:

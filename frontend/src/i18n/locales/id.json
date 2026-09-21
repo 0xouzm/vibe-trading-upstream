@@ -421,7 +421,134 @@
       "stoppedToast": "Channel IM telah dihentikan",
       "refreshFailed": "Gagal menyegarkan channel IM",
       "startFailed": "Gagal menjalankan channel IM",
-      "stopFailed": "Gagal menghentikan channel IM"
+      "stopFailed": "Gagal menghentikan channel IM",
+      "config": {
+        "toggleConfig": "Konfigurasi {{name}}",
+        "keepCurrent": "Pertahankan nilai saat ini ({{masked}})",
+        "secretNotSet": "Belum diatur",
+        "clearSecret": "Hapus",
+        "required": "Wajib",
+        "listPlaceholder": "Ketik nilai lalu tekan Enter",
+        "removeValue": "Hapus {{value}}",
+        "save": "Simpan konfigurasi",
+        "hotApply": "Penyimpanan langsung berlaku — tidak perlu restart.",
+        "saved": "Konfigurasi channel tersimpan",
+        "saveFailed": "Gagal menyimpan konfigurasi channel: {{message}}",
+        "test": "Uji koneksi",
+        "testing": "Menguji…",
+        "testOk": "Koneksi terverifikasi",
+        "testFailed": "Uji koneksi gagal: {{message}}",
+        "testCodeOk": "Provider menerima kredensial ini.",
+        "testCodeInvalidCredentials": "Provider menolak kredensial ini.",
+        "testCodeNetwork": "Provider tidak dapat dijangkau.",
+        "testCodeUnsupported": "Channel ini tidak mendukung uji koneksi.",
+        "testedSavedConfig": "Yang diuji adalah konfigurasi yang tersimpan.",
+        "testedDraftConfig": "Yang diuji adalah nilai yang saat ini ada di formulir (belum disimpan).",
+        "enable": "Aktifkan channel",
+        "enableHint": "Menonaktifkan tetap menyimpan kredensial — Anda dapat mengaktifkannya kembali kapan saja.",
+        "enabledToast": "Channel diaktifkan",
+        "disabledToast": "Channel dinonaktifkan",
+        "enableFailed": "Gagal mengaktifkan channel: {{message}}",
+        "disableFailed": "Gagal menonaktifkan channel: {{message}}",
+        "enableRejected": "Provider menolak kredensial ini, sehingga channel tidak diaktifkan.",
+        "enableRejectedDetail": "Respons provider: {{detail}}",
+        "enableAnyway": "Tetap aktifkan",
+        "enableAnywayHint": "Tetap mengaktifkan akan melewati pemeriksaan kredensial — channel mungkin gagal terhubung.",
+        "notWritable": "Konfigurasi channel disimpan dalam file YAML ({{path}}) yang tidak dapat diedit dari Web UI. Edit file tersebut secara langsung untuk mengubah kredensial.",
+        "notWritableChip": "Hanya baca (YAML)",
+        "sdkMissing": "SDK runtime belum terpasang — {{hint}}",
+        "sdkMissingNoHint": "SDK runtime belum terpasang; channel dapat dikonfigurasi tetapi mungkin tidak dapat dijalankan.",
+        "noFields": "Channel ini tidak memiliki field yang dapat dikonfigurasi.",
+        "loadFailed": "Tidak dapat memuat konfigurasi channel."
+      },
+      "fields": {
+        "dingtalk": {
+          "client_id": {
+            "label": "Client ID (AppKey)",
+            "help": "AppKey aplikasi dari halaman Credentials di konsol developer DingTalk."
+          },
+          "client_secret": {
+            "label": "Client Secret (AppSecret)",
+            "help": "AppSecret aplikasi. Disimpan di sisi server dan tidak pernah dikirim kembali ke browser."
+          },
+          "allow_from": {
+            "label": "Pengirim yang diizinkan",
+            "help": "Allowlist opsional berisi ID pengirim DingTalk yang boleh berbicara dengan agent (\"*\" mengizinkan semua orang). Pengirim yang belum dipasangkan menerima kode pairing melalui pesan langsung."
+          },
+          "allow_remote_media_redirects": {
+            "label": "Izinkan redirect media jarak jauh",
+            "help": "Ikuti redirect dari provider saat mengunduh media pesan. Nonaktif secara default."
+          },
+          "remote_media_redirect_allowed_hosts": {
+            "label": "Host redirect yang diizinkan",
+            "help": "Host yang diizinkan saat redirect media jarak jauh diaktifkan. Daftar kosong memblokir setiap redirect lintas host."
+          },
+          "group_user_isolation": {
+            "label": "Sesi grup per pengguna",
+            "help": "Beri setiap anggota grup chat sesi agent sendiri alih-alih berbagi satu sesi."
+          },
+          "force_ipv4": {
+            "label": "Paksa IPv4",
+            "help": "Paksa panggilan API DingTalk menggunakan IPv4. Berguna jika whitelist IP egress aplikasi berisi alamat IPv4 yang tetap sementara prefix IPv6 terus berganti."
+          }
+        },
+        "qq": {
+          "app_id": {
+            "label": "AppID",
+            "help": "AppID bot dari pengaturan aplikasi di QQ Open Platform (q.qq.com)."
+          },
+          "secret": {
+            "label": "AppSecret",
+            "help": "AppSecret bot. Disimpan di sisi server dan tidak pernah dikirim kembali ke browser."
+          },
+          "allow_from": {
+            "label": "Pengirim yang diizinkan",
+            "help": "Allowlist opsional berisi openid pengirim QQ yang boleh berbicara dengan agent (\"*\" mengizinkan semua orang). Pengirim yang belum dipasangkan menerima kode pairing melalui pesan langsung."
+          },
+          "msg_format": {
+            "label": "Format pesan",
+            "help": "Format balasan: plain atau markdown."
+          },
+          "ack_message": {
+            "label": "Pesan konfirmasi",
+            "help": "Pesan konfirmasi yang langsung dikirim saat pesan masuk. Kosongkan untuk menonaktifkan."
+          },
+          "media_dir": {
+            "label": "Direktori media",
+            "help": "Lokasi penyimpanan lampiran masuk. Kosong berarti ~/.vibe-trading/media/qq."
+          },
+          "download_chunk_size": {
+            "label": "Ukuran chunk unduhan",
+            "help": "Byte per chunk saat mengunduh lampiran (default 262144)."
+          },
+          "download_max_bytes": {
+            "label": "Ukuran unduhan maksimum (byte)",
+            "help": "Batas pengaman untuk satu unduhan lampiran (default 209715200 = 200 MB)."
+          }
+        }
+      },
+      "guides": {
+        "dingtalk": {
+          "title": "Panduan setup DingTalk",
+          "intro": "Bot DingTalk menggunakan Stream Mode, sehingga tidak memerlukan URL callback publik.",
+          "step1": "Buat aplikasi di konsol developer DingTalk (open-dev.dingtalk.com).",
+          "step2": "Tambahkan kemampuan bot ke aplikasi dan aktifkan Stream Mode untuknya.",
+          "step3": "Salin AppKey aplikasi ke Client ID dan AppSecret-nya ke Client Secret.",
+          "step4": "Publikasikan aplikasi agar tersedia untuk organisasi Anda.",
+          "step5": "Kembali ke sini, klik Uji koneksi, lalu aktifkan channel.",
+          "docsLabel": "Buka konsol developer DingTalk"
+        },
+        "qq": {
+          "title": "Panduan setup QQ",
+          "intro": "Bot QQ terhubung melalui WebSocket menggunakan SDK resmi botpy, sehingga tidak memerlukan URL callback publik.",
+          "step1": "Daftar di QQ Open Platform (q.qq.com) dan buat bot.",
+          "step2": "Salin AppID dan AppSecret dari halaman pengaturan pengembangan bot.",
+          "step3": "Tempelkan keduanya ke field AppID dan AppSecret di atas.",
+          "step4": "Tambahkan bot ke grup QQ atau chat dengannya secara pribadi, sesuai aturan sandbox/publikasi platform.",
+          "step5": "Kembali ke sini, klik Uji koneksi, lalu aktifkan channel.",
+          "docsLabel": "Buka QQ Open Platform"
+        }
+      }
     },
     "generation": "Generasi",
     "dataSourceSettings": "Pengaturan Sumber Data",
@@ -457,7 +584,9 @@
       }
     },
     "tushareToken": "Token Tushare",
+    "gildataToken": "Token Gildata",
     "clearTushareToken": "Hapus token Tushare tersimpan",
+    "clearGildataToken": "Hapus token Gildata tersimpan",
     "saveDataSourceSettings": "Simpan pengaturan sumber data",
     "baostock": "BaoStock",
     "loadLlmSettingsFailed": "Gagal memuat pengaturan LLM: {{message}}",
@@ -489,7 +618,8 @@
     "oauth": "OAuth",
     "authentication": "Autentikasi",
     "apiKey": "API key",
-    "tushareTokenDesc": "Digunakan untuk data A-share China, futures, fund, dan makro. Jika tidak diatur, proyek akan menggunakan AKShare sebagai fallback jika tersedia."
+    "tushareTokenDesc": "Digunakan untuk data A-share China, futures, fund, dan makro. Jika tidak diatur, proyek akan menggunakan AKShare sebagai fallback jika tersedia.",
+    "gildataTokenDesc": "Feed Gildata (Hundsun Juyuan) opsional untuk A-share China. Jika diatur, feed ini bergabung di ujung chain fallback A-share dengan bar harian forward-adjusted."
   },
   "qveris": {
     "title": "Marketplace Tool QVeris",

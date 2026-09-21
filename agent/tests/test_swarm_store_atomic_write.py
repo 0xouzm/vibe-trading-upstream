@@ -163,6 +163,39 @@ def test_concurrent_stores_writing_same_run_do_not_crash_or_clobber(tmp_path):
     assert store_a.load_run("r").final_report in {"FROM-A", "FROM-B"}
 
 
+def test_concurrent_task_stores_saving_one_task_do_not_crash(tmp_path):
+    """The TaskStore sibling of the SwarmStore race (#1536): two workers writing
+    the same task file each used ``task-<id>.tmp``, so one rename could consume
+    the other's temp file and raise FileNotFoundError."""
+    from src.swarm.models import SwarmTask
+    from src.swarm.task_store import TaskStore
+
+    errors: list[Exception] = []
+
+    def write(store: TaskStore, task: SwarmTask, gate: threading.Barrier) -> None:
+        gate.wait()
+        try:
+            for _ in range(20):
+                store.save_task(task)
+        except Exception as exc:  # noqa: BLE001 - captured for the assertion below
+            errors.append(exc)
+
+    task = SwarmTask(id="t1", agent_id="analyst", prompt_template="do x")
+    for _ in range(10):
+        gate = threading.Barrier(2)
+        threads = [
+            threading.Thread(target=write, args=(TaskStore(tmp_path), task, gate)) for _ in range(2)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    assert not errors, f"concurrent save_task raised: {errors[:3]!r}"
+    assert TaskStore(tmp_path).load_task("t1").id == "t1"
+    assert not list((tmp_path / "tasks").glob("*.tmp")), "a temp file was left behind"
+
+
 def test_posix_oserror_is_not_treated_transient():
     """POSIX no-op guard: a plain OSError (no winerror) is never transient,
     so off-Windows the retry loop runs exactly once — no behavior change."""

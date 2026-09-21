@@ -486,6 +486,40 @@
             "label": "IPv4 강제",
             "help": "DingTalk API 호출을 IPv4에 바인딩합니다. 발신 IP 화이트리스트를 사용 중이고 IPv6 접두사는 자주 바뀌지만 IPv4는 안정적일 때 활성화하세요."
           }
+        },
+        "qq": {
+          "app_id": {
+            "label": "AppID",
+            "help": "QQ 오픈 플랫폼(q.qq.com) 앱 설정에 있는 봇의 AppID입니다."
+          },
+          "secret": {
+            "label": "AppSecret",
+            "help": "봇의 AppSecret입니다. 서버에 저장되며 브라우저로 다시 전송되지 않습니다."
+          },
+          "allow_from": {
+            "label": "허용된 발신자",
+            "help": "에이전트와 대화할 수 있는 QQ 발신자 openid 허용 목록입니다(\"*\"는 모두 허용). 페어링되지 않은 발신자는 DM으로 페어링 코드를 받습니다."
+          },
+          "msg_format": {
+            "label": "메시지 형식",
+            "help": "응답 형식: plain 또는 markdown."
+          },
+          "ack_message": {
+            "label": "확인 메시지",
+            "help": "메시지가 도착했을 때 즉시 보내는 확인 응답입니다. 비워 두면 전송하지 않습니다."
+          },
+          "media_dir": {
+            "label": "미디어 디렉터리",
+            "help": "수신한 첨부 파일을 저장할 위치입니다. 비워 두면 ~/.vibe-trading/media/qq를 사용합니다."
+          },
+          "download_chunk_size": {
+            "label": "다운로드 청크 크기",
+            "help": "첨부 파일을 내려받을 때 청크당 바이트 수(기본 262144)."
+          },
+          "download_max_bytes": {
+            "label": "최대 다운로드 크기(바이트)",
+            "help": "첨부 파일 하나 다운로드의 안전 상한(기본 209715200 = 200 MB)."
+          }
         }
       },
       "guides": {
@@ -498,6 +532,16 @@
           "step4": "앱을 게시하여 조직에서 사용할 수 있게 합니다.",
           "step5": "여기로 돌아와 '연결 테스트'를 클릭한 다음 채널을 사용 설정합니다.",
           "docsLabel": "DingTalk 개발자 콘솔 열기"
+        },
+        "qq": {
+          "title": "QQ 설정 가이드",
+          "intro": "QQ 봇은 공식 botpy SDK를 통해 WebSocket으로 연결되므로 공개 콜백 URL이 필요하지 않습니다.",
+          "step1": "QQ 오픈 플랫폼(q.qq.com)에 등록하고 봇을 만듭니다.",
+          "step2": "봇의 개발 설정 페이지에서 AppID와 AppSecret을 복사합니다.",
+          "step3": "위의 AppID 및 AppSecret 필드에 붙여 넣습니다.",
+          "step4": "플랫폼의 샌드박스/게시 규칙에 따라 봇을 QQ 그룹에 추가하거나 개인 채팅을 시작합니다.",
+          "step5": "여기로 돌아와 '연결 테스트'를 클릭한 다음 채널을 사용 설정합니다.",
+          "docsLabel": "QQ 오픈 플랫폼 열기"
         }
       }
     },

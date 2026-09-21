@@ -491,6 +491,40 @@
             "label": "Force IPv4",
             "help": "Bind DingTalk API calls to IPv4. Useful when the app's egress-IP whitelist holds a stable IPv4 address while the IPv6 prefix keeps rotating."
           }
+        },
+        "qq": {
+          "app_id": {
+            "label": "AppID",
+            "help": "The bot's AppID from the QQ Open Platform (q.qq.com) app settings."
+          },
+          "secret": {
+            "label": "AppSecret",
+            "help": "The bot's AppSecret. Stored server-side and never sent back to the browser."
+          },
+          "allow_from": {
+            "label": "Allowed senders",
+            "help": "Optional allowlist of QQ sender openids that may talk to the agent (\"*\" allows everyone). Unpaired senders receive a pairing code in a direct message."
+          },
+          "msg_format": {
+            "label": "Message format",
+            "help": "Reply format: plain or markdown."
+          },
+          "ack_message": {
+            "label": "Ack message",
+            "help": "Immediate acknowledgement sent when a message arrives. Leave empty to disable."
+          },
+          "media_dir": {
+            "label": "Media directory",
+            "help": "Where inbound attachments are saved. Empty uses ~/.vibe-trading/media/qq."
+          },
+          "download_chunk_size": {
+            "label": "Download chunk size",
+            "help": "Bytes per chunk when downloading attachments (default 262144)."
+          },
+          "download_max_bytes": {
+            "label": "Max download size (bytes)",
+            "help": "Safety cap for a single attachment download (default 209715200 = 200 MB)."
+          }
         }
       },
       "guides": {
@@ -503,6 +537,16 @@
           "step4": "Publish the app so it is available to your organization.",
           "step5": "Return here, click Test connection, then enable the channel.",
           "docsLabel": "Open the DingTalk developer console"
+        },
+        "qq": {
+          "title": "QQ setup guide",
+          "intro": "QQ bots connect over WebSocket via the official botpy SDK, so no public callback URL is needed.",
+          "step1": "Register on the QQ Open Platform (q.qq.com) and create a bot.",
+          "step2": "Copy the AppID and AppSecret from the bot's development settings page.",
+          "step3": "Paste them into the AppID and AppSecret fields above.",
+          "step4": "Add the bot to a QQ group or chat with it privately, following the platform's sandbox/publish rules.",
+          "step5": "Return here, click Test connection, then enable the channel.",
+          "docsLabel": "Open the QQ Open Platform"
         }
       }
     },

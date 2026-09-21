@@ -491,6 +491,40 @@
             "label": "Forçar IPv4",
             "help": "Vincula as chamadas da API do DingTalk ao IPv4. Útil quando a lista de IPs de saída tem um IPv4 estável, mas o prefixo IPv6 muda constantemente."
           }
+        },
+        "qq": {
+          "app_id": {
+            "label": "AppID",
+            "help": "O AppID do bot nas configurações do app na QQ Open Platform (q.qq.com)."
+          },
+          "secret": {
+            "label": "AppSecret",
+            "help": "O AppSecret do bot. Fica no servidor e nunca é devolvido ao navegador."
+          },
+          "allow_from": {
+            "label": "Remetentes permitidos",
+            "help": "Lista opcional de openids de remetentes do QQ autorizados a falar com o agente (\"*\" libera todos). Remetentes não emparelhados recebem um código de emparelhamento por mensagem direta."
+          },
+          "msg_format": {
+            "label": "Formato da mensagem",
+            "help": "Formato da resposta: plain ou markdown."
+          },
+          "ack_message": {
+            "label": "Mensagem de confirmação",
+            "help": "Confirmação imediata enviada quando uma mensagem chega. Deixe vazio para desativar."
+          },
+          "media_dir": {
+            "label": "Diretório de mídia",
+            "help": "Onde os anexos recebidos são salvos. Vazio usa ~/.vibe-trading/media/qq."
+          },
+          "download_chunk_size": {
+            "label": "Tamanho do bloco de download",
+            "help": "Bytes por bloco ao baixar anexos (padrão 262144)."
+          },
+          "download_max_bytes": {
+            "label": "Tamanho máximo de download (bytes)",
+            "help": "Limite de segurança para o download de um único anexo (padrão 209715200 = 200 MB)."
+          }
         }
       },
       "guides": {
@@ -503,6 +537,16 @@
           "step4": "Publique o app para que ele fique disponível na sua organização.",
           "step5": "Volte aqui, clique em “Testar conexão” e ative o canal.",
           "docsLabel": "Abrir o console de desenvolvedor do DingTalk"
+        },
+        "qq": {
+          "title": "Guia de configuração do QQ",
+          "intro": "Os bots do QQ se conectam via WebSocket pelo SDK oficial botpy, então não é necessária uma URL de callback pública.",
+          "step1": "Registre-se na QQ Open Platform (q.qq.com) e crie um bot.",
+          "step2": "Copie o AppID e o AppSecret da página de configurações de desenvolvimento do bot.",
+          "step3": "Cole-os nos campos AppID e AppSecret acima.",
+          "step4": "Adicione o bot a um grupo do QQ ou converse com ele em privado, seguindo as regras de sandbox/publicação da plataforma.",
+          "step5": "Volte aqui, clique em “Testar conexão” e ative o canal.",
+          "docsLabel": "Abrir a QQ Open Platform"
         }
       }
     },

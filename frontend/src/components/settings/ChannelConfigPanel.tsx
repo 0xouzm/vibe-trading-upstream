@@ -11,6 +11,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -60,6 +61,56 @@ function initialFormValues(entry: ChannelConfigEntry): Record<string, FormValue>
   }
   return next;
 }
+
+interface ChannelGuide {
+  title: string;
+  intro: string;
+  steps: string[];
+  docsUrl: string;
+  docsLabel: string;
+}
+
+/**
+ * Per-channel setup guide registry: adding a channel is one entry here plus its
+ * i18n keys. `build` must use literal t() keys — typed i18n rejects
+ * interpolated ones — and receives `t` so the copy re-resolves on language
+ * change instead of being frozen at module load.
+ */
+const GUIDE_DEFS: Record<
+  string,
+  { docsUrl: string; build: (t: TFunction) => Omit<ChannelGuide, "docsUrl"> } | undefined
+> = {
+  dingtalk: {
+    docsUrl: "https://open-dev.dingtalk.com/",
+    build: (t) => ({
+      title: t("settings.channels.guides.dingtalk.title"),
+      intro: t("settings.channels.guides.dingtalk.intro"),
+      steps: [
+        t("settings.channels.guides.dingtalk.step1"),
+        t("settings.channels.guides.dingtalk.step2"),
+        t("settings.channels.guides.dingtalk.step3"),
+        t("settings.channels.guides.dingtalk.step4"),
+        t("settings.channels.guides.dingtalk.step5"),
+      ],
+      docsLabel: t("settings.channels.guides.dingtalk.docsLabel"),
+    }),
+  },
+  qq: {
+    docsUrl: "https://q.qq.com/",
+    build: (t) => ({
+      title: t("settings.channels.guides.qq.title"),
+      intro: t("settings.channels.guides.qq.intro"),
+      steps: [
+        t("settings.channels.guides.qq.step1"),
+        t("settings.channels.guides.qq.step2"),
+        t("settings.channels.guides.qq.step3"),
+        t("settings.channels.guides.qq.step4"),
+        t("settings.channels.guides.qq.step5"),
+      ],
+      docsLabel: t("settings.channels.guides.qq.docsLabel"),
+    }),
+  },
+};
 
 export interface ChannelConfigPanelProps {
   name: string;
@@ -126,6 +177,14 @@ export function ChannelConfigPanel({
       "settings.channels.fields.dingtalk.remote_media_redirect_allowed_hosts": { label: t("settings.channels.fields.dingtalk.remote_media_redirect_allowed_hosts.label"), help: t("settings.channels.fields.dingtalk.remote_media_redirect_allowed_hosts.help") },
       "settings.channels.fields.dingtalk.group_user_isolation": { label: t("settings.channels.fields.dingtalk.group_user_isolation.label"), help: t("settings.channels.fields.dingtalk.group_user_isolation.help") },
       "settings.channels.fields.dingtalk.force_ipv4": { label: t("settings.channels.fields.dingtalk.force_ipv4.label"), help: t("settings.channels.fields.dingtalk.force_ipv4.help") },
+      "settings.channels.fields.qq.app_id": { label: t("settings.channels.fields.qq.app_id.label"), help: t("settings.channels.fields.qq.app_id.help") },
+      "settings.channels.fields.qq.secret": { label: t("settings.channels.fields.qq.secret.label"), help: t("settings.channels.fields.qq.secret.help") },
+      "settings.channels.fields.qq.allow_from": { label: t("settings.channels.fields.qq.allow_from.label"), help: t("settings.channels.fields.qq.allow_from.help") },
+      "settings.channels.fields.qq.msg_format": { label: t("settings.channels.fields.qq.msg_format.label"), help: t("settings.channels.fields.qq.msg_format.help") },
+      "settings.channels.fields.qq.ack_message": { label: t("settings.channels.fields.qq.ack_message.label"), help: t("settings.channels.fields.qq.ack_message.help") },
+      "settings.channels.fields.qq.media_dir": { label: t("settings.channels.fields.qq.media_dir.label"), help: t("settings.channels.fields.qq.media_dir.help") },
+      "settings.channels.fields.qq.download_chunk_size": { label: t("settings.channels.fields.qq.download_chunk_size.label"), help: t("settings.channels.fields.qq.download_chunk_size.help") },
+      "settings.channels.fields.qq.download_max_bytes": { label: t("settings.channels.fields.qq.download_max_bytes.label"), help: t("settings.channels.fields.qq.download_max_bytes.help") },
     }),
     [t],
   );
@@ -141,20 +200,9 @@ export function ChannelConfigPanel({
   );
 
   const guide = useMemo(() => {
-    if (name !== "dingtalk") return null;
-    return {
-      title: t("settings.channels.guides.dingtalk.title"),
-      intro: t("settings.channels.guides.dingtalk.intro"),
-      steps: [
-        t("settings.channels.guides.dingtalk.step1"),
-        t("settings.channels.guides.dingtalk.step2"),
-        t("settings.channels.guides.dingtalk.step3"),
-        t("settings.channels.guides.dingtalk.step4"),
-        t("settings.channels.guides.dingtalk.step5"),
-      ],
-      docsUrl: "https://open-dev.dingtalk.com/",
-      docsLabel: t("settings.channels.guides.dingtalk.docsLabel"),
-    };
+    const definition = GUIDE_DEFS[name];
+    if (!definition) return null;
+    return { ...definition.build(t), docsUrl: definition.docsUrl };
   }, [name, t]);
 
   const setValue = (key: string, value: FormValue) => {

@@ -94,12 +94,12 @@ if DISCORD_AVAILABLE:
 
         async def on_ready(self) -> None:
             self._channel._bot_user_id = str(self.user.id) if self.user else None
-            self._channel.logger.info("bot connected as user {}", self._channel._bot_user_id)
+            self._channel.logger.info("bot connected as user %s", self._channel._bot_user_id)
             try:
                 synced = await self.tree.sync()
-                self._channel.logger.info("app commands synced: {}", len(synced))
+                self._channel.logger.info("app commands synced: %s", len(synced))
             except Exception as e:
-                self._channel.logger.warning("app command sync failed: {}", e)
+                self._channel.logger.warning("app command sync failed: %s", e)
 
         async def on_message(self, message: discord.Message) -> None:
             await self._channel._handle_discord_message(message)
@@ -119,7 +119,7 @@ if DISCORD_AVAILABLE:
                 await interaction.response.send_message(text, ephemeral=True)
                 return True
             except Exception as e:
-                self._channel.logger.warning("interaction response failed: {}", e)
+                self._channel.logger.warning("interaction response failed: %s", e)
                 return False
 
         async def _resolve_interaction_channel(
@@ -134,7 +134,7 @@ if DISCORD_AVAILABLE:
                 try:
                     channel = await self.fetch_channel(channel_id)
                 except Exception as e:
-                    self._channel.logger.warning("interaction channel {} unavailable: {}", channel_id, e)
+                    self._channel.logger.warning("interaction channel %s unavailable: %s", channel_id, e)
                     return None
             self._channel._remember_channel(channel)
             return channel
@@ -162,7 +162,7 @@ if DISCORD_AVAILABLE:
             channel_id = interaction.channel_id
 
             if channel_id is None:
-                self._channel.logger.warning("slash command missing channel_id: {}", command_text)
+                self._channel.logger.warning("slash command missing channel_id: %s", command_text)
                 return
 
             if not self._channel.is_allowed(sender_id):
@@ -245,7 +245,7 @@ if DISCORD_AVAILABLE:
             ) -> None:
                 command_name = interaction.command.qualified_name if interaction.command else "?"
                 self._channel.logger.warning(
-                    "app command failed user={} channel={} cmd={} error={}",
+                    "app command failed user=%s channel=%s cmd=%s error=%s",
                     interaction.user.id,
                     interaction.channel_id,
                     command_name,
@@ -261,7 +261,7 @@ if DISCORD_AVAILABLE:
                 try:
                     channel = await self.fetch_channel(channel_id)
                 except Exception as e:
-                    self._channel.logger.warning("channel {} unavailable: {}", msg.chat_id, e)
+                    self._channel.logger.warning("channel %s unavailable: %s", msg.chat_id, e)
                     return
 
             reference, mention_settings = self._build_reply_context(channel, msg.reply_to)
@@ -299,11 +299,11 @@ if DISCORD_AVAILABLE:
             """Send a file attachment via discord.py."""
             path = Path(file_path)
             if not path.is_file():
-                self._channel.logger.warning("file not found, skipping: {}", file_path)
+                self._channel.logger.warning("file not found, skipping: %s", file_path)
                 return False
 
             if path.stat().st_size > MAX_ATTACHMENT_BYTES:
-                self._channel.logger.warning("file too large (>20MB), skipping: {}", path.name)
+                self._channel.logger.warning("file too large (>20MB), skipping: %s", path.name)
                 return False
 
             try:
@@ -312,10 +312,10 @@ if DISCORD_AVAILABLE:
                     kwargs["reference"] = reference
                     kwargs["allowed_mentions"] = mention_settings
                 await channel.send(**kwargs)
-                self._channel.logger.info("file sent: {}", path.name)
+                self._channel.logger.info("file sent: %s", path.name)
                 return True
             except Exception:
-                self._channel.logger.exception("Error sending file {}", path.name)
+                self._channel.logger.exception("Error sending file %s", path.name)
                 return False
 
         @staticmethod
@@ -344,7 +344,7 @@ if DISCORD_AVAILABLE:
             try:
                 message_id = int(reply_to)
             except ValueError:
-                self._channel.logger.warning("Invalid reply target: {}", reply_to)
+                self._channel.logger.warning("Invalid reply target: %s", reply_to)
                 return None, mention_settings
 
             return channel.get_partial_message(message_id), mention_settings
@@ -520,7 +520,7 @@ class DiscordChannel(BaseChannel):
 
         target = await self._resolve_channel(chat_id)
         if target is None:
-            self.logger.warning("stream target {} unavailable", chat_id)
+            self.logger.warning("stream target %s unavailable", chat_id)
             return
 
         now = time.monotonic()
@@ -529,7 +529,7 @@ class DiscordChannel(BaseChannel):
                 buf.message = await target.send(content=buf.text)
                 buf.last_edit = now
             except Exception as e:
-                self.logger.warning("stream initial send failed: {}", e)
+                self.logger.warning("stream initial send failed: %s", e)
                 raise
             return
 
@@ -540,7 +540,7 @@ class DiscordChannel(BaseChannel):
             await buf.message.edit(content=DiscordBotClient._build_chunks(buf.text, [], False)[0])
             buf.last_edit = now
         except Exception as e:
-            self.logger.warning("stream edit failed: {}", e)
+            self.logger.warning("stream edit failed: %s", e)
             raise
 
     async def _handle_discord_message(self, message: discord.Message) -> None:
@@ -583,7 +583,7 @@ class DiscordChannel(BaseChannel):
             await message.add_reaction(self.config.read_receipt_emoji)
             self._pending_reactions[channel_id] = message
         except Exception as e:
-            self.logger.debug("Failed to add read receipt reaction: {}", e)
+            self.logger.debug("Failed to add read receipt reaction: %s", e)
 
         # Delayed working indicator (cosmetic — not tied to subagent lifecycle)
         async def _delayed_working_emoji() -> None:
@@ -627,7 +627,7 @@ class DiscordChannel(BaseChannel):
         try:
             return await client.fetch_channel(channel_id)
         except Exception as e:
-            self.logger.warning("channel {} unavailable: {}", chat_id, e)
+            self.logger.warning("channel %s unavailable: %s", chat_id, e)
             return None
 
     async def _finalize_stream(self, chat_id: str, buf: _StreamBuf) -> None:
@@ -640,12 +640,12 @@ class DiscordChannel(BaseChannel):
         try:
             await buf.message.edit(content=chunks[0])
         except Exception as e:
-            self.logger.warning("final stream edit failed: {}", e)
+            self.logger.warning("final stream edit failed: %s", e)
             raise
 
         target = getattr(buf.message, "channel", None) or await self._resolve_channel(chat_id)
         if target is None:
-            self.logger.warning("stream follow-up target {} unavailable", chat_id)
+            self.logger.warning("stream follow-up target %s unavailable", chat_id)
             self._stream_bufs.pop(chat_id, None)
             return
 
@@ -697,7 +697,7 @@ class DiscordChannel(BaseChannel):
                 media_paths.append(str(file_path))
                 markers.append(f"[attachment: {file_path.name}]")
             except Exception as e:
-                self.logger.warning("Failed to download attachment: {}", e)
+                self.logger.warning("Failed to download attachment: %s", e)
                 markers.append(f"[attachment: {filename} - download failed]")
 
         return media_paths, markers
@@ -740,7 +740,7 @@ class DiscordChannel(BaseChannel):
                 bot_user_id = str(self._client.user.id)
             if bot_user_id is None:
                 self.logger.debug(
-                    "message in {} ignored (bot identity unavailable)", message.channel.id
+                    "message in %s ignored (bot identity unavailable)", message.channel.id
                 )
                 return False
 
@@ -753,7 +753,7 @@ class DiscordChannel(BaseChannel):
             if self._references_bot_message(message, bot_user_id):
                 return True
 
-            self.logger.debug("message in {} ignored (bot not mentioned)", message.channel.id)
+            self.logger.debug("message in %s ignored (bot not mentioned)", message.channel.id)
             return False
 
         return True
@@ -783,7 +783,7 @@ class DiscordChannel(BaseChannel):
                 except asyncio.CancelledError:
                     return
                 except Exception as e:
-                    self.logger.debug("typing indicator failed for {}: {}", channel_id, e)
+                    self.logger.debug("typing indicator failed for %s: %s", channel_id, e)
                     return
 
         self._typing_tasks[channel_id] = asyncio.create_task(typing_loop())
@@ -827,6 +827,6 @@ class DiscordChannel(BaseChannel):
             try:
                 await self._client.close()
             except Exception as e:
-                self.logger.warning("client close failed: {}", e)
+                self.logger.warning("client close failed: %s", e)
         self._client = None
         self._bot_user_id = None

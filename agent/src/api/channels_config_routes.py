@@ -125,6 +125,35 @@ def _stored_section(name: str) -> dict[str, Any]:
     return dict(section) if isinstance(section, dict) else {}
 
 
+def _effective_section(name: str, section: dict[str, Any]) -> dict[str, Any]:
+    """Return the stored section backfilled with adapter defaults.
+
+    A never-configured channel has no on-disk section; without defaults the
+    generic form seeds empty strings and typed fields (``int``, ``Literal``)
+    reject the untouched form on Test/Save. Secret masking is unaffected:
+    defaults are empty, so ``secrets`` still reflects only the stored state.
+    """
+    try:
+        defaults = load_channel_class(name).default_config()
+    except Exception:  # noqa: BLE001 - an unloadable adapter keeps the raw section
+        logger.debug("Config defaults unavailable for channel '%s'", name, exc_info=True)
+        return section
+    if not isinstance(defaults, dict):
+        return section
+    return {**defaults, **section}
+
+
+def _unknown_keys(cls: type, patch: dict[str, Any]) -> list[str]:
+    """Return patch keys that are neither adapter fields nor manager overrides.
+
+    Shared by PUT and POST /test so both reject an unrecognized key with the
+    same 422 instead of one writing-refusing and one silently dropping it
+    into the probe instance (pydantic ``extra="ignore"``).
+    """
+    allowed = set(cls.default_config()) | _MANAGER_OVERRIDE_KEYS
+    return sorted(key for key in patch if key not in allowed)
+
+
 def _patch_of(name: str, body: dict[str, Any]) -> dict[str, Any]:
     """Filter a body patch: an empty string on a secret key keeps the stored value."""
     return {
@@ -162,7 +191,7 @@ def _live_status(name: str) -> dict[str, Any]:
 
 def _channel_entry(name: str, section: dict[str, Any], status_map: dict[str, Any]) -> dict[str, Any]:
     """Build one channel's GET-shape entry; secrets are masked, never returned."""
-    values, secrets = split_values_secrets(name, section)
+    values, secrets = split_values_secrets(name, _effective_section(name, section))
     available = bool(status_map.get("available", False))
     return {
         "display_name": str(status_map.get("display_name") or name),
@@ -296,11 +325,7 @@ async def _apply_update(name: str, payload: ChannelConfigUpdateRequest) -> dict[
 
     cls, instance = _build_ephemeral(name, merged)
 
-    unknown = sorted(
-        key
-        for key in patch
-        if key not in set(cls.default_config()) and key not in _MANAGER_OVERRIDE_KEYS
-    )
+    unknown = _unknown_keys(cls, patch)
     if unknown:
         raise _reject_validation(unknown)
 
@@ -342,7 +367,8 @@ async def _apply_update(name: str, payload: ChannelConfigUpdateRequest) -> dict[
 async def _run_test(name: str, body: dict[str, Any] | None, clears: list[str]) -> dict[str, Any]:
     """Probe credentials on an ephemeral instance; never persists anything."""
     stored = _stored_section(name)
-    merged = {**stored, **_patch_of(name, body or {})}
+    patch = _patch_of(name, body or {})
+    merged = {**stored, **patch}
     for key in clears:
         merged.pop(key, None)
     tested_saved_config = not body
@@ -364,6 +390,10 @@ async def _run_test(name: str, body: dict[str, Any] | None, clears: list[str]) -
     if cls is None or not getattr(cls, "supports_connection_test", False):
         # Nothing network-facing is constructed for an unsupported channel.
         return _result(False, "unsupported", "", sdk_fallback)
+
+    unknown = _unknown_keys(cls, patch)
+    if unknown:
+        raise _reject_validation(unknown)
 
     try:
         instance = cls(merged, MessageBus())

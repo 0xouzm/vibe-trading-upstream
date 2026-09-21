@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import mimetypes
 import time
 from contextlib import suppress
@@ -55,7 +56,6 @@ from src.channels.utils import get_media_dir, get_runtime_subdir
 from src.config.paths import get_data_dir
 from pydantic import BaseModel
 from src.channels.utils import safe_filename
-from src.utils.logging_bridge import redirect_lib_logging
 
 TYPING_NOTICE_TIMEOUT_MS = 30_000
 # Must stay below TYPING_NOTICE_TIMEOUT_MS so the indicator doesn't expire mid-processing.
@@ -255,7 +255,8 @@ class MatrixChannel(BaseChannel):
         """Start Matrix client and begin sync loop."""
         self._running = True
         self._started_at_ms = int(time.time() * 1000)
-        redirect_lib_logging("nio", level="WARNING")
+        # Keep the chatty nio SDK loggers at WARNING+ during the sync loop.
+        logging.getLogger("nio").setLevel(logging.WARNING)
 
         # The nio E2E store + session.json hold credentials, so they live under
         # the runtime dir (NOT the agent-readable uploads root that

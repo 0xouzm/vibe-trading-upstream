@@ -78,6 +78,40 @@ function dingtalkEntry(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function qqEntry(overrides: Record<string, unknown> = {}) {
+  return {
+    display_name: "QQ",
+    available: true,
+    loaded: true,
+    install_hint: "",
+    error: "",
+    supports_test: true,
+    sdk_available: true,
+    fields: [
+      { key: "app_id", type: "text", secret: false, required: true, help_key: "settings.channels.fields.qq.app_id" },
+      { key: "secret", type: "password", secret: true, required: true, help_key: "settings.channels.fields.qq.secret" },
+      { key: "allow_from", type: "list", secret: false, required: false, help_key: "settings.channels.fields.qq.allow_from" },
+      { key: "msg_format", type: "text", secret: false, required: false, help_key: "settings.channels.fields.qq.msg_format" },
+      { key: "ack_message", type: "text", secret: false, required: false, help_key: "settings.channels.fields.qq.ack_message" },
+      { key: "media_dir", type: "text", secret: false, required: false, help_key: "settings.channels.fields.qq.media_dir" },
+      { key: "download_chunk_size", type: "text", secret: false, required: false, help_key: "settings.channels.fields.qq.download_chunk_size" },
+      { key: "download_max_bytes", type: "text", secret: false, required: false, help_key: "settings.channels.fields.qq.download_max_bytes" },
+    ],
+    values: {
+      enabled: false,
+      app_id: "102000001",
+      allow_from: [],
+      msg_format: "markdown",
+      ack_message: "",
+      media_dir: "",
+      download_chunk_size: 262144,
+      download_max_bytes: 209715200,
+    },
+    secrets: { secret: { set: true, masked: "****9f2c" } },
+    ...overrides,
+  };
+}
+
 function channelsConfig(overrides: Record<string, unknown> = {}) {
   return {
     config_path: "~/.vibe-trading/agent.json",
@@ -94,6 +128,22 @@ async function renderExpanded() {
   await screen.findByText("IM Channels");
   fireEvent.click(await screen.findByRole("button", { name: "Configure DingTalk" }));
   expect(await screen.findByDisplayValue("ding_appkey")).toBeInTheDocument();
+}
+
+/** Render the card with both the DingTalk and QQ config panels available. */
+function bothChannelsConfig() {
+  return channelsConfig({
+    channels: { dingtalk: dingtalkEntry(), qq: qqEntry() },
+  });
+}
+
+/** Render the card with the QQ config panel expanded. */
+async function renderQqExpanded() {
+  apiMock.getChannelsConfig.mockResolvedValue(bothChannelsConfig());
+  render(<ChannelSettings />);
+  await screen.findByText("IM Channels");
+  fireEvent.click(await screen.findByRole("button", { name: "Configure QQ" }));
+  expect(await screen.findByDisplayValue("102000001")).toBeInTheDocument();
 }
 
 describe("ChannelSettings config panel", () => {
@@ -362,5 +412,62 @@ describe("ChannelSettings config panel", () => {
     fireEvent.click(guideToggle);
     expect(guideToggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText(/Create an app in the DingTalk developer console/)).not.toBeInTheDocument();
+  });
+
+  it("renders every QQ field from the backend help_keys with localized labels", async () => {
+    await renderQqExpanded();
+
+    expect(screen.getByText("AppID")).toBeInTheDocument();
+    expect(screen.getByText("AppSecret")).toBeInTheDocument();
+    expect(screen.getByText("Allowed senders")).toBeInTheDocument();
+    expect(screen.getByText("Message format")).toBeInTheDocument();
+    expect(screen.getByText("Ack message")).toBeInTheDocument();
+    expect(screen.getByText("Media directory")).toBeInTheDocument();
+    expect(screen.getByText("Download chunk size")).toBeInTheDocument();
+    expect(screen.getByText("Max download size (bytes)")).toBeInTheDocument();
+    expect(screen.getByText(/The bot's AppID from the QQ Open Platform/)).toBeInTheDocument();
+    // The secret field keeps the generic masked placeholder and password type.
+    const secretInput = screen.getByPlaceholderText("Keep current (****9f2c)");
+    expect(secretInput).toHaveAttribute("type", "password");
+    expect(secretInput).toHaveValue("");
+  });
+
+  it("toggles the QQ setup guide with its steps and external link", async () => {
+    await renderQqExpanded();
+
+    expect(screen.queryByText(/Register on the QQ Open Platform/)).not.toBeInTheDocument();
+
+    const guideToggle = screen.getByRole("button", { name: "QQ setup guide" });
+    expect(guideToggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(guideToggle);
+
+    expect(guideToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/Register on the QQ Open Platform/)).toBeInTheDocument();
+    expect(screen.getByText(/no public callback URL is needed/)).toBeInTheDocument();
+    expect(screen.getByText(/Copy the AppID and AppSecret/)).toBeInTheDocument();
+    expect(screen.getByText(/Paste them into the AppID and AppSecret fields above/)).toBeInTheDocument();
+    expect(screen.getByText(/Add the bot to a QQ group/)).toBeInTheDocument();
+    expect(screen.getByText(/click Test connection, then enable the channel/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open the QQ Open Platform" }))
+      .toHaveAttribute("href", "https://q.qq.com/");
+
+    fireEvent.click(guideToggle);
+    expect(guideToggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(/Register on the QQ Open Platform/)).not.toBeInTheDocument();
+  });
+
+  it("renders no setup guide for a channel without a guide definition", async () => {
+    apiMock.getChannelsConfig.mockResolvedValue(channelsConfig({
+      channels: {
+        dingtalk: dingtalkEntry(),
+        signal: qqEntry({ display_name: "Signal", fields: [], values: { enabled: false }, secrets: {} }),
+      },
+    }));
+    render(<ChannelSettings />);
+    await screen.findByText("IM Channels");
+    fireEvent.click(await screen.findByRole("button", { name: "Configure Signal" }));
+
+    expect(await screen.findByText("This channel has no configurable fields.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /setup guide/ })).not.toBeInTheDocument();
   });
 });

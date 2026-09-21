@@ -143,6 +143,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   "insufficient capital for position rebalance". Such an open is now skipped
   and reported once as `insufficient_capital`, the bar's reductions still
   run, and a close whose loss exceeds its margin still aborts the bar (#1274).
+- The grounding gate reads decimal commas (#1517): `17,93 %` and
+  `1.410,00 CNY` ground against tool results, two unspaced numbers such as
+  `1400,1777` stay two numbers, and a written figure must match its evidence
+  within half a unit of its last written digit (a truncated `30.20%` for
+  30.2052% is now sent back for correction). One shape regex added (14 → 15).
 - Block trades, margin trading and financial statements no longer read
   Eastmoney rejecting a stale query (code 9501) as an empty result; all six
   datacenter callers share `eastmoney_client.datacenter_rejection`.

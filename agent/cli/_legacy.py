@@ -435,7 +435,6 @@ def _provider_key_env(provider: str | None) -> str | None:
     """Return the credential environment variable for a provider."""
     return {
         "openrouter": "OPENROUTER_API_KEY",
-        "requesty": "REQUESTY_API_KEY",
         "openai": "OPENAI_API_KEY",
         "deepseek": "DEEPSEEK_API_KEY",
         "nvidia": "NVIDIA_API_KEY",
@@ -460,7 +459,6 @@ def _provider_base_env(provider: str | None) -> str | None:
     """Return the base URL environment variable for a provider."""
     return {
         "openrouter": "OPENROUTER_BASE_URL",
-        "requesty": "REQUESTY_BASE_URL",
         "openai": "OPENAI_BASE_URL",
         "openai-codex": "OPENAI_CODEX_BASE_URL",
         "deepseek": "DEEPSEEK_BASE_URL",
@@ -5716,16 +5714,6 @@ _PROVIDER_CHOICES: list[dict[str, str | None]] = [
         "key_placeholder": "sk-or-v1-...",
     },
     {
-        "label": "Requesty (OpenAI-compatible gateway - multiple models)",
-        "provider": "requesty",
-        "key_env": "REQUESTY_API_KEY",
-        "base_env": "REQUESTY_BASE_URL",
-        "base_url": "https://router.requesty.ai/v1",
-        "model": "openai/gpt-4o-mini",
-        "key_prefix": None,
-        "key_placeholder": "api-key...",
-    },
-    {
         "label": "DeepSeek",
         "provider": "deepseek",
         "key_env": "DEEPSEEK_API_KEY",
@@ -5932,8 +5920,6 @@ def _render_env_content(config: dict[str, str]) -> str:
         "LANGCHAIN_PROVIDER",
         "OPENROUTER_API_KEY",
         "OPENROUTER_BASE_URL",
-        "REQUESTY_API_KEY",
-        "REQUESTY_BASE_URL",
         "DEEPSEEK_API_KEY",
         "DEEPSEEK_BASE_URL",
         "NVIDIA_API_KEY",

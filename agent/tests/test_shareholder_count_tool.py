@@ -111,10 +111,12 @@ def test_max_periods_caps_returned_rows():
     payload = json.loads(out)
     assert len(payload["data"]["periods"]) == 1
     # the cap flows to the detail report's pageSize — the latest-only report
-    # used to return exactly one row whatever was asked (#1503)
+    # used to return exactly one row whatever was asked (#1503) — plus one row,
+    # so the oldest returned period still knows its previous period
     _, kwargs = mock_get.call_args_list[0]
     assert kwargs["params"]["reportName"] == sct._DETAIL_REPORT
-    assert kwargs["params"]["pageSize"] == "1"
+    assert kwargs["params"]["pageSize"] == "2"
+    assert payload["data"]["periods"][0]["prev_period_end"] == "2023-12-31"
 
 
 def test_latest_only_fallback_when_detail_report_is_empty():
@@ -149,6 +151,40 @@ def test_latest_join_failure_keeps_the_history():
     assert payload["ok"] is True
     assert len(payload["data"]["periods"]) == 3
     assert payload["data"]["periods"][0]["avg_hold_shares"] is None
+    # ...but it says why the average fields are empty
+    assert any("HTTP 502" in w for w in payload["data"]["warnings"])
+
+
+def test_latest_join_rejection_is_a_warning_not_silence():
+    """A retired latest-only column (the #1489 failure) must not read as null data."""
+    def latest_rejected(url, params=None, **kwargs):
+        if (params or {}).get("reportName") == sct._DETAIL_REPORT:
+            return _DETAIL_PAYLOAD
+        return {"success": False, "result": None, "code": 9501, "message": "AVG_HOLD_AMT返回字段不存在"}
+
+    with patch.object(sct, "get_json", side_effect=latest_rejected):
+        payload = json.loads(ShareholderCountTool().execute(code="600519.SH"))
+    assert payload["ok"] is True
+    assert any("AVG_HOLD_AMT" in w for w in payload["data"]["warnings"])
+
+
+def test_latest_only_fallback_rejection_is_an_error_not_no_disclosure():
+    def both(url, params=None, **kwargs):
+        if (params or {}).get("reportName") == sct._DETAIL_REPORT:
+            return {"result": {"data": []}}
+        return {"success": False, "result": None, "code": 9501, "message": "AVG_HOLD_AMT返回字段不存在"}
+
+    with patch.object(sct, "get_json", side_effect=both):
+        payload = json.loads(ShareholderCountTool().execute(code="600519.SH"))
+    assert payload["ok"] is False
+    assert "AVG_HOLD_AMT" in payload["error"]
+    assert "no shareholder-count disclosure" not in payload["error"]
+
+
+def test_a_clean_join_carries_no_warnings():
+    with patch.object(sct, "get_json", side_effect=_route_by_report):
+        payload = json.loads(ShareholderCountTool().execute(code="600519.SH"))
+    assert "warnings" not in payload["data"]
 
 
 def test_non_a_share_returns_error_envelope():

@@ -122,7 +122,9 @@ class ShareholderCountTool(BaseTool):
                     "sortColumns": "END_DATE",
                     "sortTypes": "-1",
                     "pageNumber": "1",
-                    "pageSize": str(limit),
+                    # One row past the limit: the oldest returned period's
+                    # prev_period_end comes from the row after it.
+                    "pageSize": str(limit + 1),
                     "source": "WEB",
                     "client": "WEB",
                 },
@@ -135,29 +137,34 @@ class ShareholderCountTool(BaseTool):
             return _error(f"eastmoney datacenter rejected the request: {rejection}")
 
         periods = _parse_periods(detail_payload)
+        warnings: list[str] = []
         if periods:
             # The per-period report has no average-holding or market-cap
             # columns; the latest-only report carries them, so join its row
             # onto the newest period when the two agree on the end date.
-            latest = _fetch_latest_row(code)
+            latest, problem = _fetch_latest_row(code)
+            if problem is not None:
+                warnings.append(
+                    f"average holding and market cap unavailable: latest-only report {problem}"
+                )
             if latest is not None and periods[0]["end_date"] == latest["end_date"]:
                 for key in ("avg_hold_shares", "avg_hold_amount", "total_market_cap"):
                     periods[0][key] = latest.get(key)
         else:
             # Some symbols only surface on the latest-only report; answer the
             # single latest period rather than nothing.
-            latest = _fetch_latest_row(code)
+            latest, problem = _fetch_latest_row(code)
+            if problem is not None:
+                return _error(f"eastmoney latest-only report {problem}")
             if latest is None:
                 return _error(f"no shareholder-count disclosure found for '{code}'")
             periods = [latest]
 
+        data: dict[str, Any] = {"code": code, "periods": periods[:limit]}
+        if warnings:
+            data["warnings"] = warnings
         return json.dumps(
-            {
-                "ok": True,
-                "market": "CN",
-                "source": "eastmoney",
-                "data": {"code": code, "periods": periods[:limit]},
-            },
+            {"ok": True, "market": "CN", "source": "eastmoney", "data": data},
             ensure_ascii=False,
         )
 
@@ -269,13 +276,17 @@ def _normalize_row(row: Any) -> dict | None:
     }
 
 
-def _fetch_latest_row(code: str) -> dict | None:
-    """Fetch the latest-only report's single row for ``code``, or ``None``.
+def _fetch_latest_row(code: str) -> tuple[dict | None, str | None]:
+    """Fetch the latest-only report's single row for ``code``.
 
     Used for the average-holding / market-cap columns the detail report does
     not carry, and as the single-period answer when the detail report has no
-    rows for the symbol. Its own failures never fail the call: the caller
-    already has (or lacks) the history either way.
+    rows for the symbol. A failure is returned, not raised, so the caller can
+    keep the history it has and say what is missing.
+
+    Returns:
+        ``(row, None)`` on success, ``(None, None)`` when the report has no
+        row, or ``(None, problem)`` when the request failed or was rejected.
     """
     try:
         payload = get_json(
@@ -292,12 +303,13 @@ def _fetch_latest_row(code: str) -> dict | None:
                 "client": "WEB",
             },
         )
-    except Exception:  # noqa: BLE001 - best-effort enrichment, never fatal
-        return None
-    if _upstream_rejection(payload) is not None:
-        return None
+    except Exception as exc:  # noqa: BLE001 - reported to the caller, never raised
+        return None, f"request failed: {exc}"
+    rejection = _upstream_rejection(payload)
+    if rejection is not None:
+        return None, f"rejected the request: {rejection}"
     periods = _parse_periods(payload)
-    return periods[0] if periods else None
+    return (periods[0] if periods else None), None
 
 
 def _clean_date(value: Any) -> str | None:

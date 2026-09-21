@@ -41,8 +41,8 @@ def _make_channel(
 ) -> QQChannel:
     """Build a QQ channel that has NOT been started (no ``self._http``).
 
-    ``QQChannel.__init__`` creates its media directory, so it is pinned under
-    ``tmp_path`` to keep the test sandbox clean.
+    ``media_dir`` is pinned under ``tmp_path`` so any media-root creation
+    (``_ensure_media_root``, downloads) stays inside the test sandbox.
     """
     return QQChannel(
         {
@@ -281,6 +281,30 @@ def test_server_error_reports_network(
 
     assert result["ok"] is False
     assert result["code"] == "network"
+
+
+# --------------------------------------------------------------------------- #
+# Construction side effects
+# --------------------------------------------------------------------------- #
+
+
+def test_construction_never_creates_the_media_directory(tmp_path: Path) -> None:
+    """Ephemeral validation instances must not touch the filesystem.
+
+    The web-config Test/Save routes construct the channel to validate a
+    section before anything is persisted; a constructor that mkdir'd a
+    user-controlled path created directories for configs that were then
+    rejected. Creation belongs to ``start()`` via ``_ensure_media_root``.
+    """
+    media = tmp_path / "qq-media"
+
+    channel = _make_channel(tmp_path)
+
+    assert channel._media_root == media
+    assert not media.exists()
+
+    channel._ensure_media_root()
+    assert media.is_dir()
 
 
 # --------------------------------------------------------------------------- #

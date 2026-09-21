@@ -177,7 +177,13 @@ class QQChannel(BaseChannel):
     # ---------------------------
 
     def _init_media_root(self) -> Path:
-        """Choose a directory for saving inbound attachments."""
+        """Choose a directory for saving inbound attachments (side-effect free).
+
+        Ephemeral validation instances (web-config Test/Save) construct the
+        channel before anything is persisted and must not touch the
+        filesystem; the directory itself is created by ``_ensure_media_root``
+        from ``start()``.
+        """
         if self.config.media_dir:
             root = Path(self.config.media_dir).expanduser()
         elif get_media_dir:
@@ -188,9 +194,12 @@ class QQChannel(BaseChannel):
         else:
             root = Path.home() / ".vibe-trading" / "media" / "qq"
 
-        root.mkdir(parents=True, exist_ok=True)
         self.logger.info("media directory: %s", str(root))
         return root
+
+    def _ensure_media_root(self) -> None:
+        """Create the media root; called from ``start()``, never ``__init__``."""
+        self._media_root.mkdir(parents=True, exist_ok=True)
 
     async def start(self) -> None:
         """Start the QQ bot with auto-reconnect loop."""
@@ -202,6 +211,15 @@ class QQChannel(BaseChannel):
         if not self.config.app_id or not self.config.secret:
             self.logger.error("app_id and secret not configured")
             return
+
+        try:
+            self._ensure_media_root()
+        except OSError as exc:
+            # An unwritable media dir must not stop a text-capable bot;
+            # each download re-attempts the mkdir and fails on its own.
+            self.logger.warning(
+                "cannot create media directory %s: %s", self._media_root, exc
+            )
 
         self._running = True
         self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))

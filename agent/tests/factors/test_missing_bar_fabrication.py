@@ -99,19 +99,21 @@ def _base() -> dict[str, np.ndarray]:
     return base
 
 
-def _panel(base: dict[str, np.ndarray], deps: set[str], mode: str) -> dict[str, pd.DataFrame]:
+def _panel(
+    base: dict[str, np.ndarray], deps: set[str], mode: str, symbol: int = _SYMBOL
+) -> dict[str, pd.DataFrame]:
     index = pd.bdate_range("2020-01-01", periods=_T)
     columns = [f"S{i}" for i in range(_N)]
     panel = {}
     for name, values in base.items():
         array = values.copy()
         if name in deps and mode == "missing":
-            array[_GAP, _SYMBOL] = np.nan
+            array[_GAP, symbol] = np.nan
         elif name in deps and mode in ("up", "down"):
             # Eight ticks, still dyadic: large enough to flip a comparison with the
             # neighbouring bars, so up/down comparisons actually depend on the gap.
             step = 0.5 if name in _PRICES else (1.0 / 8.0 if name.startswith("fund:") else 4096.0)
-            array[_GAP, _SYMBOL] += step if mode == "up" else -step
+            array[_GAP, symbol] += step if mode == "up" else -step
         panel[name] = pd.DataFrame(array, index=index, columns=columns)
     panel["amount"] = panel["vwap"] * panel["volume"]
     panel["sector"] = pd.DataFrame(np.tile(np.arange(_N) % 3, (_T, 1)), index=index, columns=columns)
@@ -198,12 +200,17 @@ def test_a_smoother_skips_the_gap(alpha_id: str) -> None:
 
 
 # Flagged by the value oracle for a reason other than the gap: a rounding residue
-# in a correlation of ranks that breaks a later rank tie differently.
+# in a correlation of ranks that breaks a later rank tie differently, or (the
+# alpha101_021 / gtja191_004 twins, 37 bars past a 20-bar reach) a rolling mean
+# minus a rolling std that equals the 2-bar mean exactly on the gap-free run and
+# misses it by 1e-14 on the gapped one.
 RESIDUE_ARTIFACTS = {
     "alpha101_013",
     "alpha101_016",
+    "alpha101_021",
     "alpha101_094",
     "alpha101_098",
+    "gtja191_004",
     "gtja191_083",
     "gtja191_099",
     "gtja191_121",
@@ -214,6 +221,9 @@ PARTIAL_WINDOWS = {"gtja191_025", "gtja191_033", "academic_corr_rewire"}
 # so one symbol's missing close moves every symbol's "benchmark down" flag on the
 # next bar. The symbol's own inputs are masked; the benchmark is left as it is.
 BENCHMARK_FROM_THE_PANEL = {"gtja191_075", "gtja191_182"}
+
+
+_VALUE_ORACLE_SYMBOLS = (_SYMBOL, 16)
 
 
 def _all_alpha_ids() -> list[str]:
@@ -228,12 +238,19 @@ def test_no_finite_value_after_a_gap_differs_from_the_gap_free_one(alpha_id: str
     registry = get_default_registry()
     deps = set(registry.get(alpha_id).meta.get("columns_required", []))
     base = _base()
-    clean = registry.compute(alpha_id, _panel(base, deps, "base")).iloc[_GAP:, _SYMBOL].to_numpy(dtype=float)
-    gapped = registry.compute(alpha_id, _panel(base, deps, "missing")).iloc[_GAP:, _SYMBOL].to_numpy(dtype=float)
-
-    scale = np.maximum(1.0, np.abs(clean))
-    moved = np.isfinite(gapped) & (~np.isfinite(clean) | (np.abs(gapped - clean) / scale > 1e-9))
-    assert not moved.any(), f"finite bars after the gap that differ from the gap-free run: {np.flatnonzero(moved).tolist()}"
+    clean = registry.compute(alpha_id, _panel(base, deps, "base")).iloc[_GAP:].to_numpy(dtype=float)
+    # A gate only shows when the substituted verdict differs from the true one, so
+    # one symbol can miss it (alpha101_096's fmax is invisible on symbol 7).
+    for symbol in _VALUE_ORACLE_SYMBOLS:
+        gapped = registry.compute(alpha_id, _panel(base, deps, "missing", symbol))
+        after = gapped.iloc[_GAP:, symbol].to_numpy(dtype=float)
+        truth = clean[:, symbol]
+        scale = np.maximum(1.0, np.abs(truth))
+        moved = np.isfinite(after) & (~np.isfinite(truth) | (np.abs(after - truth) / scale > 1e-9))
+        assert not moved.any(), (
+            f"symbol {symbol}: finite bars after the gap that differ from the gap-free run: "
+            f"{np.flatnonzero(moved).tolist()}"
+        )
 
 
 def test_the_value_oracle_exemptions_are_real_alphas() -> None:

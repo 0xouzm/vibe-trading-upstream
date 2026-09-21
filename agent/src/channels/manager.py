@@ -32,6 +32,9 @@ _BOOL_CAMEL_ALIASES: dict[str, str] = {
     "show_reasoning": "showReasoning",
 }
 
+# Bound the reload stop wait so a wedged adapter cannot stall a hot swap.
+_RELOAD_STOP_TIMEOUT_S = 10.0
+
 
 # Inbound messages whose reply fingerprint is kept for duplicate suppression.
 _MAX_REPLY_FINGERPRINTS = 4096
@@ -60,6 +63,7 @@ class ChannelManager:
         self._cron_service = cron_service
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self._start_tasks: set[asyncio.Task] = set()
         self._origin_reply_fingerprints: dict[tuple[str, str, str], str] = {}
         self._status: dict[str, dict[str, Any]] = {}
 
@@ -69,76 +73,82 @@ class ChannelManager:
         """Initialize channels discovered via pkgutil scan + entry_points plugins."""
         self._status = inspect_channels(self.config)
         enabled_names = {
-            name
-            for name, status in self._status.items()
-            if status.get("enabled") is True
+            name for name, status in self._status.items() if status.get("enabled") is True
         }
-        plugin_classes = discover_plugins(enabled_names)
-        builtins = set(discover_channel_names())
 
         for name in sorted(enabled_names):
             section = self._get_channel_config(name)
             if section is None:
                 continue
-            if self._status.get(name, {}).get("available") is False:
-                logger.warning(
-                    "%s channel not available: %s",
-                    name,
-                    self._status[name].get("error", "unavailable"),
-                )
-                continue
-            try:
-                cls = load_channel_class(name) if name in builtins else plugin_classes[name]
-            except Exception as exc:  # noqa: BLE001 - status endpoint must explain startup gaps
-                self._status.setdefault(name, {})
-                self._status[name].update(
-                    {
-                        "available": False,
-                        "loaded": False,
-                        "running": False,
-                        "error": f"{type(exc).__name__}: {exc}",
-                    }
-                )
-                logger.warning("%s channel not available: %s", name, exc)
-                continue
-
-            try:
-                kwargs = self._build_channel_kwargs(name)
-                channel = cls(section, self.bus, **kwargs)
-                # Resolve global → per-channel boolean overrides
-                channel.send_progress = self._resolve_bool_override(
-                    section, "send_progress", self._global_bool("send_progress", True),
-                )
-                channel.send_tool_hints = self._resolve_bool_override(
-                    section, "send_tool_hints", self._global_bool("send_tool_hints", False),
-                )
-                channel.show_reasoning = self._resolve_bool_override(
-                    section, "show_reasoning", self._global_bool("show_reasoning", True),
-                )
+            channel = self._build_channel(name, section)
+            if channel is not None:
                 self.channels[name] = channel
-                self._status.setdefault(name, {})
-                self._status[name].update(
-                    {
-                        "available": True,
-                        "loaded": True,
-                        "running": channel.is_running,
-                        "display_name": getattr(cls, "display_name", name),
-                        "error": "",
-                    }
-                )
-                logger.info("%s channel enabled", cls.display_name)
-            except Exception as exc:
-                self._status.setdefault(name, {})
-                self._status[name].update(
-                    {
-                        "loaded": False,
-                        "running": False,
-                        "error": f"{type(exc).__name__}: {exc}",
-                    }
-                )
-                logger.warning("%s channel not available", name, exc_info=True)
 
         self._validate_allow_from()
+
+    def _build_channel(self, name: str, section: dict) -> BaseChannel | None:
+        """Build one adapter instance and record its status (``None`` if it cannot be built).
+
+        Args:
+            name: Channel name.
+            section: The channel's config section.
+        """
+        if self._status.get(name, {}).get("available") is False:
+            logger.warning(
+                "%s channel not available: %s",
+                name,
+                self._status[name].get("error", "unavailable"),
+            )
+            return None
+
+        try:
+            builtins = set(discover_channel_names())
+            cls = load_channel_class(name) if name in builtins else discover_plugins({name})[name]
+        except Exception as exc:  # noqa: BLE001 - status endpoint must explain startup gaps
+            self._record_status(
+                name,
+                available=False,
+                loaded=False,
+                running=False,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            logger.warning("%s channel not available: %s", name, exc)
+            return None
+
+        try:
+            kwargs = self._build_channel_kwargs(name)
+            channel = cls(section, self.bus, **kwargs)
+            # Resolve global → per-channel boolean overrides
+            channel.send_progress = self._resolve_bool_override(
+                section, "send_progress", self._global_bool("send_progress", True),
+            )
+            channel.send_tool_hints = self._resolve_bool_override(
+                section, "send_tool_hints", self._global_bool("send_tool_hints", False),
+            )
+            channel.show_reasoning = self._resolve_bool_override(
+                section, "show_reasoning", self._global_bool("show_reasoning", True),
+            )
+            self._record_status(
+                name,
+                configured=True,
+                enabled=True,
+                available=True,
+                loaded=True,
+                running=channel.is_running,
+                display_name=getattr(cls, "display_name", name),
+                error="",
+            )
+            logger.info("%s channel enabled", cls.display_name)
+            return channel
+        except Exception as exc:
+            self._record_status(
+                name,
+                loaded=False,
+                running=False,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            logger.warning("%s channel not available", name, exc_info=True)
+            return None
 
     def _build_channel_kwargs(self, name: str) -> dict[str, Any]:
         """Build adapter-specific constructor kwargs for channels that need services."""
@@ -214,21 +224,26 @@ class ChannelManager:
         except Exception:
             logger.exception("Failed to start channel %s", name)
 
+    def _spawn_channel_start(self, name: str, channel: BaseChannel) -> None:
+        """Start a channel in the background, keeping a strong task reference."""
+        task = asyncio.create_task(self._start_channel(name, channel))
+        self._start_tasks.add(task)
+        task.add_done_callback(self._start_tasks.discard)
+
     async def start_all(self) -> None:
         """Start all channels and the outbound dispatcher."""
+        self._dispatch_task = asyncio.create_task(self._dispatch_outbound())
         if not self.channels:
             logger.warning("No channels enabled")
             return
 
-        self._dispatch_task = asyncio.create_task(self._dispatch_outbound())
-
         tasks = []
-        for name, channel in self.channels.items():
+        for name, channel in list(self.channels.items()):
             logger.info("Starting %s channel...", name)
             tasks.append(asyncio.create_task(self._start_channel(name, channel)))
 
         await asyncio.gather(*tasks, return_exceptions=True)
-        for name, channel in self.channels.items():
+        for name, channel in list(self.channels.items()):
             self._status.setdefault(name, {})
             self._status[name]["running"] = channel.is_running
 
@@ -240,8 +255,10 @@ class ChannelManager:
             self._dispatch_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._dispatch_task
+            self._dispatch_task = None
 
-        for name, channel in self.channels.items():
+        # Iterate a snapshot: a concurrent reload_channel may pop/insert entries.
+        for name, channel in list(self.channels.items()):
             try:
                 await channel.stop()
                 logger.info("Stopped %s channel", name)
@@ -254,6 +271,79 @@ class ChannelManager:
             finally:
                 self._status.setdefault(name, {})
                 self._status[name]["running"] = channel.is_running
+
+    async def reload_channel(self, name: str, section: dict | None) -> dict[str, Any]:
+        """Hot-swap one channel adapter without restarting the other channels.
+
+        A slow ``stop()`` is bounded and never blocks the replacement.
+
+        Args:
+            name: Channel name.
+            section: The channel's new config section, or ``None`` when it is
+                no longer configured.
+
+        Returns:
+            The updated ``_status[name]`` entry.
+        """
+        old = self.channels.get(name)
+        if old is not None:
+            try:
+                await asyncio.wait_for(old.stop(), timeout=_RELOAD_STOP_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                logger.warning("Stopping %s timed out; replacing", name)
+            except Exception:
+                logger.warning("Stopping %s failed; replacing", name, exc_info=True)
+        self.channels.pop(name, None)
+        self._store_channel_section(name, section)
+
+        if section is None or not self._section_enabled(section):
+            return self._record_status(
+                name,
+                configured=section is not None,
+                enabled=False,
+                loaded=False,
+                running=False,
+            )
+
+        channel = self._build_channel(name, section)
+        if channel is None:
+            return self._record_status(name)
+        self.channels[name] = channel
+        if self._is_manager_running():
+            # start() can be long-running (reconnect loops), so it must not be
+            # awaited inline; yield once so adapters that flip is_running early
+            # are reflected in the returned status.
+            self._spawn_channel_start(name, channel)
+            await asyncio.sleep(0)
+            self._status[name]["running"] = channel.is_running
+        return self._status[name]
+
+    def _record_status(self, name: str, **fields: Any) -> dict[str, Any]:
+        """Merge *fields* into the status entry for *name* and return it."""
+        self._status.setdefault(name, {})
+        self._status[name].update(fields)
+        return self._status[name]
+
+    @staticmethod
+    def _section_enabled(section: Any) -> bool:
+        """Return whether a channel section enables the adapter."""
+        if isinstance(section, dict):
+            return bool(section.get("enabled", False))
+        return bool(getattr(section, "enabled", False))
+
+    def _store_channel_section(self, name: str, section: dict | None) -> None:
+        """Keep the manager's config snapshot in step with the reloaded section."""
+        if isinstance(self.config, dict):
+            if section is None:
+                self.config.pop(name, None)
+            else:
+                self.config[name] = section
+        elif section is not None:
+            setattr(self.config, name, section)
+
+    def _is_manager_running(self) -> bool:
+        """Return whether the outbound dispatcher (``start_all``) is active."""
+        return self._dispatch_task is not None and not self._dispatch_task.done()
 
     # --- Outbound dispatch ---
 

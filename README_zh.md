@@ -52,6 +52,8 @@
 
 > ⚠️ **安全警告：** X 账号 `VibeTrading_HKU`、Virtuals 项目 `101845` 及代币合约 `0x640BDBF77b6447E8b7DB7894cED84BD1c40571f4` 均非 Vibe-Trading 官方。我们从未发行或背书任何代币或 meme 币。请勿购买、连接钱包或签名。[详细说明](SECURITY.md#official-channels--impersonation)。
 
+- **2026-09-20** 🔌 **IM 频道现在可以在 Web 界面中配置**：在“设置”页即可编辑各频道字段——先校验后保存（被驳回的修改不会落盘）、密钥脱敏显示、可选连接测试、按频道热生效无需重启（[#1519](https://github.com/HKUDS/Vibe-Trading/issues/1519)，[#1520](https://github.com/HKUDS/Vibe-Trading/pull/1520)）。钉钉首个提供引导式配置流程。
+
 - **2026-09-20** 🛠️ **行情请求更明确，日常交互更可靠**：月线 `1M` 请求现在明确报不支持，不再悄悄返回一分钟 K 线（[#1487](https://github.com/HKUDS/Vibe-Trading/pull/1487)）；周线和月线支持仍由 [#1479](https://github.com/HKUDS/Vibe-Trading/issues/1479) 跟踪。欢迎页快捷操作会高亮实际选中项（[#1500](https://github.com/HKUDS/Vibe-Trading/pull/1500)）；钉钉下载文件名会清理路径字符（[#1506](https://github.com/HKUDS/Vibe-Trading/pull/1506)）；Signal 不再因 emoji 后的提及偏移而误删文字（[#1478](https://github.com/HKUDS/Vibe-Trading/pull/1478)）；信用利差表把 `5` / `5.0` 等相同期限合并为一列（[#1507](https://github.com/HKUDS/Vibe-Trading/pull/1507)）。
 
 - **2026-09-19** 🛠️ **被误报成“无披露”或错误来源的数据问题**：修正上游改名字段，恢复 A 股股东户数查询；接口拒绝请求时直接报告原因，不再误称股票没有披露（[#1490](https://github.com/HKUDS/Vibe-Trading/pull/1490)）。请求的 SDK 不可用而发生降级时，行情来源现在逐股票记录实际提供数据的 loader，降级标记和复权口径也随之匹配（[#1491](https://github.com/HKUDS/Vibe-Trading/issues/1491)）。QVeris 不再把 `indicators` 覆盖成结束日期（[#1496](https://github.com/HKUDS/Vibe-Trading/pull/1496)）；复权选择、复权响应解析及计费问题仍由 [#1494](https://github.com/HKUDS/Vibe-Trading/issues/1494) 跟踪。感谢 [@cgycorey](https://github.com/cgycorey) 和 [@lorenzozanee](https://github.com/lorenzozanee)！
@@ -1030,6 +1032,10 @@ vibe-trading channels pairing --channel telegram list
 | `/pairing list` | 显示待处理的 sender pairing 请求 |
 
 命令不区分大小写，且必须作为整条消息发送（例如 `hello /new` 会被当作普通消息而非重置命令）。
+
+**从 Web UI 配置**：Settings 页面的 **IM Channels** 面板可以直接在网页上完成通道配置，无需手工编辑文件。展开某个通道即打开配置面板：表单字段由后端元数据渲染；secret 值不会回传给浏览器，只显示掩码（`****` 加末 4 位）。钉钉是第一个带完整接入指南的通道：在 [open-dev.dingtalk.com](https://open-dev.dingtalk.com/) 创建应用，添加机器人能力并开启 Stream Mode（无需公网回调地址），把 AppKey 填入 Client ID、AppSecret 填入 Client Secret，然后发布应用。**Test connection** 在任何内容保存之前就用表单中的当前值发起探测，并返回真实结果码（`ok`、`invalid_credentials`、`network`、`unsupported`）。打开 **Enable** 立即生效：运行中的通道 runtime 只热替换该通道的适配器，无需重启进程；启用时会自动校验凭据，除非你在校验失败后显式选择 **Enable anyway** 跳过。停用通道不会删除已保存的凭据，重新启用无需再次录入。此处仅列出内置适配器；通过 entry points 接入的插件频道仍需编辑配置文件。
+
+保存会原子地更新 `~/.vibe-trading/agent.json` 的 `channels.<name>` 段。YAML 配置文件对 Web UI 只读（浏览器内编辑要求 JSON），面板会直接说明这一点而不是报错。没有专属指南的通道会按其默认配置渲染通用表单。
 
 </details>
 

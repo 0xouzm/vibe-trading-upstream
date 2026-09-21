@@ -52,6 +52,8 @@
 
 > ⚠️ **セキュリティ警告：** Xアカウント `VibeTrading_HKU`、Virtualsプロジェクト `101845`、およびトークンコントラクト `0x640BDBF77b6447E8b7DB7894cED84BD1c40571f4` は、いずれもVibe-Trading公式のものではありません。Vibe-Tradingはこれまで、いかなるトークンやミームコインも発行・公認していません。購入、ウォレットの接続、署名は行わないでください。[詳細](SECURITY.md#official-channels--impersonation)
 
+- **2026-09-20** 🔌 **IM チャンネルを Web UI から設定可能に**：設定ページで各チャンネルの項目を編集できます——保存前バリデーション（拒否された変更はディスクに書き込まれません）、マスクされたシークレット、任意の接続テスト、再起動不要のチャンネル単位ホット適用（[#1519](https://github.com/HKUDS/Vibe-Trading/issues/1519)、[#1520](https://github.com/HKUDS/Vibe-Trading/pull/1520)）。DingTalk が最初のガイド付きセットアップです。
+
 - **2026-09-20** 🛠️ **データ要求の明確化と日常操作の修正**：月足を指定する `1M` は、誤って1分足を取得する代わりに未対応として明示的に拒否します（[#1487](https://github.com/HKUDS/Vibe-Trading/pull/1487)）。週足・月足対応は引き続き [#1479](https://github.com/HKUDS/Vibe-Trading/issues/1479) で追跡しています。ウェルカム画面では選択したクイックアクションを強調表示（[#1500](https://github.com/HKUDS/Vibe-Trading/pull/1500)）、DingTalkではダウンロード名のパス文字を無害化（[#1506](https://github.com/HKUDS/Vibe-Trading/pull/1506)）。Signalでは絵文字の後のメンション周辺の文字を保持し（[#1478](https://github.com/HKUDS/Vibe-Trading/pull/1478)）、信用スプレッド表では `5` / `5.0` のような同一期限を一列に統合します（[#1507](https://github.com/HKUDS/Vibe-Trading/pull/1507)）。
 
 - **2026-09-19** 🛠️ **「開示なし」や誤った取得元として表示されていたデータの問題を修正**：上流の列名変更に対応し、A株の株主数取得を復旧。リクエストが拒否された場合は、開示がないとせず提供元のエラーを返します（[#1490](https://github.com/HKUDS/Vibe-Trading/pull/1490)）。指定したSDKが利用できない場合も、銘柄ごとに実際の取得元を記録し、フォールバックの有無と価格調整区分を一致させます（[#1491](https://github.com/HKUDS/Vibe-Trading/issues/1491)）。QVerisが `indicators` を終了日で上書きする問題も修正（[#1496](https://github.com/HKUDS/Vibe-Trading/pull/1496)）。価格調整の選択、調整済みレスポンスの解析、課金の問題は引き続き [#1494](https://github.com/HKUDS/Vibe-Trading/issues/1494) で追跡します。[@cgycorey](https://github.com/cgycorey) と [@lorenzozanee](https://github.com/lorenzozanee) に感謝します！
@@ -1025,6 +1027,10 @@ Built-in adapters は `websocket`、`telegram`、`slack`、`discord`、`matrix`�
 | `/pairing list` | 保留中の sender pairing リクエストを表示 |
 
 コマンドは大文字小文字を区別せず、メッセージ全体として送信する必要があります（例：`hello /new` はリセットではなく通常メッセージとして処理されます）。
+
+**Web UI から設定**: Settings ページの **IM Channels** パネルでは、ファイルを手編集せずにチャンネルを設定できます。チャンネルを展開すると設定パネルが開きます。フィールドはバックエンドのメタデータから描画され、secret の値はブラウザに返されず、マスク表示（`****` ＋末尾 4 文字）のみです。DingTalk が最初の完全なガイド付きチャンネルです：[open-dev.dingtalk.com](https://open-dev.dingtalk.com/) でアプリを作成し、ボット機能を追加して Stream Mode を有効化（公開コールバック URL 不要）、AppKey を Client ID、AppSecret を Client Secret にコピーしてアプリを公開します。**Test connection** は保存前にフォームの入力値だけで接続を試み、正直な結果コード（`ok` / `invalid_credentials` / `network` / `unsupported`）を返します。**Enable** は即適用：稼働中の channel runtime はプロセス再起動なしに該当アダプターのみをホットスワップし、有効化時に認証情報を自動検証します（検証失敗後に明示的に **Enable anyway** を選んだ場合のみスキップ）。無効化しても保存済み認証情報は残るため、再有効化時に再入力は不要です。ここには組み込みアダプターのみが表示されます。entry points 経由のプラグインチャンネルは引き続きファイルで設定します。
+
+保存は `~/.vibe-trading/agent.json` の `channels.<name>` をアトミックに更新します。YAML 設定ファイルは Web UI から読み取り専用です（ブラウザ編集には JSON が必要で、パネルはエラーの代わりにその旨を表示します）。専用ガイドのないチャンネルはデフォルト設定から生成された汎用フォームを描画します。
 
 </details>
 

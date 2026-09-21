@@ -416,7 +416,90 @@
       "stoppedToast": "IM 通道已停止",
       "refreshFailed": "刷新 IM 通道失败",
       "startFailed": "启动 IM 通道失败",
-      "stopFailed": "停止 IM 通道失败"
+      "stopFailed": "停止 IM 通道失败",
+      "config": {
+        "toggleConfig": "配置 {{name}}",
+        "keepCurrent": "保留当前值（{{masked}}）",
+        "secretNotSet": "未设置",
+        "clearSecret": "清除",
+        "required": "必填",
+        "listPlaceholder": "输入后按回车添加",
+        "removeValue": "移除 {{value}}",
+        "save": "保存配置",
+        "hotApply": "保存后立即生效，无需重启。",
+        "saved": "渠道配置已保存",
+        "saveFailed": "保存渠道配置失败：{{message}}",
+        "test": "测试连接",
+        "testing": "测试中…",
+        "testOk": "连接验证通过",
+        "testFailed": "连接测试失败：{{message}}",
+        "testCodeOk": "服务商已接受这些凭据。",
+        "testCodeInvalidCredentials": "服务商拒绝了这些凭据。",
+        "testCodeNetwork": "无法连接到服务商。",
+        "testCodeUnsupported": "该渠道不支持连接测试。",
+        "testedSavedConfig": "测试的是已保存的配置。",
+        "testedDraftConfig": "测试的是表单中当前的值（尚未保存）。",
+        "enable": "启用渠道",
+        "enableHint": "停用会保留已保存的凭据，随时可以重新启用。",
+        "enabledToast": "渠道已启用",
+        "disabledToast": "渠道已停用",
+        "enableFailed": "启用渠道失败：{{message}}",
+        "disableFailed": "停用渠道失败：{{message}}",
+        "enableRejected": "服务商拒绝了这些凭据，渠道未启用。",
+        "enableRejectedDetail": "服务商响应：{{detail}}",
+        "enableAnyway": "仍然启用",
+        "enableAnywayHint": "仍然启用会跳过凭据校验，渠道可能无法连接。",
+        "notWritable": "渠道配置保存在 YAML 文件（{{path}}）中，Web UI 无法编辑。请直接修改该文件来更改凭据。",
+        "notWritableChip": "只读（YAML）",
+        "sdkMissing": "运行依赖未安装 — {{hint}}",
+        "sdkMissingNoHint": "运行依赖未安装；仍可配置该渠道，但可能无法启动。",
+        "noFields": "该渠道没有可配置的字段。",
+        "loadFailed": "无法加载渠道配置。"
+      },
+      "fields": {
+        "dingtalk": {
+          "client_id": {
+            "label": "Client ID（AppKey）",
+            "help": "钉钉开发者后台“凭据”页面中的应用 AppKey。"
+          },
+          "client_secret": {
+            "label": "Client Secret（AppSecret）",
+            "help": "应用的 AppSecret，保存在服务端，绝不会回传到浏览器。"
+          },
+          "allow_from": {
+            "label": "允许的发送者",
+            "help": "允许与智能体对话的钉钉发送者 ID 白名单（“*”表示全部允许）。未配对的用户会在私聊中收到配对码。"
+          },
+          "allow_remote_media_redirects": {
+            "label": "允许媒体重定向",
+            "help": "下载消息媒体时跟随服务商的重定向，默认关闭。"
+          },
+          "remote_media_redirect_allowed_hosts": {
+            "label": "允许重定向的主机",
+            "help": "开启媒体重定向后允许跳转的主机列表；为空时拒绝所有跨主机跳转。"
+          },
+          "group_user_isolation": {
+            "label": "群聊按用户隔离会话",
+            "help": "群聊中每个成员使用独立的智能体会话，而不是共享同一个会话。"
+          },
+          "force_ipv4": {
+            "label": "强制使用 IPv4",
+            "help": "将钉钉 API 调用绑定到 IPv4 出口。当应用配置了服务器出口 IP 白名单、IPv6 前缀会漂移而 IPv4 地址稳定时启用。"
+          }
+        }
+      },
+      "guides": {
+        "dingtalk": {
+          "title": "钉钉配置指南",
+          "intro": "钉钉机器人使用 Stream 模式，无需公网回调地址。",
+          "step1": "在钉钉开发者后台（open-dev.dingtalk.com）创建应用。",
+          "step2": "为应用添加机器人能力，并开启 Stream 模式。",
+          "step3": "将应用的 AppKey 填入 Client ID，AppSecret 填入 Client Secret。",
+          "step4": "发布应用，使其对组织内成员可用。",
+          "step5": "回到这里点击“测试连接”，然后启用渠道。",
+          "docsLabel": "打开钉钉开发者后台"
+        }
+      }
     },
     "generation": "生成设置",
     "dataSourceSettings": "数据源设置",

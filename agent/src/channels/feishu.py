@@ -7,7 +7,6 @@ import importlib.util
 import json
 import os
 import re
-import tempfile
 import threading
 import time
 import uuid
@@ -49,67 +48,27 @@ def _persist_login_credentials(
 
     The QR flow creates a bot application and returns its secret only once, so
     reporting a successful login without durably storing that secret leaves the
-    channel unusable after the CLI process exits.  Write through a private
-    same-directory temporary file and atomically replace the config so readers
-    never observe a partial credential record.
+    channel unusable after the CLI process exits.  Credential persistence is
+    delegated to :func:`src.config.writer.update_channel_section`, which merges
+    into the raw JSON dict and atomically replaces the config so readers never
+    observe a partial credential record.  The ``ValueError`` contract is kept
+    for callers that already handle a non-JSON config.
     """
-    from src.config.loader import _read_config_file
-    from src.config.paths import get_config_path
+    from src.config.writer import ConfigNotWritableError, update_channel_section
 
-    path = config_path or get_config_path()
-    if path.suffix.lower() != ".json":
-        raise ValueError(
-            "Feishu QR login requires a JSON agent config; use "
-            "~/.vibe-trading/agent.json"
+    try:
+        return update_channel_section(
+            "feishu",
+            {
+                "enabled": True,
+                "app_id": app_id,
+                "app_secret": app_secret,
+                "domain": domain,
+            },
+            config_path=config_path,
         )
-
-    payload: dict[str, Any] = {}
-    if path.exists():
-        payload = _read_config_file(path)
-    channels = payload.setdefault("channels", {})
-    if not isinstance(channels, dict):
-        raise ValueError("agent config 'channels' must be an object")
-    section = channels.setdefault("feishu", {})
-    if not isinstance(section, dict):
-        raise ValueError("agent config 'channels.feishu' must be an object")
-    section.update(
-        {
-            "enabled": True,
-            "app_id": app_id,
-            "app_secret": app_secret,
-            "domain": domain,
-        }
-    )
-
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    content = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-    fd, temporary = tempfile.mkstemp(
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-    )
-    try:
-        try:
-            with os.fdopen(fd, "wb") as handle:
-                fd = -1
-                handle.write(content)
-                handle.flush()
-                if hasattr(os, "fchmod"):
-                    os.fchmod(handle.fileno(), 0o600)
-                os.fsync(handle.fileno())
-        finally:
-            if fd >= 0:
-                os.close(fd)
-        os.replace(temporary, path)
-    except BaseException:
-        with suppress(OSError):
-            os.unlink(temporary)
-        raise
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
-    return path
+    except ConfigNotWritableError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _load_lark_runtime() -> tuple[Any, str, str]:

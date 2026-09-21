@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+from collections import defaultdict
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -64,6 +65,10 @@ class ChannelManager:
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
         self._start_tasks: set[asyncio.Task] = set()
+        # One reload at a time per channel, whoever calls it: the settings route
+        # locks its own file write, but two reloads of one channel racing here
+        # would each stop the adapter they saw and start their own.
+        self._reload_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._origin_reply_fingerprints: dict[tuple[str, str, str], str] = {}
         self._status: dict[str, dict[str, Any]] = {}
 
@@ -257,6 +262,14 @@ class ChannelManager:
                 await self._dispatch_task
             self._dispatch_task = None
 
+        # A reload's background start() can still be connecting; left running it
+        # would bring an adapter up after the manager stopped (from #1521).
+        for task in list(self._start_tasks):
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        self._start_tasks.clear()
+
         # Iterate a snapshot: a concurrent reload_channel may pop/insert entries.
         for name, channel in list(self.channels.items()):
             try:
@@ -285,6 +298,10 @@ class ChannelManager:
         Returns:
             The updated ``_status[name]`` entry.
         """
+        async with self._reload_locks[name]:
+            return await self._reload_channel_locked(name, section)
+
+    async def _reload_channel_locked(self, name: str, section: dict | None) -> dict[str, Any]:
         old = self.channels.get(name)
         if old is not None:
             try:

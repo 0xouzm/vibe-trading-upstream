@@ -394,3 +394,44 @@ def test_reload_does_not_await_a_blocking_start(
             await manager.stop_all()
 
     asyncio.run(scenario())
+
+
+def test_concurrent_reloads_of_one_channel_leave_one_adapter_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two reloads racing on one channel each stopped the adapter they saw and
+    started their own, so one replacement ran outside the manager."""
+
+    async def scenario() -> None:
+        manager = _build_manager(monkeypatch, {"fakea": {"enabled": True, "tag": "old", "slow_stop": True}})
+        await manager.start_all()
+        try:
+            await asyncio.gather(
+                manager.reload_channel("fakea", {"enabled": True, "tag": "a", "slow_stop": True}),
+                manager.reload_channel("fakea", {"enabled": True, "tag": "b", "slow_stop": True}),
+            )
+            await asyncio.sleep(0)
+            running = [c.tag for c in FakeChannel.instances if c.is_running]
+            assert running == [manager.channels["fakea"].tag]
+        finally:
+            await manager.stop_all()
+
+    asyncio.run(scenario())
+
+
+def test_stop_all_cancels_a_start_still_in_flight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def scenario() -> None:
+        manager = _build_manager(monkeypatch, {"fakea": {"enabled": True, "tag": "old"}})
+        await manager.start_all()
+        await manager.reload_channel("fakea", {"enabled": True, "tag": "new", "hang_start": True})
+        pending = list(manager._start_tasks)
+        assert pending
+
+        await asyncio.wait_for(manager.stop_all(), timeout=2.0)
+
+        assert all(task.done() for task in pending)
+        assert not manager._start_tasks
+
+    asyncio.run(scenario())

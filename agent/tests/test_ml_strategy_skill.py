@@ -128,6 +128,46 @@ def test_walk_forward_skips_a_single_class_window_with_a_real_classifier() -> No
         assert result.between(-1.0, 1.0).all()
 
 
+def test_a_skipped_retrain_keeps_serving_the_previous_model() -> None:
+    """The retrain day itself is predicted too, not left at 0.0 (#1522)."""
+    from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
+
+    namespace = {
+        "np": np,
+        "pd": pd,
+        "StandardScaler": StandardScaler,
+        "RandomForestClassifier": RandomForestClassifier,
+        "GradientBoostingClassifier": GradientBoostingClassifier,
+        "LogisticRegression": LogisticRegression,
+    }
+    walk_forward_predict = _load_node("walk_forward_predict", ast.FunctionDef, namespace)
+
+    rng = np.random.default_rng(1)
+    features = pd.DataFrame({f"f{i}": rng.standard_normal(260) for i in range(3)})
+    # Two classes early, one class from row 120: a 60-row sliding window that
+    # starts at or after row 120 holds a single class.
+    labels = pd.Series(np.where(np.arange(260) < 120, np.arange(260) % 2, 1.0))
+
+    result = walk_forward_predict(
+        features,
+        labels,
+        min_train_size=100,
+        retrain_freq=20,
+        model_type="ridge",
+        window_type="sliding",
+        sliding_size=60,
+        prediction_horizon=1,
+    )
+
+    single_class_retrain_days = [
+        i for i in range(100, 260) if (i - 100) % 20 == 0 and max(0, i - 60) >= 120
+    ]
+    assert single_class_retrain_days, "the fixture must reach a single-class window"
+    assert all(result.iloc[i] != 0.0 for i in single_class_retrain_days)
+
+
 def test_signal_engine_preserves_unavailable_future_labels_as_nan() -> None:
     captured: dict[str, object] = {}
 

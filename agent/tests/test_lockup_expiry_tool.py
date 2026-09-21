@@ -8,6 +8,8 @@ this tool's parsing both run while nothing hits the network.
 
 from __future__ import annotations
 
+import pytest
+
 import json
 from datetime import date
 from unittest.mock import patch
@@ -30,6 +32,7 @@ def _row(code: str, free_date: str) -> dict:
         "FREE_DATE": f"{free_date} 00:00:00",
         "FREE_SHARES_TYPE": "首发原股东限售股份",
         "FREE_SHARES": 1000000.0,
+        "CURRENT_FREE_SHARES": 900000.0,
         "ABLE_FREE_SHARES": 900000.0,
         "LIFT_MARKET_CAP": 1.7e9,
         "FREE_RATIO": 0.8,
@@ -190,3 +193,30 @@ class TestEndToEndHttpMocked:
         assert kwargs["params"]["reportName"] == "RPT_LIFT_STAGE"
         assert out["ok"] is True
         assert out["data"]["records"][0]["name"] == "贵州茅台"
+
+
+def test_free_shares_is_the_unlock_not_the_float() -> None:
+    """RPT_LIFT_STAGE's FREE_SHARES is the float FREE_RATIO divides by (#1513).
+
+    Row as served live for 603162 on 2026-09-21.
+    """
+    from src.tools.lockup_expiry_tool import _shape_record
+
+    record = _shape_record(
+        {
+            "SECURITY_CODE": "603162",
+            "SECURITY_NAME_ABBR": "海通发展",
+            "FREE_DATE": "2026-09-21 00:00:00",
+            "FREE_SHARES_TYPE": "股权激励限售股份",
+            "FREE_SHARES": 42489.1666,
+            "CURRENT_FREE_SHARES": 232.8832,
+            "ABLE_FREE_SHARES": 232.8832,
+            "LIFT_MARKET_CAP": 3355.846912,
+            "FREE_RATIO": 0.005481001833,
+            "TOTAL_RATIO": 0.001693562627,
+        }
+    )
+
+    assert record["free_shares"] == 232.8832
+    assert record["float_shares"] == 42489.1666
+    assert record["free_ratio"] == pytest.approx(record["free_shares"] / record["float_shares"], rel=1e-6)

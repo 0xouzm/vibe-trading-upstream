@@ -148,13 +148,27 @@ def _shape_record(raw: Any) -> dict[str, Any] | None:
         "name": raw.get("SECURITY_NAME_ABBR"),
         "free_date": str(free_date)[:10],
         "share_type": raw.get("FREE_SHARES_TYPE"),
-        "free_shares": _to_float(raw.get("FREE_SHARES")),
+        # RPT_LIFT_STAGE's FREE_SHARES is the float the unlock is measured
+        # against (FREE_RATIO = CURRENT_FREE_SHARES / FREE_SHARES), not the
+        # unlock: 603162 on 2026-09-21 unlocked 232.88 of 42,489.17 (万股).
+        "free_shares": _to_float(raw.get("CURRENT_FREE_SHARES")),
         "able_free_shares": _to_float(raw.get("ABLE_FREE_SHARES")),
+        "float_shares": _to_float(raw.get("FREE_SHARES")),
         "lift_market_cap": _to_float(raw.get("LIFT_MARKET_CAP")),
         "free_ratio": _to_float(raw.get("FREE_RATIO")),
         "total_ratio": _to_float(raw.get("TOTAL_RATIO")),
     }
 
+
+# Eastmoney reports share counts in 万股 and market value in 万元.
+_UNITS = {
+    "free_shares": "10k shares (万股)",
+    "able_free_shares": "10k shares (万股)",
+    "float_shares": "10k shares (万股)",
+    "lift_market_cap": "10k CNY (万元)",
+    "free_ratio": "fraction of float_shares",
+    "total_ratio": "fraction of total shares",
+}
 
 _EMPTY_RESULT_MESSAGES = ("返回数据为空",)
 
@@ -284,6 +298,7 @@ def get_lockup_expiry(code: str | None, horizon_days: int) -> str:
         "scope": scope,
         "count": len(records),
         "records": records,
+        "units": _UNITS,
     }
     if bare_code is not None:
         data["code"] = bare_code

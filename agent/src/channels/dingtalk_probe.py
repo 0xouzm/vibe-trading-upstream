@@ -15,8 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from src.channels.token_probe import probe_token_endpoint, scrub_secrets
-from src.channels.token_probe import response_detail as response_detail  # re-export
+from src.channels.token_probe import probe_token_endpoint
 
 if TYPE_CHECKING:
     from src.channels.dingtalk import DingTalkConfig
@@ -34,16 +33,6 @@ def build_http_transport(config: DingTalkConfig) -> httpx.AsyncHTTPTransport | N
     if config.force_ipv4:
         return httpx.AsyncHTTPTransport(local_address="0.0.0.0")
     return None
-
-
-def scrub_detail(config: DingTalkConfig, text: str) -> str:
-    """Return diagnostic text with any credential value replaced.
-
-    Transport and rejection messages can echo the request or credential by
-    accident; every value the config holds as a secret is masked before the
-    text reaches a result envelope.
-    """
-    return scrub_secrets(text, (config.client_secret, config.client_id))
 
 
 async def test_connection(

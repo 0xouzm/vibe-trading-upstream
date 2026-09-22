@@ -335,6 +335,19 @@ _COMPARABLE_CALIBERS = frozenset(
 _ADDITIVE_CALIBERS = frozenset({"split_dividend_additive"})
 
 
+def market_has_corporate_actions(market: str) -> bool:
+    """Whether prices in ``market`` depend on a split/dividend adjustment.
+
+    Args:
+        market: A market name as ``_detect_market`` returns it.
+
+    Returns:
+        False for the markets stamped "na" and for price indices, True for
+        every other market, so an unrecognized one is assumed to need it.
+    """
+    return market not in _NA_CALIBER_MARKETS and market not in _INDEX_CALIBER_MARKETS
+
+
 def price_caliber(source: str, market: str | None = None, symbol: str | None = None) -> str:
     """Return the adjustment caliber of ``source``'s served prices.
 

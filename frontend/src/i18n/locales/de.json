@@ -579,6 +579,10 @@
             "label": "SMTP-SSL",
             "help": "SMTP über implizites TLS verbinden, z. B. Port 465 (standardmäßig aus). In der Praxis nicht mit STARTTLS kombinierbar."
           },
+          "verify_tls": {
+            "label": "TLS-Zertifikat prüfen",
+            "help": "TLS-Zertifikat und Hostname des Mailservers prüfen (empfohlen). Nur für selbstsignierte oder interne CA-Server deaktivieren."
+          },
           "from_address": {
             "label": "Absenderadresse",
             "help": "Adresse, von der Antworten versendet werden. Leer übernimmt den SMTP-Benutzernamen."

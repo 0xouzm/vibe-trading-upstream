@@ -579,6 +579,10 @@
             "label": "SSL do SMTP",
             "help": "Conectar ao SMTP via TLS implícito, por exemplo na porta 465 (desativado por padrão). Na prática, é exclusivo com o STARTTLS."
           },
+          "verify_tls": {
+            "label": "Verificar o certificado TLS",
+            "help": "Verificar o certificado TLS e o nome de host do servidor de e-mail (recomendado). Desative apenas para servidores com certificado autoassinado ou CA interna."
+          },
           "from_address": {
             "label": "Endereço do remetente",
             "help": "Endereço de onde as respostas são enviadas. Se ficar vazio, usa o usuário SMTP."

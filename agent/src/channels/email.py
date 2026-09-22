@@ -28,7 +28,7 @@ from src.channels.bus.queue import MessageBus
 from src.channels.base import BaseChannel
 from src.channels.utils import get_media_dir
 from pydantic import BaseModel
-from src.channels.utils import safe_filename, send_imap_id
+from src.channels.utils import email_tls_context, safe_filename, send_imap_id
 
 
 class EmailConfig(BaseModel):
@@ -50,6 +50,9 @@ class EmailConfig(BaseModel):
     smtp_password: str = ""
     smtp_use_tls: bool = True
     smtp_use_ssl: bool = False
+    # TLS certificate verification for implicit-SSL (IMAP4_SSL/SMTP_SSL)
+    # connections; set False only for self-signed / internal-CA mail servers.
+    verify_tls: bool = True
     from_address: str = ""
 
     auto_reply_enabled: bool = True
@@ -355,6 +358,7 @@ class EmailChannel(BaseChannel):
                 self.config.smtp_host,
                 self.config.smtp_port,
                 timeout=timeout,
+                ssl_context=email_tls_context(self.config.verify_tls),
             ) as smtp:
                 smtp.login(self.config.smtp_username, self.config.smtp_password)
                 smtp.send_message(msg)
@@ -574,7 +578,11 @@ class EmailChannel(BaseChannel):
 
     def _open_imap_client(self, mailbox: str, *, missing_mailbox_ok: bool = False) -> Any | None:
         if self.config.imap_use_ssl:
-            client: Any = imaplib.IMAP4_SSL(self.config.imap_host, self.config.imap_port)
+            client: Any = imaplib.IMAP4_SSL(
+                self.config.imap_host,
+                self.config.imap_port,
+                ssl_context=email_tls_context(self.config.verify_tls),
+            )
         else:
             client = imaplib.IMAP4(self.config.imap_host, self.config.imap_port)
 

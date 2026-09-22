@@ -135,6 +135,7 @@ function emailEntry(overrides: Record<string, unknown> = {}) {
       { key: "smtp_password", type: "password", secret: true, required: true, help_key: "settings.channels.fields.email.smtp_password" },
       { key: "smtp_use_tls", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.smtp_use_tls" },
       { key: "smtp_use_ssl", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.smtp_use_ssl" },
+      { key: "verify_tls", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.verify_tls" },
       { key: "from_address", type: "text", secret: false, required: false, help_key: "settings.channels.fields.email.from_address" },
       { key: "auto_reply_enabled", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.auto_reply_enabled" },
       { key: "poll_interval_seconds", type: "text", secret: false, required: false, help_key: "settings.channels.fields.email.poll_interval_seconds" },
@@ -165,6 +166,7 @@ function emailEntry(overrides: Record<string, unknown> = {}) {
       smtp_username: "bot@example.com",
       smtp_use_tls: true,
       smtp_use_ssl: false,
+      verify_tls: true,
       from_address: "",
       auto_reply_enabled: true,
       poll_interval_seconds: 30,
@@ -621,6 +623,7 @@ describe("ChannelSettings config panel", () => {
     expect(screen.getByText("After processing")).toBeInTheDocument();
     expect(screen.getByText("Allowed senders")).toBeInTheDocument();
     expect(screen.getByText("Verify DKIM")).toBeInTheDocument();
+    expect(screen.getByText("Verify TLS certificate")).toBeInTheDocument();
     expect(screen.getByText("Allowed attachment types")).toBeInTheDocument();
     expect(screen.getByText("Max attachments per email")).toBeInTheDocument();
     expect(screen.getByText(/Inbound mail server host, e\.g\. imap\.gmail\.com/)).toBeInTheDocument();

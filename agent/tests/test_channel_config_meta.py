@@ -189,6 +189,7 @@ _EMAIL_HINT_KEYS = (
     "smtp_password",
     "smtp_use_tls",
     "smtp_use_ssl",
+    "verify_tls",
     "from_address",
     "auto_reply_enabled",
     "poll_interval_seconds",
@@ -233,7 +234,7 @@ def test_email_field_hints_contract() -> None:
     keys = tuple(hint["key"] for hint in hints)
     assert keys == _EMAIL_HINT_KEYS
     assert "enabled" not in keys
-    assert len(hints) == 29
+    assert len(hints) == 30
 
     by_key = {hint["key"]: hint for hint in hints}
     assert {key for key, hint in by_key.items() if hint["secret"]} == {

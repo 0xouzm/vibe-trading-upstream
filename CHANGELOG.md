@@ -161,6 +161,27 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The Email channel verifies TLS certificates by default** (a follow-up
+  to #1544). The implicit-SSL paths (`IMAP4_SSL` / `SMTP_SSL`) in both the
+  connection probe and the polling/send adapter used Python's default
+  unverified context (`CERT_NONE`, no hostname check), so the mailbox
+  password travelled to a server whose certificate was never checked — an
+  active network attacker between the operator and their mail provider could
+  harvest it. All four call sites now build their context through a shared
+  `email_tls_context()` that verifies the certificate and hostname against
+  the system CA bundle, matching the STARTTLS path, which already did. A new
+  `verify_tls` field (default `true`, surfaced in the guided Email setup in
+  all nine locales) is the documented opt-out for self-signed or internal-CA
+  servers.
+- **Settings-write routes reject cross-site browser requests** (a follow-up
+  to #1544). `require_settings_write_auth` did not apply the cross-site guard
+  that its siblings `require_auth` and `require_event_stream_auth` enforce on
+  unsafe methods, so a malicious web page could attempt a CSRF write against
+  any settings route — including the new `POST /channels/email/test`, which
+  merges stored credentials with a caller-supplied patch and could be steered
+  to send the stored mailbox password to an attacker-chosen host. The guard
+  now runs first on every settings-write route; same-origin Web UI calls and
+  non-browser clients (CLI/curl, no `Origin`) are unaffected.
 - **A backtest aborted when a funding debit left cash below zero** (#1542).
   CompositeEngine and CryptoEngine subtract crypto funding from capital with
   no floor, and the next open then fitted at no scale, not even an empty plan:

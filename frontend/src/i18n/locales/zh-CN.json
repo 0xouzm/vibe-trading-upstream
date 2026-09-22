@@ -574,6 +574,10 @@
             "label": "SMTP SSL",
             "help": "通过隐式 TLS 连接 SMTP，例如 465 端口（默认关闭）。实际使用中与 STARTTLS 互斥。"
           },
+          "verify_tls": {
+            "label": "校验 TLS 证书",
+            "help": "验证邮件服务器的 TLS 证书与主机名（推荐）。仅在使用自签名或内部 CA 服务器时关闭。"
+          },
           "from_address": {
             "label": "发件地址",
             "help": "回复邮件的发件地址。留空则沿用 SMTP 用户名。"

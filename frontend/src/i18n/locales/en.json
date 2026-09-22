@@ -579,6 +579,10 @@
             "label": "SMTP SSL",
             "help": "Connect to SMTP over implicit TLS, e.g. port 465 (off by default). In practice this is mutually exclusive with STARTTLS."
           },
+          "verify_tls": {
+            "label": "Verify TLS certificate",
+            "help": "Verify the mail server's TLS certificate and hostname (recommended). Disable only for self-signed or internal-CA servers."
+          },
           "from_address": {
             "label": "From address",
             "help": "Address replies are sent from. Empty reuses the SMTP username."

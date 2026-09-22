@@ -18,13 +18,15 @@ import json
 import logging
 import smtplib
 import socket
+import ssl
+from email.message import EmailMessage
 from typing import Any
 
 import pytest
 
 from src.channels.bus.queue import MessageBus
 from src.channels.email import EmailChannel
-from src.channels.utils import send_imap_id
+from src.channels.utils import email_tls_context, send_imap_id
 
 IMAP_HOST = "imap.example.com"
 SMTP_HOST = "smtp.example.com"
@@ -76,6 +78,7 @@ def _install_imap_fakes(
     """Replace ``imaplib.IMAP4``/``IMAP4_SSL`` with recording fakes."""
     calls: dict[str, Any] = {
         "constructed": [],
+        "ssl_contexts": [],
         "logins": [],
         "ids": [],
         "selects": [],
@@ -85,8 +88,15 @@ def _install_imap_fakes(
     class FakeIMAP4:
         kind = "IMAP4"
 
-        def __init__(self, host: str, port: int, timeout: float | None = None) -> None:
+        def __init__(
+            self,
+            host: str,
+            port: int,
+            timeout: float | None = None,
+            ssl_context: Any = None,
+        ) -> None:
             calls["constructed"].append((self.kind, host, port, timeout))
+            calls["ssl_contexts"].append(ssl_context)
             if connect_error is not None:
                 raise connect_error
 
@@ -128,18 +138,37 @@ def _install_smtp_fakes(
     """Replace ``smtplib.SMTP``/``SMTP_SSL`` with recording fakes."""
     calls: dict[str, Any] = {
         "constructed": [],
+        "ssl_contexts": [],
         "starttls": [],
         "logins": [],
+        "sent": [],
         "quits": 0,
     }
 
     class FakeSMTP:
         kind = "SMTP"
 
-        def __init__(self, host: str, port: int, timeout: float | None = None) -> None:
+        def __init__(
+            self,
+            host: str,
+            port: int,
+            timeout: float | None = None,
+            ssl_context: Any = None,
+        ) -> None:
             calls["constructed"].append((self.kind, host, port, timeout))
+            calls["ssl_contexts"].append(ssl_context)
             if connect_error is not None:
                 raise connect_error
+
+        def __enter__(self) -> "FakeSMTP":
+            return self
+
+        def __exit__(self, *exc_info: Any) -> None:
+            return None
+
+        def send_message(self, msg: Any) -> dict[Any, Any]:
+            calls["sent"].append(msg)
+            return {}
 
         def starttls(self, context: Any = None) -> tuple[int, bytes]:
             calls["starttls"].append(context is not None)
@@ -417,6 +446,128 @@ def test_smtp_ssl_transport_skips_starttls(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 # --------------------------------------------------------------------------- #
+# TLS certificate verification (verify_tls)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("verify", [True, False])
+def test_email_tls_context_verify_modes(verify: bool) -> None:
+    ctx = email_tls_context(verify)
+
+    if verify:
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.check_hostname is True
+    else:
+        assert ctx.verify_mode == ssl.CERT_NONE
+        assert ctx.check_hostname is False
+
+
+@pytest.mark.parametrize("verify_tls", [True, False])
+def test_probe_imap_ssl_context_follows_verify_tls(
+    monkeypatch: pytest.MonkeyPatch, verify_tls: bool
+) -> None:
+    """The probe must never send the IMAP password over an unverified socket
+    unless the operator explicitly opted out with ``verify_tls=False``."""
+    imap_calls = _install_imap_fakes(monkeypatch)
+    _install_smtp_fakes(monkeypatch)
+
+    result = _run(_make_channel(verify_tls=verify_tls).test_connection())
+
+    assert result["ok"] is True
+    ctx = imap_calls["ssl_contexts"][0]
+    assert isinstance(ctx, ssl.SSLContext)
+    if verify_tls:
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.check_hostname is True
+    else:
+        assert ctx.verify_mode == ssl.CERT_NONE
+        assert ctx.check_hostname is False
+
+
+@pytest.mark.parametrize("verify_tls", [True, False])
+def test_probe_smtp_ssl_context_follows_verify_tls(
+    monkeypatch: pytest.MonkeyPatch, verify_tls: bool
+) -> None:
+    imap_calls = _install_imap_fakes(monkeypatch)
+    smtp_calls = _install_smtp_fakes(monkeypatch)
+
+    result = _run(
+        _make_channel(
+            smtp_use_ssl=True, smtp_port=465, verify_tls=verify_tls
+        ).test_connection()
+    )
+
+    assert result["ok"] is True
+    ctx = smtp_calls["ssl_contexts"][0]
+    assert isinstance(ctx, ssl.SSLContext)
+    if verify_tls:
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.check_hostname is True
+    else:
+        assert ctx.verify_mode == ssl.CERT_NONE
+        assert ctx.check_hostname is False
+    # The plain IMAP4_SSL probe half shares the same verify_tls switch.
+    assert isinstance(imap_calls["ssl_contexts"][0], ssl.SSLContext)
+
+
+def test_probe_plain_transports_pass_no_ssl_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-SSL transports take no context; STARTTLS keeps its own verifying one."""
+    imap_calls = _install_imap_fakes(monkeypatch)
+    smtp_calls = _install_smtp_fakes(monkeypatch)
+
+    result = _run(
+        _make_channel(imap_use_ssl=False, smtp_use_ssl=False).test_connection()
+    )
+
+    assert result["ok"] is True
+    assert imap_calls["ssl_contexts"] == [None]
+    assert smtp_calls["ssl_contexts"] == [None]
+    assert smtp_calls["starttls"] == [True]
+
+
+@pytest.mark.parametrize("verify_tls", [True, False])
+def test_adapter_imap_ssl_context_follows_verify_tls(
+    monkeypatch: pytest.MonkeyPatch, verify_tls: bool
+) -> None:
+    """The adapter's polling connection uses the same helper as the probe."""
+    imap_calls = _install_imap_fakes(monkeypatch)
+    channel = _make_channel(verify_tls=verify_tls)
+
+    client = channel._open_imap_client("INBOX")
+
+    assert client is not None
+    ctx = imap_calls["ssl_contexts"][0]
+    expected = ssl.CERT_REQUIRED if verify_tls else ssl.CERT_NONE
+    assert ctx.verify_mode == expected
+    assert ctx.check_hostname is verify_tls
+
+
+@pytest.mark.parametrize("verify_tls", [True, False])
+def test_adapter_smtp_ssl_context_follows_verify_tls(
+    monkeypatch: pytest.MonkeyPatch, verify_tls: bool
+) -> None:
+    smtp_calls = _install_smtp_fakes(monkeypatch)
+    channel = _make_channel(smtp_use_ssl=True, smtp_port=465, verify_tls=verify_tls)
+
+    channel._smtp_send(EmailMessage())
+
+    ctx = smtp_calls["ssl_contexts"][0]
+    expected = ssl.CERT_REQUIRED if verify_tls else ssl.CERT_NONE
+    assert ctx.verify_mode == expected
+    assert ctx.check_hostname is verify_tls
+    assert len(smtp_calls["sent"]) == 1
+
+
+def test_verify_tls_defaults_to_true() -> None:
+    """Secure by default: certificate verification is on unless opted out."""
+    channel = _make_channel()
+
+    assert channel.config.verify_tls is True
+
+
+# --------------------------------------------------------------------------- #
 # Secret hygiene
 # --------------------------------------------------------------------------- #
 
@@ -576,7 +727,13 @@ def test_probe_sends_imap_id_before_select(monkeypatch: pytest.MonkeyPatch) -> N
     order: list[str] = []
 
     class FakeIMAP4_SSL:
-        def __init__(self, host: str, port: int, timeout: float | None = None) -> None:
+        def __init__(
+            self,
+            host: str,
+            port: int,
+            timeout: float | None = None,
+            ssl_context: Any = None,
+        ) -> None:
             order.append("connect")
 
         def login(self, user: str, password: str) -> tuple[str, list[bytes]]:

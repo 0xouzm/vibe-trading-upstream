@@ -133,6 +133,7 @@ def _email_hints() -> list[FieldHint]:
         ("smtp_password", "password", True, True),
         ("smtp_use_tls", "bool", False, False),
         ("smtp_use_ssl", "bool", False, False),
+        ("verify_tls", "bool", False, False),
         ("from_address", "text", False, False),
         ("auto_reply_enabled", "bool", False, False),
         ("poll_interval_seconds", "text", False, False),

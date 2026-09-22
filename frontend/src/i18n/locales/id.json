@@ -579,6 +579,10 @@
             "label": "SSL SMTP",
             "help": "Hubungkan ke SMTP melalui TLS implisit, misalnya port 465 (nonaktif secara default). Dalam praktik tidak dipakai bersama STARTTLS."
           },
+          "verify_tls": {
+            "label": "Verifikasi sertifikat TLS",
+            "help": "Verifikasi sertifikat TLS dan nama host server email (disarankan). Nonaktifkan hanya untuk server dengan sertifikat self-signed atau CA internal."
+          },
           "from_address": {
             "label": "Alamat pengirim",
             "help": "Alamat asal balasan dikirim. Jika kosong, memakai nama pengguna SMTP."

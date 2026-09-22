@@ -35,7 +35,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from src.channels.token_probe import scrub_secrets
-from src.channels.utils import send_imap_id
+from src.channels.utils import email_tls_context, send_imap_id
 
 if TYPE_CHECKING:
     from src.channels.email import EmailConfig
@@ -84,7 +84,10 @@ def _probe_imap(config: EmailConfig) -> tuple[str, str] | None:
         try:
             if config.imap_use_ssl:
                 client = imaplib.IMAP4_SSL(
-                    config.imap_host, config.imap_port, timeout=_CONNECT_TIMEOUT_S
+                    config.imap_host,
+                    config.imap_port,
+                    timeout=_CONNECT_TIMEOUT_S,
+                    ssl_context=email_tls_context(config.verify_tls),
                 )
             else:
                 client = imaplib.IMAP4(
@@ -127,7 +130,10 @@ def _probe_smtp(config: EmailConfig) -> tuple[str, str] | None:
         try:
             if config.smtp_use_ssl:
                 client = smtplib.SMTP_SSL(
-                    config.smtp_host, config.smtp_port, timeout=_CONNECT_TIMEOUT_S
+                    config.smtp_host,
+                    config.smtp_port,
+                    timeout=_CONNECT_TIMEOUT_S,
+                    ssl_context=email_tls_context(config.verify_tls),
                 )
             else:
                 client = smtplib.SMTP(

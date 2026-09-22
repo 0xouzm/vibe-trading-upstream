@@ -228,6 +228,7 @@ export function ChannelConfigPanel({
       "settings.channels.fields.email.smtp_password": { label: t("settings.channels.fields.email.smtp_password.label"), help: t("settings.channels.fields.email.smtp_password.help") },
       "settings.channels.fields.email.smtp_use_tls": { label: t("settings.channels.fields.email.smtp_use_tls.label"), help: t("settings.channels.fields.email.smtp_use_tls.help") },
       "settings.channels.fields.email.smtp_use_ssl": { label: t("settings.channels.fields.email.smtp_use_ssl.label"), help: t("settings.channels.fields.email.smtp_use_ssl.help") },
+      "settings.channels.fields.email.verify_tls": { label: t("settings.channels.fields.email.verify_tls.label"), help: t("settings.channels.fields.email.verify_tls.help") },
       "settings.channels.fields.email.from_address": { label: t("settings.channels.fields.email.from_address.label"), help: t("settings.channels.fields.email.from_address.help") },
       "settings.channels.fields.email.auto_reply_enabled": { label: t("settings.channels.fields.email.auto_reply_enabled.label"), help: t("settings.channels.fields.email.auto_reply_enabled.help") },
       "settings.channels.fields.email.poll_interval_seconds": { label: t("settings.channels.fields.email.poll_interval_seconds.label"), help: t("settings.channels.fields.email.poll_interval_seconds.help") },

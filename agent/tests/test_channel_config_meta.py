@@ -13,6 +13,7 @@ from src.channels import config_meta as _config_meta
 from src.channels.config_meta import (
     SECRET_KEY_RE,
     channel_field_hints,
+    is_secret_key,
     split_values_secrets,
 )
 from src.channels.registry import discover_channel_names, load_channel_class
@@ -172,10 +173,187 @@ def test_qq_field_hints_exact_snapshot() -> None:
     assert "enabled" not in {hint["key"] for hint in hints}
 
 
+# --- (a2) hand-written Email / WebSocket hints ------------------------------- #
+
+_EMAIL_HINT_KEYS = (
+    "consent_granted",
+    "imap_host",
+    "imap_port",
+    "imap_username",
+    "imap_password",
+    "imap_mailbox",
+    "imap_use_ssl",
+    "smtp_host",
+    "smtp_port",
+    "smtp_username",
+    "smtp_password",
+    "smtp_use_tls",
+    "smtp_use_ssl",
+    "from_address",
+    "auto_reply_enabled",
+    "poll_interval_seconds",
+    "mark_seen",
+    "post_action",
+    "post_action_move_mailbox",
+    "post_action_expunge",
+    "post_action_ignore_skipped",
+    "max_body_chars",
+    "subject_prefix",
+    "allow_from",
+    "verify_dkim",
+    "verify_spf",
+    "allowed_attachment_types",
+    "max_attachment_size",
+    "max_attachments_per_email",
+)
+
+_WEBSOCKET_HINT_KEYS = (
+    "host",
+    "port",
+    "unix_socket_path",
+    "path",
+    "token",
+    "token_issue_path",
+    "token_issue_secret",
+    "token_ttl_s",
+    "websocket_requires_token",
+    "allow_from",
+    "streaming",
+    "max_message_bytes",
+    "ping_interval_s",
+    "ping_timeout_s",
+    "ssl_certfile",
+    "ssl_keyfile",
+)
+
+
+def test_email_field_hints_contract() -> None:
+    """Email hints: declaration order, secrets, required set, help_key prefix."""
+    hints = channel_field_hints("email")
+    keys = tuple(hint["key"] for hint in hints)
+    assert keys == _EMAIL_HINT_KEYS
+    assert "enabled" not in keys
+    assert len(hints) == 29
+
+    by_key = {hint["key"]: hint for hint in hints}
+    assert {key for key, hint in by_key.items() if hint["secret"]} == {
+        "imap_password",
+        "smtp_password",
+    }
+    assert by_key["imap_password"]["type"] == "password"
+    assert by_key["smtp_password"]["type"] == "password"
+    # required mirrors EmailChannel._validate_config: the channel refuses to
+    # start without all six credential fields.
+    assert {key for key, hint in by_key.items() if hint["required"]} == {
+        "imap_host",
+        "imap_username",
+        "imap_password",
+        "smtp_host",
+        "smtp_username",
+        "smtp_password",
+    }
+    for hint in hints:
+        assert hint["help_key"] == f"settings.channels.fields.email.{hint['key']}"
+
+
+def test_websocket_field_hints_contract() -> None:
+    """WebSocket hints: declaration order, secrets, help_key prefix."""
+    hints = channel_field_hints("websocket")
+    keys = tuple(hint["key"] for hint in hints)
+    assert keys == _WEBSOCKET_HINT_KEYS
+    assert "enabled" not in keys
+    assert len(hints) == 16
+
+    by_key = {hint["key"]: hint for hint in hints}
+    assert {key for key, hint in by_key.items() if hint["secret"]} == {
+        "token",
+        "token_issue_secret",
+    }
+    assert by_key["token"]["type"] == "password"
+    assert by_key["token_issue_secret"]["type"] == "password"
+    # ssl_certfile/ssl_keyfile are filesystem paths, not secret material.
+    assert by_key["ssl_certfile"]["secret"] is False
+    assert by_key["ssl_keyfile"]["secret"] is False
+    # Nothing is unconditionally required: defaults work and unix_socket_path
+    # is a legitimate alternative to host/port.
+    assert {key for key, hint in by_key.items() if hint["required"]} == set()
+    for hint in hints:
+        assert hint["help_key"] == f"settings.channels.fields.websocket.{hint['key']}"
+
+
+# --- (a3) hint-authoritative secret resolution ------------------------------- #
+
+
+def test_is_secret_key_hint_authoritative_with_regex_failsafe() -> None:
+    """A hand-written hint's secret flag wins for the keys it covers only."""
+    # Declared non-secret wins over the regex over-match...
+    assert is_secret_key("websocket", "token_issue_path") is False
+    assert is_secret_key("websocket", "token_ttl_s") is False
+    assert is_secret_key("websocket", "websocket_requires_token") is False
+    # ...and declared secrets stay secret.
+    assert is_secret_key("websocket", "token") is True
+    assert is_secret_key("websocket", "token_issue_secret") is True
+    assert is_secret_key("email", "imap_password") is True
+    assert is_secret_key("email", "smtp_password") is True
+    assert is_secret_key("dingtalk", "client_secret") is True
+    # An UNHINTED regex-matching key on a hand-written channel keeps the
+    # unconditional fail-safe...
+    assert is_secret_key("websocket", "webhook_secret") is True
+    # ...as do derived channels and unknown channels.
+    assert is_secret_key("telegram", "bot_token") is True
+    assert is_secret_key("no_such_channel", "api_key") is True
+    assert is_secret_key("telegram", "allow_from") is False
+
+
+def test_websocket_token_shaped_non_secrets_land_in_values() -> None:
+    """The security-flip root cause: requires_token masked → form seeds False."""
+    section = {
+        "enabled": False,
+        "websocket_requires_token": True,
+        "token_ttl_s": 300,
+        "token_issue_path": "/issue",
+        "token": "s3cret-value",
+        "token_issue_secret": "issue-secret-value",
+        "webhook_secret": "unhinted-but-regex-caught",
+    }
+
+    values, secrets = split_values_secrets("websocket", section)
+
+    assert values["websocket_requires_token"] is True
+    assert values["token_ttl_s"] == 300
+    assert values["token_issue_path"] == "/issue"
+    assert set(secrets) == {"token", "token_issue_secret", "webhook_secret"}
+    assert secrets["token"] == {"set": True, "masked": "****alue"}
+
+
+def test_email_and_dingtalk_masking_unchanged() -> None:
+    values, secrets = split_values_secrets(
+        "email",
+        {"imap_host": "h", "imap_password": "a", "smtp_password": "b"},
+    )
+    assert values == {"imap_host": "h"}
+    assert set(secrets) == {"imap_password", "smtp_password"}
+
+    values, secrets = split_values_secrets(
+        "dingtalk", {"client_secret": "dummy-secret-1234"}
+    )
+    assert values == {}
+    assert secrets == {"client_secret": {"set": True, "masked": "****1234"}}
+
+
+def test_derived_channel_regex_masking_unchanged() -> None:
+    values, secrets = split_values_secrets(
+        "telegram", {"bot_token": "x", "allow_from": ["*"]}
+    )
+    assert "bot_token" not in values
+    assert "bot_token" in secrets
+    assert values == {"allow_from": ["*"]}
+
+
 # --- (b) fallback derivation ------------------------------------------------- #
 
 
-@pytest.mark.parametrize("name", ["discord", "websocket"])
+@pytest.mark.parametrize("name", ["discord", "telegram"])
 def test_fallback_derives_types_and_secret_flags(name: str) -> None:
     """Adapters without hand-written hints derive metadata from default_config()."""
     config = _section_for(name)
@@ -395,7 +573,13 @@ def test_discovered_adapter_surface_is_locked() -> None:
 
 @pytest.mark.parametrize("name", ADAPTER_NAMES)
 def test_split_never_leaks_secret_keys_in_values(name: str) -> None:
-    """No SECRET_KEY_RE key may appear in ``values`` for any adapter."""
+    """A regex-matching key reaches ``values`` only via an audited hint.
+
+    Hand-written hints are authoritative for the keys they cover (websocket's
+    ``token_ttl_s`` is a declared non-secret); every OTHER regex-matching key
+    — derived channels, unhinted extras — stays under the unconditional
+    :data:`SECRET_KEY_RE` fail-safe.
+    """
     section = _section_for(name)
     if section is None:
         # Missing SDK (e.g. matrix today): hints degrade to empty and masking
@@ -404,7 +588,13 @@ def test_split_never_leaks_secret_keys_in_values(name: str) -> None:
         section = {"webhook_secret": "dummy-secret-1234", "bot_token": "dummy-token"}
 
     values, secrets = split_values_secrets(name, section)
-    assert [key for key in values if SECRET_KEY_RE.search(key)] == []
+    hand_written = {
+        hint["key"]: hint for hint in _config_meta.FIELD_HINTS.get(name, [])
+    }
+    for key in values:
+        if SECRET_KEY_RE.search(key):
+            assert key in hand_written, f"{name}.{key}: regex fail-safe bypassed"
+            assert hand_written[key]["secret"] is False
     assert set(values) | set(secrets) == set(section)
     assert not (set(values) & set(secrets))
 

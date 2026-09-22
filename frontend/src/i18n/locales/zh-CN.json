@@ -520,6 +520,190 @@
             "label": "最大下载大小（字节）",
             "help": "单个附件下载的安全上限（默认 209715200，即 200 MB）。"
           }
+        },
+        "email": {
+          "consent_granted": {
+            "label": "已授予同意",
+            "help": "总开关：只有明确授予同意后，该渠道才会读取和发送邮件。"
+          },
+          "imap_host": {
+            "label": "IMAP 服务器",
+            "help": "收件（入站）邮件服务器地址，例如 imap.gmail.com。新邮件通过 IMAP 从该服务器轮询。"
+          },
+          "imap_port": {
+            "label": "IMAP 端口",
+            "help": "入站端口（默认 993，配合 SSL）。"
+          },
+          "imap_username": {
+            "label": "IMAP 用户名",
+            "help": "用于登录 IMAP 的邮箱账号，通常是完整的邮箱地址。"
+          },
+          "imap_password": {
+            "label": "IMAP 密码",
+            "help": "IMAP 邮箱密码或应用专用密码。仅保存在服务端，不会回传给浏览器。"
+          },
+          "imap_mailbox": {
+            "label": "IMAP 邮箱文件夹",
+            "help": "轮询新邮件所在的文件夹（默认 INBOX）。"
+          },
+          "imap_use_ssl": {
+            "label": "IMAP SSL",
+            "help": "通过 SSL 连接 IMAP（默认开启；993 端口需要）。"
+          },
+          "smtp_host": {
+            "label": "SMTP 服务器",
+            "help": "发件（出站）邮件服务器地址，例如 smtp.gmail.com。回复邮件经由该服务器发送。"
+          },
+          "smtp_port": {
+            "label": "SMTP 端口",
+            "help": "出站端口（默认 587，使用 STARTTLS；465 用于隐式 SSL）。"
+          },
+          "smtp_username": {
+            "label": "SMTP 用户名",
+            "help": "用于 SMTP 认证的账号，通常是完整的邮箱地址。"
+          },
+          "smtp_password": {
+            "label": "SMTP 密码",
+            "help": "SMTP 密码或应用专用密码。仅保存在服务端，不会回传给浏览器。"
+          },
+          "smtp_use_tls": {
+            "label": "SMTP STARTTLS",
+            "help": "使用 STARTTLS 升级 SMTP 连接（默认开启，适用于 587 端口）。实际使用中与 SMTP SSL 互斥。"
+          },
+          "smtp_use_ssl": {
+            "label": "SMTP SSL",
+            "help": "通过隐式 TLS 连接 SMTP，例如 465 端口（默认关闭）。实际使用中与 STARTTLS 互斥。"
+          },
+          "from_address": {
+            "label": "发件地址",
+            "help": "回复邮件的发件地址。留空则沿用 SMTP 用户名。"
+          },
+          "auto_reply_enabled": {
+            "label": "自动回复",
+            "help": "对入站邮件自动回复。智能体主动发起的发送不受影响。"
+          },
+          "poll_interval_seconds": {
+            "label": "轮询间隔（秒）",
+            "help": "检查 IMAP 新邮件的频率（默认 30，最小 5）。"
+          },
+          "mark_seen": {
+            "label": "标记为已读",
+            "help": "将已处理的邮件在邮箱中标记为已读。"
+          },
+          "post_action": {
+            "label": "处理后动作",
+            "help": "已处理邮件的处理方式：delete（删除）、move（移动到其他文件夹），留空表示保留。"
+          },
+          "post_action_move_mailbox": {
+            "label": "移动到文件夹",
+            "help": "“处理后动作”选择 move 时使用的目标文件夹。"
+          },
+          "post_action_expunge": {
+            "label": "删除后彻底清除",
+            "help": "删除邮件后执行 expunge 彻底清除，而不是仅保留删除标记。"
+          },
+          "post_action_ignore_skipped": {
+            "label": "跳过自身与已过滤邮件",
+            "help": "被跳过的邮件（自身邮件及被名单过滤的发件人）不受处理后动作影响（默认开启）。"
+          },
+          "max_body_chars": {
+            "label": "正文最大字符数",
+            "help": "每封邮件正文截断到该字符数（默认 12000）。"
+          },
+          "subject_prefix": {
+            "label": "回复主题前缀",
+            "help": "在回复主题前添加的前缀（默认 \"Re: \"）。"
+          },
+          "allow_from": {
+            "label": "允许的发件人",
+            "help": "可选的发件人邮箱白名单，只有名单内的地址可以与智能体对话（\"*\" 表示允许所有人）。未配对的发件人会收到一条包含配对码的回复。"
+          },
+          "verify_dkim": {
+            "label": "校验 DKIM",
+            "help": "要求 Authentication-Results 头中 dkim=pass。同时关闭 DKIM 与 SPF 校验将接受伪造的 From 头。"
+          },
+          "verify_spf": {
+            "label": "校验 SPF",
+            "help": "要求 Authentication-Results 头中 spf=pass。同时关闭 DKIM 与 SPF 校验将接受伪造的 From 头。"
+          },
+          "allowed_attachment_types": {
+            "label": "允许的附件类型",
+            "help": "入站附件的 MIME 白名单，例如 application/pdf 或 image/*。留空表示禁用附件。"
+          },
+          "max_attachment_size": {
+            "label": "附件大小上限（字节）",
+            "help": "单个附件允许的最大字节数（默认 2000000，即 2 MB）。"
+          },
+          "max_attachments_per_email": {
+            "label": "单封邮件附件数上限",
+            "help": "一封邮件最多接受的附件数量（默认 5）。"
+          }
+        },
+        "websocket": {
+          "host": {
+            "label": "绑定地址",
+            "help": "WebSocket 服务监听的本地地址（默认 127.0.0.1，仅本机可访问）。使用 0.0.0.0 或 :: 等通配地址会把服务暴露到所有网卡，除非设置了 token 或 token 下发密钥，否则会被拒绝。"
+          },
+          "port": {
+            "label": "绑定端口",
+            "help": "WebSocket 服务监听的本地端口（默认 8765）。设置 Unix socket 路径时此项被忽略。"
+          },
+          "unix_socket_path": {
+            "label": "Unix socket 路径",
+            "help": "可选的绝对路径。设置后服务监听该 Unix socket，而不再使用上方的主机和端口。"
+          },
+          "path": {
+            "label": "升级路径",
+            "help": "客户端连接使用的 WebSocket 升级路径（默认 /），必须以“/”开头。"
+          },
+          "token": {
+            "label": "静态令牌",
+            "help": "握手时通过 token 查询参数校验的共享密钥。仅保存在服务端，不会回传给浏览器。"
+          },
+          "token_issue_path": {
+            "label": "令牌下发路径",
+            "help": "以 JSON 形式下发短期一次性令牌的 HTTP GET 路由。必须与升级路径不同。"
+          },
+          "token_issue_secret": {
+            "label": "令牌下发密钥",
+            "help": "令牌下发路由要求的 Bearer 密钥（Authorization: Bearer 或 X-Vibe-Trading-Auth）。仅保存在服务端，不会回传给浏览器。"
+          },
+          "token_ttl_s": {
+            "label": "令牌有效期（秒）",
+            "help": "令牌下发路由签发令牌的有效期，单位为秒（30–86400，默认 300）。"
+          },
+          "websocket_requires_token": {
+            "label": "强制令牌",
+            "help": "拒绝未携带有效静态令牌或签发令牌的握手（默认开启）。"
+          },
+          "allow_from": {
+            "label": "允许的客户端",
+            "help": "可选的客户端 ID 白名单，只有名单内的客户端可以连接（\"*\" 表示允许所有人，默认）。"
+          },
+          "streaming": {
+            "label": "流式输出",
+            "help": "将模型输出增量实时推送给已连接的客户端。"
+          },
+          "max_message_bytes": {
+            "label": "单条消息上限（字节）",
+            "help": "允许的最大入站帧字节数（默认 37748736；范围 1024–41943040）。"
+          },
+          "ping_interval_s": {
+            "label": "Ping 间隔（秒）",
+            "help": "心跳 ping 的发送间隔秒数（5–300，默认 20）。"
+          },
+          "ping_timeout_s": {
+            "label": "Ping 超时（秒）",
+            "help": "等待 ping 响应的秒数，超时后断开连接（5–300，默认 20）。"
+          },
+          "ssl_certfile": {
+            "label": "TLS 证书路径",
+            "help": "WSS 使用的服务端 PEM 证书路径。证书与私钥需成对设置或同时留空；这里是服务器上的文件路径，不是上传的材料。"
+          },
+          "ssl_keyfile": {
+            "label": "TLS 私钥路径",
+            "help": "WSS 使用的服务端 PEM 私钥路径。证书与私钥需成对设置或同时留空；这里是服务器上的文件路径，不是上传的材料。"
+          }
         }
       },
       "guides": {
@@ -542,6 +726,26 @@
           "step4": "按平台的沙箱/发布规则，将机器人加入 QQ 群或与其私聊。",
           "step5": "回到这里点击“测试连接”，然后启用渠道。",
           "docsLabel": "打开 QQ 开放平台"
+        },
+        "email": {
+          "title": "邮箱配置指南",
+          "intro": "邮箱渠道通过 IMAP 轮询收件、通过 SMTP 发送回复，因此无需公网回调地址。",
+          "step1": "从邮箱服务商处获取 IMAP 与 SMTP 的服务器地址和端口（通常是 imap.<服务商> 的 993 端口和 smtp.<服务商> 的 587 端口）。",
+          "step2": "在邮箱设置中开启 IMAP 与 SMTP 服务；如果服务商要求（Gmail、QQ 邮箱等启用两步验证的邮箱），请创建应用专用密码。",
+          "step3": "填写上方的 IMAP 与 SMTP 凭据，设置发件地址，并把你自己的邮箱加入“允许的发件人”。",
+          "step4": "点击“测试连接”，它会依次探测 IMAP 登录、邮箱文件夹和 SMTP 登录。",
+          "step5": "勾选“已授予同意”并启用渠道，自动回复即可送达通过 DKIM/SPF 校验的发件人。",
+          "docsLabel": "打开 Vibe-Trading 文档"
+        },
+        "websocket": {
+          "title": "WebSocket 配置指南",
+          "intro": "WebSocket 渠道自带本地服务，客户端直接通过 WebSocket 地址连接，因此无需公网回调地址。",
+          "step1": "选择绑定地址：仅本机使用可保持 127.0.0.1；如需对外暴露可设置 0.0.0.0 或 ::，此时必须配置令牌或令牌下发密钥。",
+          "step2": "设置静态令牌，或配置令牌下发路径及其 Bearer 密钥，让客户端获取短期令牌。",
+          "step3": "客户端使用 ws://host:port/path?client_id=...&token=... 连接。",
+          "step4": "渠道运行中保存会热切换服务：已连接的客户端（包括本 Web UI 聊天）会短暂断开并自动重连。",
+          "step5": "点击“测试连接”，它会在本地校验 SSL 证书/私钥与地址可用性。",
+          "docsLabel": "打开 Vibe-Trading 文档"
         }
       }
     },

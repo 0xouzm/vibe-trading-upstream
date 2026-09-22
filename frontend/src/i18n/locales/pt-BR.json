@@ -525,6 +525,190 @@
             "label": "Tamanho máximo de download (bytes)",
             "help": "Limite de segurança para o download de um único anexo (padrão 209715200 = 200 MB)."
           }
+        },
+        "email": {
+          "consent_granted": {
+            "label": "Consentimento concedido",
+            "help": "Chave de permissão principal. O canal só lê e envia e-mails depois que você concede o consentimento explicitamente."
+          },
+          "imap_host": {
+            "label": "Host IMAP",
+            "help": "Servidor de e-mail de entrada, por exemplo imap.gmail.com. Os e-mails recebidos são consultados nesse servidor via IMAP."
+          },
+          "imap_port": {
+            "label": "Porta IMAP",
+            "help": "Porta de entrada (padrão 993 com SSL)."
+          },
+          "imap_username": {
+            "label": "Usuário IMAP",
+            "help": "Conta da caixa de correio usada para entrar via IMAP; normalmente é o endereço de e-mail completo."
+          },
+          "imap_password": {
+            "label": "Senha IMAP",
+            "help": "Senha da caixa de correio ou senha de aplicativo para IMAP. Fica armazenada no servidor e nunca é devolvida ao navegador."
+          },
+          "imap_mailbox": {
+            "label": "Caixa IMAP",
+            "help": "Pasta consultada em busca de e-mails novos (padrão INBOX)."
+          },
+          "imap_use_ssl": {
+            "label": "SSL do IMAP",
+            "help": "Conectar ao IMAP via SSL (ativado por padrão; necessário para a porta 993)."
+          },
+          "smtp_host": {
+            "label": "Host SMTP",
+            "help": "Servidor de e-mail de saída, por exemplo smtp.gmail.com. As respostas são enviadas por esse servidor."
+          },
+          "smtp_port": {
+            "label": "Porta SMTP",
+            "help": "Porta de saída (padrão 587 com STARTTLS; 465 para SSL implícito)."
+          },
+          "smtp_username": {
+            "label": "Usuário SMTP",
+            "help": "Conta usada para autenticar no servidor SMTP; normalmente é o endereço de e-mail completo."
+          },
+          "smtp_password": {
+            "label": "Senha SMTP",
+            "help": "Senha ou senha de aplicativo para SMTP. Fica armazenada no servidor e nunca é devolvida ao navegador."
+          },
+          "smtp_use_tls": {
+            "label": "STARTTLS do SMTP",
+            "help": "Criptografar a conexão SMTP com STARTTLS (ativado por padrão; o usual na porta 587). Na prática, é exclusivo com o SSL do SMTP."
+          },
+          "smtp_use_ssl": {
+            "label": "SSL do SMTP",
+            "help": "Conectar ao SMTP via TLS implícito, por exemplo na porta 465 (desativado por padrão). Na prática, é exclusivo com o STARTTLS."
+          },
+          "from_address": {
+            "label": "Endereço do remetente",
+            "help": "Endereço de onde as respostas são enviadas. Se ficar vazio, usa o usuário SMTP."
+          },
+          "auto_reply_enabled": {
+            "label": "Respostas automáticas",
+            "help": "Responder automaticamente aos e-mails recebidos. Envios iniciados pelo agente não são afetados."
+          },
+          "poll_interval_seconds": {
+            "label": "Intervalo de consulta (s)",
+            "help": "Com que frequência a caixa IMAP é verificada em busca de e-mails novos (padrão 30, mínimo 5)."
+          },
+          "mark_seen": {
+            "label": "Marcar como lido",
+            "help": "Marcar como lidos os e-mails processados na caixa de correio."
+          },
+          "post_action": {
+            "label": "Ação após processar",
+            "help": "O que fazer com os e-mails processados: delete (excluir), move (mover para outra pasta) ou vazio para mantê-los."
+          },
+          "post_action_move_mailbox": {
+            "label": "Mover para a pasta",
+            "help": "Pasta de destino usada quando a ação após processar é move."
+          },
+          "post_action_expunge": {
+            "label": "Expurgar após excluir",
+            "help": "Remover definitivamente os e-mails excluídos (expunge) em vez de deixá-los apenas sinalizados."
+          },
+          "post_action_ignore_skipped": {
+            "label": "Ignorar próprios e filtrados",
+            "help": "Não aplicar a ação pós-processamento aos e-mails ignorados (os seus e os de remetentes filtrados pela lista) (ativado por padrão)."
+          },
+          "max_body_chars": {
+            "label": "Máx. de caracteres do corpo",
+            "help": "Truncar o corpo de cada e-mail nesse número de caracteres (padrão 12000)."
+          },
+          "subject_prefix": {
+            "label": "Prefixo do assunto",
+            "help": "Prefixo adicionado ao assunto das respostas (padrão \"Re: \")."
+          },
+          "allow_from": {
+            "label": "Remetentes permitidos",
+            "help": "Lista opcional de endereços autorizados a falar com o agente (\"*\" permite todos). Remetentes não pareados recebem um código de pareamento na resposta."
+          },
+          "verify_dkim": {
+            "label": "Verificar DKIM",
+            "help": "Exigir o cabeçalho Authentication-Results com dkim=pass. Desativar DKIM e SPF ao mesmo tempo aceita cabeçalhos From falsificados."
+          },
+          "verify_spf": {
+            "label": "Verificar SPF",
+            "help": "Exigir o cabeçalho Authentication-Results com spf=pass. Desativar DKIM e SPF ao mesmo tempo aceita cabeçalhos From falsificados."
+          },
+          "allowed_attachment_types": {
+            "label": "Tipos de anexo permitidos",
+            "help": "Lista MIME permitida para anexos recebidos, por exemplo application/pdf ou image/*. Deixe vazio para desativar anexos."
+          },
+          "max_attachment_size": {
+            "label": "Tamanho máx. do anexo (bytes)",
+            "help": "Maior tamanho aceito por anexo, em bytes (padrão 2000000 = 2 MB)."
+          },
+          "max_attachments_per_email": {
+            "label": "Máx. de anexos por e-mail",
+            "help": "Quantos anexos são aceitos em um único e-mail (padrão 5)."
+          }
+        },
+        "websocket": {
+          "host": {
+            "label": "Host de escuta",
+            "help": "Endereço local ao qual o servidor WebSocket se vincula (padrão 127.0.0.1, apenas local). Um host curinga como 0.0.0.0 ou :: expõe o servidor em todas as interfaces e é recusado sem um token ou segredo de emissão."
+          },
+          "port": {
+            "label": "Porta de escuta",
+            "help": "Porta local em que o servidor WebSocket escuta (padrão 8765). Ignorada quando um caminho de socket Unix é definido."
+          },
+          "unix_socket_path": {
+            "label": "Caminho do socket Unix",
+            "help": "Caminho absoluto opcional. Quando definido, o servidor escuta nesse socket Unix em vez do host e da porta."
+          },
+          "path": {
+            "label": "Caminho de upgrade",
+            "help": "Caminho de upgrade WebSocket usado pelos clientes (padrão /). Precisa começar com \"/\"."
+          },
+          "token": {
+            "label": "Token estático",
+            "help": "Segredo compartilhado validado pelo parâmetro token durante o handshake. Fica armazenado no servidor e nunca é devolvido ao navegador."
+          },
+          "token_issue_path": {
+            "label": "Caminho de emissão de tokens",
+            "help": "Rota HTTP GET que entrega tokens de curta duração e uso único em JSON. Precisa ser diferente do caminho de upgrade."
+          },
+          "token_issue_secret": {
+            "label": "Segredo de emissão",
+            "help": "Segredo Bearer exigido pela rota de emissão (Authorization: Bearer ou X-Vibe-Trading-Auth). Fica armazenado no servidor e nunca é devolvido ao navegador."
+          },
+          "token_ttl_s": {
+            "label": "TTL do token emitido (s)",
+            "help": "Validade do token emitido pela rota de emissão, em segundos (30-86400, padrão 300)."
+          },
+          "websocket_requires_token": {
+            "label": "Exigir token",
+            "help": "Recusar handshakes sem um token estático ou emitido válido (ativado por padrão)."
+          },
+          "allow_from": {
+            "label": "Clientes permitidos",
+            "help": "Lista opcional de IDs de cliente autorizados a conectar (\"*\" permite todos, padrão)."
+          },
+          "streaming": {
+            "label": "Transmitir saída",
+            "help": "Enviar os deltas de saída do modelo aos clientes conectados conforme são gerados."
+          },
+          "max_message_bytes": {
+            "label": "Máx. de bytes por mensagem",
+            "help": "Maior frame de entrada aceito, em bytes (padrão 37748736; 1024-41943040)."
+          },
+          "ping_interval_s": {
+            "label": "Intervalo de ping (s)",
+            "help": "Segundos entre pings de keepalive (5-300, padrão 20)."
+          },
+          "ping_timeout_s": {
+            "label": "Timeout de ping (s)",
+            "help": "Segundos de espera por uma resposta de ping antes de encerrar a conexão (5-300, padrão 20)."
+          },
+          "ssl_certfile": {
+            "label": "Caminho do certificado TLS",
+            "help": "Caminho do certificado PEM no servidor para WSS. Defina certificado e chave juntos ou nenhum dos dois; são caminhos de arquivo no servidor, não material enviado por upload."
+          },
+          "ssl_keyfile": {
+            "label": "Caminho da chave TLS",
+            "help": "Caminho da chave privada PEM no servidor para WSS. Defina certificado e chave juntos ou nenhum dos dois; são caminhos de arquivo no servidor, não material enviado por upload."
+          }
         }
       },
       "guides": {
@@ -547,6 +731,26 @@
           "step4": "Adicione o bot a um grupo do QQ ou converse com ele em privado, seguindo as regras de sandbox/publicação da plataforma.",
           "step5": "Volte aqui, clique em “Testar conexão” e ative o canal.",
           "docsLabel": "Abrir a QQ Open Platform"
+        },
+        "email": {
+          "title": "Guia de configuração de e-mail",
+          "intro": "O canal de e-mail consulta a caixa via IMAP e responde via SMTP, então não é necessária uma URL de callback pública.",
+          "step1": "Descubra os hosts e as portas de IMAP e SMTP do seu provedor (normalmente imap.<provedor> na 993 e smtp.<provedor> na 587).",
+          "step2": "Ative IMAP e SMTP nas configurações da caixa de correio e, se o provedor exigir (Gmail, QQ Mail e outros com verificação em duas etapas), crie uma senha de aplicativo.",
+          "step3": "Preencha as credenciais de IMAP e SMTP acima, defina o endereço do remetente e adicione o seu endereço em «Remetentes permitidos».",
+          "step4": "Clique em «Testar conexão»: ele verifica o login IMAP, a pasta da caixa e o login SMTP.",
+          "step5": "Marque «Consentimento concedido» e ative o canal; as respostas automáticas passam a chegar aos remetentes que passarem nas verificações DKIM/SPF.",
+          "docsLabel": "Abrir a documentação do Vibe-Trading"
+        },
+        "websocket": {
+          "title": "Guia de configuração do WebSocket",
+          "intro": "O canal WebSocket executa seu próprio servidor local ao qual os clientes se conectam por uma URL WebSocket, então não é necessária uma URL de callback pública.",
+          "step1": "Escolha um endereço de escuta: mantenha 127.0.0.1 para uso apenas local ou defina 0.0.0.0 / :: para expor o servidor — um host curinga exige um token ou um segredo de emissão.",
+          "step2": "Defina um token estático, ou um caminho de emissão com seu segredo Bearer para que os clientes obtenham tokens de curta duração.",
+          "step3": "Conecte os clientes com ws://host:port/path?client_id=...&token=...",
+          "step4": "Salvar com o canal em execução troca o servidor a quente: os clientes conectados (incluindo este chat da interface web) caem por um instante e se reconectam.",
+          "step5": "Clique em «Testar conexão»: ele valida localmente o certificado e a chave SSL e a disponibilidade do endereço.",
+          "docsLabel": "Abrir a documentação do Vibe-Trading"
         }
       }
     },

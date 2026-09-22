@@ -520,6 +520,190 @@
             "label": "최대 다운로드 크기(바이트)",
             "help": "첨부 파일 하나 다운로드의 안전 상한(기본 209715200 = 200 MB)."
           }
+        },
+        "email": {
+          "consent_granted": {
+            "label": "동의 승인",
+            "help": "최상위 허용 스위치입니다. 여기서 명시적으로 동의해야만 이 채널이 메일을 읽고 보냅니다."
+          },
+          "imap_host": {
+            "label": "IMAP 호스트",
+            "help": "수신 메일 서버 호스트입니다(예: imap.gmail.com). 새 메일은 이 서버에서 IMAP으로 폴링합니다."
+          },
+          "imap_port": {
+            "label": "IMAP 포트",
+            "help": "수신 포트입니다(기본 993, SSL 사용)."
+          },
+          "imap_username": {
+            "label": "IMAP 사용자 이름",
+            "help": "IMAP 로그인에 사용하는 메일함 계정으로, 보통 전체 이메일 주소입니다."
+          },
+          "imap_password": {
+            "label": "IMAP 비밀번호",
+            "help": "IMAP용 메일함 비밀번호 또는 앱 비밀번호입니다. 서버 측에만 저장되며 브라우저로 반환되지 않습니다."
+          },
+          "imap_mailbox": {
+            "label": "IMAP 메일함",
+            "help": "새 메일을 폴링할 폴더입니다(기본 INBOX)."
+          },
+          "imap_use_ssl": {
+            "label": "IMAP SSL",
+            "help": "SSL로 IMAP에 연결합니다(기본 켜짐, 포트 993에 필요)."
+          },
+          "smtp_host": {
+            "label": "SMTP 호스트",
+            "help": "발신 메일 서버 호스트입니다(예: smtp.gmail.com). 답장은 이 서버를 통해 전송됩니다."
+          },
+          "smtp_port": {
+            "label": "SMTP 포트",
+            "help": "발신 포트입니다(기본 587, STARTTLS 사용. 465는 암시적 SSL)."
+          },
+          "smtp_username": {
+            "label": "SMTP 사용자 이름",
+            "help": "SMTP 인증에 사용하는 계정으로, 보통 전체 이메일 주소입니다."
+          },
+          "smtp_password": {
+            "label": "SMTP 비밀번호",
+            "help": "SMTP용 비밀번호 또는 앱 비밀번호입니다. 서버 측에만 저장되며 브라우저로 반환되지 않습니다."
+          },
+          "smtp_use_tls": {
+            "label": "SMTP STARTTLS",
+            "help": "STARTTLS로 SMTP 연결을 암호화합니다(기본 켜짐, 포트 587의 표준). 실제로는 SMTP SSL과 함께 사용하지 않습니다."
+          },
+          "smtp_use_ssl": {
+            "label": "SMTP SSL",
+            "help": "암시적 TLS로 SMTP에 연결합니다(예: 포트 465, 기본 꺼짐). 실제로는 STARTTLS와 함께 사용하지 않습니다."
+          },
+          "from_address": {
+            "label": "보낸 사람 주소",
+            "help": "답장을 보낼 주소입니다. 비워 두면 SMTP 사용자 이름을 사용합니다."
+          },
+          "auto_reply_enabled": {
+            "label": "자동 답장",
+            "help": "수신 메일에 자동으로 답장합니다. 에이전트가 시작하는 발신에는 영향을 주지 않습니다."
+          },
+          "poll_interval_seconds": {
+            "label": "폴링 간격(초)",
+            "help": "IMAP 메일함에서 새 메일을 확인하는 주기입니다(기본 30, 최소 5)."
+          },
+          "mark_seen": {
+            "label": "읽음으로 표시",
+            "help": "처리한 메일을 메일함에서 읽음으로 표시합니다."
+          },
+          "post_action": {
+            "label": "처리 후 동작",
+            "help": "처리한 메일의 처리 방식: delete(삭제), move(다른 메일함으로 이동), 비워 두면 그대로 유지."
+          },
+          "post_action_move_mailbox": {
+            "label": "이동할 메일함",
+            "help": "‘처리 후 동작’이 move일 때 사용할 대상 메일함입니다."
+          },
+          "post_action_expunge": {
+            "label": "삭제 후 expunge",
+            "help": "삭제한 메일에 삭제 플래그를 남기지 않고 완전히 제거합니다."
+          },
+          "post_action_ignore_skipped": {
+            "label": "본인·필터 메일 제외",
+            "help": "건너뛴 메일(본인이 보낸 메일과 허용 목록에서 걸러진 발신자)에는 처리 후 동작을 적용하지 않습니다(기본 켜짐)."
+          },
+          "max_body_chars": {
+            "label": "본문 최대 문자 수",
+            "help": "메일 본문을 이 문자 수로 잘라냅니다(기본 12000)."
+          },
+          "subject_prefix": {
+            "label": "답장 제목 접두사",
+            "help": "답장 제목 앞에 붙일 접두사입니다(기본 \"Re: \")."
+          },
+          "allow_from": {
+            "label": "허용 발신자",
+            "help": "에이전트와 대화할 수 있는 이메일 주소 허용 목록입니다(선택, \"*\"는 모든 사람 허용). 페어링되지 않은 발신자에게는 답장으로 페어링 코드가 전송됩니다."
+          },
+          "verify_dkim": {
+            "label": "DKIM 검증",
+            "help": "Authentication-Results 헤더에 dkim=pass를 요구합니다. DKIM과 SPF를 모두 끄면 위조된 From 헤더를 허용하게 됩니다."
+          },
+          "verify_spf": {
+            "label": "SPF 검증",
+            "help": "Authentication-Results 헤더에 spf=pass를 요구합니다. DKIM과 SPF를 모두 끄면 위조된 From 헤더를 허용하게 됩니다."
+          },
+          "allowed_attachment_types": {
+            "label": "허용 첨부 유형",
+            "help": "수신 첨부 파일의 MIME 허용 목록입니다(예: application/pdf, image/*). 비워 두면 첨부가 비활성화됩니다."
+          },
+          "max_attachment_size": {
+            "label": "첨부 크기 상한(바이트)",
+            "help": "첨부 파일 하나의 최대 바이트 수입니다(기본 2000000 = 2 MB)."
+          },
+          "max_attachments_per_email": {
+            "label": "메일당 첨부 수 상한",
+            "help": "메일 한 통에서 허용하는 첨부 파일 수입니다(기본 5)."
+          }
+        },
+        "websocket": {
+          "host": {
+            "label": "바인드 호스트",
+            "help": "WebSocket 서버가 바인드할 로컬 주소입니다(기본 127.0.0.1, 로컬 전용). 0.0.0.0 또는 :: 같은 와일드카드 호스트는 모든 인터페이스에 서버를 노출하므로 토큰이나 토큰 발급 시크릿이 없으면 거부됩니다."
+          },
+          "port": {
+            "label": "바인드 포트",
+            "help": "WebSocket 서버가 수신 대기할 로컬 포트입니다(기본 8765). Unix 소켓 경로를 설정하면 무시됩니다."
+          },
+          "unix_socket_path": {
+            "label": "Unix 소켓 경로",
+            "help": "선택적 절대 경로입니다. 설정하면 호스트와 포트 대신 이 Unix 소켓에서 수신 대기합니다."
+          },
+          "path": {
+            "label": "업그레이드 경로",
+            "help": "클라이언트가 연결하는 WebSocket 업그레이드 경로입니다(기본 /). \"/\"로 시작해야 합니다."
+          },
+          "token": {
+            "label": "정적 토큰",
+            "help": "핸드셰이크 시 token 쿼리 파라미터로 확인하는 공유 시크릿입니다. 서버 측에만 저장되며 브라우저로 반환되지 않습니다."
+          },
+          "token_issue_path": {
+            "label": "토큰 발급 경로",
+            "help": "단기 일회용 토큰을 JSON으로 발급하는 HTTP GET 경로입니다. 업그레이드 경로와 달라야 합니다."
+          },
+          "token_issue_secret": {
+            "label": "토큰 발급 시크릿",
+            "help": "토큰 발급 경로가 요구하는 Bearer 시크릿입니다(Authorization: Bearer 또는 X-Vibe-Trading-Auth). 서버 측에만 저장되며 브라우저로 반환되지 않습니다."
+          },
+          "token_ttl_s": {
+            "label": "발급 토큰 TTL(초)",
+            "help": "토큰 발급 경로가 발급한 토큰의 유효 시간(초)입니다(30–86400, 기본 300)."
+          },
+          "websocket_requires_token": {
+            "label": "토큰 필수",
+            "help": "유효한 정적 토큰이나 발급된 토큰이 없는 핸드셰이크를 거부합니다(기본 켜짐)."
+          },
+          "allow_from": {
+            "label": "허용 클라이언트",
+            "help": "연결을 허용할 클라이언트 ID 허용 목록입니다(선택, \"*\"는 모든 클라이언트 허용, 기본)."
+          },
+          "streaming": {
+            "label": "출력 스트리밍",
+            "help": "모델 출력 델타를 생성되는 즉시 연결된 클라이언트로 전송합니다."
+          },
+          "max_message_bytes": {
+            "label": "메시지 상한(바이트)",
+            "help": "허용하는 수신 프레임의 최대 바이트 수입니다(기본 37748736, 범위 1024–41943040)."
+          },
+          "ping_interval_s": {
+            "label": "Ping 간격(초)",
+            "help": "연결 유지 ping을 보내는 간격(초)입니다(5–300, 기본 20)."
+          },
+          "ping_timeout_s": {
+            "label": "Ping 타임아웃(초)",
+            "help": "ping 응답을 기다리는 시간(초)입니다. 초과하면 연결을 끊습니다(5–300, 기본 20)."
+          },
+          "ssl_certfile": {
+            "label": "TLS 인증서 경로",
+            "help": "WSS용 서버의 PEM 인증서 경로입니다. 인증서와 키를 모두 설정하거나 모두 비워 두세요. 업로드 자료가 아니라 서버의 파일 경로입니다."
+          },
+          "ssl_keyfile": {
+            "label": "TLS 키 경로",
+            "help": "WSS용 서버의 PEM 개인 키 경로입니다. 인증서와 키를 모두 설정하거나 모두 비워 두세요. 업로드 자료가 아니라 서버의 파일 경로입니다."
+          }
         }
       },
       "guides": {
@@ -542,6 +726,26 @@
           "step4": "플랫폼의 샌드박스/게시 규칙에 따라 봇을 QQ 그룹에 추가하거나 개인 채팅을 시작합니다.",
           "step5": "여기로 돌아와 '연결 테스트'를 클릭한 다음 채널을 사용 설정합니다.",
           "docsLabel": "QQ 오픈 플랫폼 열기"
+        },
+        "email": {
+          "title": "이메일 설정 가이드",
+          "intro": "이메일 채널은 수신은 IMAP 폴링, 답장은 SMTP로 처리하므로 공개 콜백 URL이 필요 없습니다.",
+          "step1": "메일 제공업체의 IMAP/SMTP 호스트와 포트를 확인합니다(보통 imap.<제공업체>의 993, smtp.<제공업체>의 587).",
+          "step2": "메일함 설정에서 IMAP과 SMTP를 활성화하고, 제공업체가 요구하면(Gmail, QQ 메일 등 2단계 인증 사용 시) 앱 비밀번호를 만듭니다.",
+          "step3": "위의 IMAP/SMTP 자격 증명을 입력하고 보낸 사람 주소를 설정한 뒤, 본인 주소를 ‘허용 발신자’에 추가합니다.",
+          "step4": "‘연결 테스트’를 클릭합니다. IMAP 로그인, 메일함 폴더, SMTP 로그인을 차례로 점검합니다.",
+          "step5": "‘동의 승인’을 체크하고 채널을 활성화하면 DKIM/SPF 검증을 통과한 발신자에게 자동 답장이 전달됩니다.",
+          "docsLabel": "Vibe-Trading 문서 열기"
+        },
+        "websocket": {
+          "title": "WebSocket 설정 가이드",
+          "intro": "WebSocket 채널은 자체 로컬 서버를 실행하고 클라이언트가 WebSocket 주소로 직접 연결하므로 공개 콜백 URL이 필요 없습니다.",
+          "step1": "바인드 주소를 선택합니다. 로컬 전용이면 127.0.0.1을 유지하고, 외부에 노출하려면 0.0.0.0 또는 ::를 설정합니다(와일드카드 호스트에는 토큰 또는 토큰 발급 시크릿이 필수).",
+          "step2": "정적 토큰을 설정하거나, 토큰 발급 경로와 Bearer 시크릿을 설정해 클라이언트가 단기 토큰을 받도록 합니다.",
+          "step3": "클라이언트는 ws://host:port/path?client_id=...&token=... 으로 연결합니다.",
+          "step4": "채널 실행 중에 저장하면 서버가 핫 스왑됩니다. 연결된 클라이언트(이 웹 UI 채팅 포함)는 잠시 끊겼다가 자동으로 다시 연결됩니다.",
+          "step5": "‘연결 테스트’를 클릭하면 SSL 인증서/키 자료와 주소 사용 가능 여부를 로컬에서 검증합니다.",
+          "docsLabel": "Vibe-Trading 문서 열기"
         }
       }
     },

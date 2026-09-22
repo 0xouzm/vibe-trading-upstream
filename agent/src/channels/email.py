@@ -22,12 +22,13 @@ from typing import Any, Literal
 import logging; logger = logging.getLogger(__name__)
 from pydantic import Field
 
+from src.channels import email_probe
 from src.channels.bus.events import OutboundMessage
 from src.channels.bus.queue import MessageBus
 from src.channels.base import BaseChannel
 from src.channels.utils import get_media_dir
 from pydantic import BaseModel
-from src.channels.utils import safe_filename
+from src.channels.utils import safe_filename, send_imap_id
 
 
 class EmailConfig(BaseModel):
@@ -93,6 +94,7 @@ class EmailChannel(BaseChannel):
 
     name = "email"
     display_name = "Email"
+    supports_connection_test = True
     _IMAP_MONTHS = (
         "Jan",
         "Feb",
@@ -194,7 +196,12 @@ class EmailChannel(BaseChannel):
                 if should_apply_post_action and not self.config.post_action_ignore_skipped:
                     post_actions_uids.update(skipped_uids)
 
-                if post_actions_uids:
+                # stop() is flag-only: an in-flight to_thread fetch completes and
+                # its already-fetched batch is still delivered above (dropping it
+                # would LOSE messages already marked seen during fetch), but the
+                # destructive delete/move post-actions of a stale config are
+                # skipped once stopped — non-destructive wins.
+                if post_actions_uids and self._running:
                     await asyncio.to_thread(self._apply_post_actions_batch, sorted(post_actions_uids))
             except Exception:
                 self.logger.exception("Polling error")
@@ -206,6 +213,14 @@ class EmailChannel(BaseChannel):
     async def stop(self) -> None:
         """Stop polling loop."""
         self._running = False
+
+    async def test_connection(self) -> dict[str, Any]:
+        """Validate the email credentials with a standalone IMAP + SMTP probe.
+
+        Delegates to :func:`src.channels.email_probe.test_connection`; see
+        that function for the full contract (codes, scrubbing, no sending).
+        """
+        return await email_probe.test_connection(self.config)
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send email via SMTP."""
@@ -565,6 +580,9 @@ class EmailChannel(BaseChannel):
 
         try:
             client.login(self.config.imap_username, self.config.imap_password)
+            # NetEase (163/126/yeah.net) rejects SELECT with "Unsafe Login"
+            # unless the client sent an IMAP ID first; harmless elsewhere.
+            send_imap_id(client)
             try:
                 status, _ = client.select(mailbox)
             except Exception as exc:

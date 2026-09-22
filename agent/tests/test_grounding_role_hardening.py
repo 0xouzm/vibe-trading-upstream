@@ -603,6 +603,15 @@ def test_a_field_ref_does_not_borrow_another_fields_value(tmp_path: Path, claim:
     assert _reasons(result) == ["not_in_referenced_call"]
 
 
+def test_a_short_ref_names_whole_path_parts_only(tmp_path: Path) -> None:
+    """var_95 is the trailing part of data.risk.var_95, not of data.risk.cvar_95."""
+    risk = ("portfolio_risk_xray", {"symbols": [A]}, {"status": "ok", "data": {"risk": {"var_95": 0.0157, "cvar_95": 0.0211}}}, "x2")
+    result = _ledger(tmp_path, MARKET_A, risk).validate_final_answer(
+        HDR + " VaR 95%: 1.57%。" + _block(ROW, "95% | count | confidence", "1.57% | observed | VaR 95% | var_95")
+    )
+    assert result.valid is True, result.issues
+
+
 def test_a_field_two_calls_returned_differently_needs_its_call(tmp_path: Path) -> None:
     """historical_var at 95% and at 99% is one field in two calls: the bare
     field ref cannot say which it quotes, and the correction names both."""

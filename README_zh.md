@@ -666,7 +666,7 @@ LONGBRIDGE_ACCESS_TOKEN=...
 | **Composite** | 跨市场 | 跨市场共享单一资金池（`source="auto"`） |
 | **options_portfolio** | 期权 | 多腿、Greeks、payoff/scenario |
 
-日内 bar：1m / 5m / 15m / 30m / 1H / 4H / 1D。15 项指标 + benchmark 对比，**5 个组合优化器**（equal-volatility / risk-parity / mean-variance / max-diversification / turnover-aware），以及 3 个验证工具（Monte Carlo / Bootstrap / Walk-Forward）。
+Bar 周期：1m / 5m / 15m / 30m / 1H / 4H / 1D，以及由日线合成的周线 / 月线（1W / 1M）。15 项指标 + benchmark 对比，**5 个组合优化器**（equal-volatility / risk-parity / mean-variance / max-diversification / turnover-aware），以及 3 个验证工具（Monte Carlo / Bootstrap / Walk-Forward）。
 
 </details>
 

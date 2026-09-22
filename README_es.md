@@ -658,7 +658,7 @@ Ejecuta `vibe-trading alpha list` para explorar, `vibe-trading alpha show <id>` 
 | **Composite** | cross-market | un único pool de capital compartido entre mercados (`source="auto"`) |
 | **options_portfolio** | opciones | multi-leg, greeks, payoff/escenario |
 
-Barras intradía: 1m / 5m / 15m / 30m / 1H / 4H / 1D. 15 métricas + comparación con benchmark, **5 optimizadores de cartera** (volatilidad-igual / risk-parity / media-varianza / máxima diversificación / con conciencia de turnover), y 3 herramientas de validación (Monte Carlo / Bootstrap / Walk-Forward).
+Barras: 1m / 5m / 15m / 30m / 1H / 4H / 1D, más semanales / mensuales (1W / 1M, construidas a partir de barras diarias). 15 métricas + comparación con benchmark, **5 optimizadores de cartera** (volatilidad-igual / risk-parity / media-varianza / máxima diversificación / con conciencia de turnover), y 3 herramientas de validación (Monte Carlo / Bootstrap / Walk-Forward).
 
 </details>
 

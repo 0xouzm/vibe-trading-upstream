@@ -819,7 +819,7 @@ Jalankan `vibe-trading alpha list` untuk menjelajah, `vibe-trading alpha show <i
 | **Composite** | cross-market | one shared capital pool across markets (`source="auto"`) |
 | **options_portfolio** | options | multi-leg, Greeks, payoff/scenario |
 
-Bar intraday: 1m / 5m / 15m / 30m / 1H / 4H / 1D. 15 metrik + perbandingan benchmark, **5 optimizer portofolio** (equal-volatility / risk-parity / mean-variance / max-diversification / turnover-aware), dan 3 tool validasi (Monte Carlo / Bootstrap / Walk-Forward).
+Bar: 1m / 5m / 15m / 30m / 1H / 4H / 1D, plus mingguan / bulanan (1W / 1M, dibangun dari bar harian). 15 metrik + perbandingan benchmark, **5 optimizer portofolio** (equal-volatility / risk-parity / mean-variance / max-diversification / turnover-aware), dan 3 tool validasi (Monte Carlo / Bootstrap / Walk-Forward).
 
 </details>
 

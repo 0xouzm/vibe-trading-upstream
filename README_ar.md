@@ -653,7 +653,7 @@ LONGBRIDGE_ACCESS_TOKEN=...
 | **Composite** | عبر الأسواق | تجمّع رأس مال مشترك واحد عبر الأسواق (`source="auto"`) |
 | **options_portfolio** | الخيارات | متعدد الأرجل، وGreeks، وpayoff/scenario |
 
-أشرطة داخل اليوم: 1m / 5m / 15m / 30m / 1H / 4H / 1D. 15 مقياساً + مقارنة معيارية، و**5 محسّنات محفظة** (equal-volatility / risk-parity / mean-variance / max-diversification / turnover-aware)، و3 أدوات تحقق (Monte Carlo / Bootstrap / Walk-Forward).
+الأشرطة: 1m / 5m / 15m / 30m / 1H / 4H / 1D، إضافةً إلى الأسبوعية / الشهرية (1W / 1M، مبنية من الأشرطة اليومية). 15 مقياساً + مقارنة معيارية، و**5 محسّنات محفظة** (equal-volatility / risk-parity / mean-variance / max-diversification / turnover-aware)، و3 أدوات تحقق (Monte Carlo / Bootstrap / Walk-Forward).
 
 </details>
 

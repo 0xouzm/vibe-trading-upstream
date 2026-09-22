@@ -308,8 +308,9 @@ _NA_CALIBER_MARKETS = frozenset({"crypto", "forex", "futures", "macro"})
 #: A price index has no corporate actions, so every source serves the one
 #: unadjusted level, whatever it does to a stock: eastmoney fqt=1 equals fqt=0
 #: on every bar of 000300.SH, 000001.SH, 000016.SH, 000905.SH, 399001.SZ,
-#: 399006.SZ and 899050.BJ, Tencent's fqkline returns only "day" for them, and
-#: Yahoo's adjclose equals close on ^GSPC, ^NDX and ^HSI (measured 2026-09-22).
+#: 399006.SZ and 899050.BJ, Tencent's fqkline returns only "day" for the six
+#: SSE/SZSE ones (nothing at all for 899050.BJ), and Yahoo's adjclose equals
+#: close on ^GSPC, ^NDX and ^HSI (measured 2026-09-22).
 #: The per-source table stamped them by what the source does to a stock, so an
 #: A-share index read as additive and a Yahoo index as dividend-adjusted (#1541).
 #: Indices stay comparable: a price index beside a dividend-adjusted stock is a

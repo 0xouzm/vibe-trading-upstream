@@ -83,7 +83,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   `qveris_execute` returns `quote_not_bounded` for any other shape.
 - **A price index is stamped `raw`** (#1541). Eastmoney's fqt=1 equals fqt=0
   on every bar of the A-share indices measured, Tencent serves only `day` for
-  them, and Yahoo's adjclose equals close on ^GSPC / ^NDX / ^HSI, but the
+  the SSE/SZSE ones, and Yahoo's adjclose equals close on ^GSPC / ^NDX / ^HSI, but the
   per-source table stamped an A-share index additive and a Yahoo index
   dividend-adjusted. `price_caliber` takes the symbol; A-share index codes are
   matched per exchange, since 000001.SZ is Ping An Bank.

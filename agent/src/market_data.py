@@ -380,7 +380,7 @@ def fetch_market_data(
                 "fallback_used": bool(used_source and used_source != src),
                 "currency_conversion": currency_conversion,
                 "volume_unit": volume_units.get(market),
-                "adjustment": price_caliber(used_source or src, market),
+                "adjustment": price_caliber(used_source or src, market, symbol),
             }
             quote_currency = frame_attrs.get("quote_currency")
             if isinstance(quote_currency, str) and quote_currency:
@@ -441,7 +441,7 @@ def fetch_market_data(
                         "fallback_used": True,
                         "currency_conversion": "none",
                         "volume_unit": base.get("volume_unit"),
-                        "adjustment": base.get("adjustment", price_caliber(src, market)),
+                        "adjustment": base.get("adjustment", price_caliber(src, market, code)),
                         "venue_fallback": True,
                         "resolved_symbol": sibling,
                     }

@@ -193,10 +193,10 @@ Decide which workflow to use based on the request:
   `value | role | note | ref`. Roles:
   `observed` — a tool value that is not a price or volume of the symbol, e.g. a
   PE ratio (`ref`: the tool name such as `get_fundamentals`, or its call id). For
-  structured analysis metrics whose field identity matters (for example VaR/ES
-  confidence), use the exact evidence field path as `ref` (for example
-  `var.var_95`). If the same field was produced by more than one call, qualify
-  it as `call_id::field` (for example `q1::var.var_95`) instead of pooling calls;
+  a metric whose identity matters (VaR vs ES, 95% vs 99%), use the result field
+  as `ref`: `data.tail_risk.var_95` or just `var_95` from `portfolio_risk_xray`,
+  `historical_var` from `quantlib_call`. When more than one call returned that
+  field (historical_var at 95% and at 99%), name the call: `q1::historical_var`;
   `derived` — arithmetic on observed values (`note`: the formula; every number
   added or subtracted must itself be an observed value);
   `proposed` — a price level you suggest, such as an entry, stop or target: inside

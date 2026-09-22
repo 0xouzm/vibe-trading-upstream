@@ -544,95 +544,118 @@ def test_a_tail_risk_figure_a_tool_returned_is_grounded(tmp_path: Path) -> None:
     assert invented.valid is False
 
 
-def test_an_exact_metric_field_ref_is_tighter_than_a_call_ref(tmp_path: Path) -> None:
-    risk = (
-        "quantlib_call",
-        {"action": "call", "function": "var"},
-        {"ok": True, "result": {"var_95": -0.0157, "var_99": -0.0263}},
-        "q1",
-    )
-    prose = HDR + " VaR 95%: 1.57%。"
-    confidence = "95% | count | confidence"
-
-    exact = _ledger(tmp_path / "exact", MARKET_A, risk).validate_final_answer(
-        prose + _block(ROW, confidence, "1.57% | observed | VaR 95% | var.var_95")
-    )
-    wrong_field = _ledger(tmp_path / "wrong", MARKET_A, risk).validate_final_answer(
-        prose + _block(ROW, confidence, "1.57% | observed | VaR 95% | var.var_99")
-    )
-    call_scope = _ledger(tmp_path / "call", MARKET_A, risk).validate_final_answer(
-        prose + _block(ROW, confidence, "1.57% | observed | VaR 95% | q1")
-    )
-
-    assert exact.valid is True, exact.issues
-    assert _reasons(wrong_field) == ["not_in_referenced_call"]
-    assert call_scope.valid is True, call_scope.issues
+#: portfolio_risk_xray's tail-risk block, keys as backtest/risk_xray.py writes them.
+XRAY = (
+    "portfolio_risk_xray",
+    {"symbols": [A]},
+    {
+        "status": "ok",
+        "data": {
+            "tail_risk": {
+                "var_95": 0.0157,
+                "expected_shortfall_95": 0.0211,
+                "var_99": 0.0263,
+                "expected_shortfall_99": 0.0342,
+            }
+        },
+    },
+    "x1",
+)
 
 
-def test_es_and_var_fields_do_not_borrow_each_others_values(tmp_path: Path) -> None:
-    risk = (
-        "quantlib_call",
-        {"action": "call", "function": "var"},
-        {"ok": True, "result": {"var_95": -0.0157, "cvar_95": -0.0211}},
-        "q1",
-    )
-    prose = HDR + " ES 95%: 2.11%。"
-    block_head = (ROW, "95% | count | confidence")
+def _historical_var(confidence: float, call_id: str) -> tuple[tuple[str, dict[str, Any], str, str], float]:
+    """A real quantlib_call historical_var envelope and the VaR it returned."""
+    from src.tools.quantlib_tool import QuantlibCallTool
 
-    es = _ledger(tmp_path / "es", MARKET_A, risk).validate_final_answer(
-        prose + _block(*block_head, "2.11% | observed | ES 95% | var.cvar_95")
-    )
-    wrong_measure = _ledger(tmp_path / "var", MARKET_A, risk).validate_final_answer(
-        prose + _block(*block_head, "2.11% | observed | ES 95% | var.var_95")
-    )
-
-    assert es.valid is True, es.issues
-    assert _reasons(wrong_measure) == ["not_in_referenced_call"]
+    returns = [round(0.0005 + 0.012 * ((i * 37) % 101 - 50) / 50, 5) for i in range(250)]
+    arguments = {"action": "call", "module": "risk", "function": "historical_var", "kwargs": {"returns": returns, "confidence": confidence}}
+    payload = QuantlibCallTool().execute(**arguments)
+    return ("quantlib_call", arguments, payload, call_id), float(json.loads(payload)["result"])
 
 
-def test_repeated_field_refs_require_call_qualification(tmp_path: Path) -> None:
-    first = (
-        "quantlib_call",
-        {"action": "call", "function": "var"},
-        {"ok": True, "result": {"var_95": -0.0157}},
-        "q1",
-    )
-    second = (
-        "quantlib_call",
-        {"action": "call", "function": "var"},
-        {"ok": True, "result": {"var_95": -0.0999}},
-        "q2",
-    )
-    prose = HDR + " VaR 95%: 1.57%。"
-    confidence = "95% | count | confidence"
+def _pct(value: float) -> str:
+    return f"{abs(value) * 100:.2f}%"
 
-    ambiguous = _ledger(
-        tmp_path / "ambiguous", MARKET_A, first, second
-    ).validate_final_answer(
-        prose + _block(ROW, confidence, "1.57% | observed | VaR 95% | var.var_95")
+
+@pytest.mark.parametrize("ref", ["data.tail_risk.var_95", "tail_risk.var_95", "var_95", "x1"])
+def test_a_tail_risk_ref_grounds_its_own_value(tmp_path: Path, ref: str) -> None:
+    result = _ledger(tmp_path, MARKET_A, XRAY).validate_final_answer(
+        HDR + " VaR 95%: 1.57%。" + _block(ROW, "95% | count | confidence", f"1.57% | observed | VaR 95% | {ref}")
     )
-    q1 = _ledger(tmp_path / "q1", MARKET_A, first, second).validate_final_answer(
-        prose
-        + _block(
-            ROW,
-            confidence,
-            "1.57% | observed | VaR 95% | q1::var.var_95",
+    assert result.valid is True, result.issues
+
+
+@pytest.mark.parametrize(
+    ("claim", "ref"),
+    [
+        ("VaR 99%: 1.57%", "data.tail_risk.var_99"),
+        # A short ref used to name no field and fall through to the whole pool,
+        # where the 95% value answered a 99% claim (#1444 review, R18).
+        ("VaR 99%: 1.57%", "var_99"),
+        ("ES 95%: 1.57%", "expected_shortfall_95"),
+    ],
+)
+def test_a_field_ref_does_not_borrow_another_fields_value(tmp_path: Path, claim: str, ref: str) -> None:
+    confidence = "99% | count | confidence" if "99%" in claim else "95% | count | confidence"
+    result = _ledger(tmp_path, MARKET_A, XRAY).validate_final_answer(
+        HDR + f" {claim}。" + _block(ROW, confidence, f"1.57% | observed | {claim} | {ref}")
+    )
+    assert _reasons(result) == ["not_in_referenced_call"]
+
+
+def test_a_field_two_calls_returned_differently_needs_its_call(tmp_path: Path) -> None:
+    """historical_var at 95% and at 99% is one field in two calls: the bare
+    field ref cannot say which it quotes, and the correction names both."""
+    q1, var_95 = _historical_var(0.95, "q1")
+    q2, var_99 = _historical_var(0.99, "q2")
+    assert var_95 != var_99
+    prose = HDR + f" VaR 95%: {_pct(var_95)}。"
+
+    def answer(ref: str):
+        return _ledger(tmp_path / ref.replace(":", "_"), MARKET_A, q1, q2).validate_final_answer(
+            prose + _block(ROW, "95% | count | confidence", f"{_pct(var_95)} | observed | VaR 95% | {ref}")
         )
-    )
-    wrong_call = _ledger(
-        tmp_path / "wrong", MARKET_A, first, second
-    ).validate_final_answer(
-        prose
-        + _block(
-            ROW,
-            confidence,
-            "1.57% | observed | VaR 95% | q2::var.var_95",
-        )
-    )
 
-    assert _reasons(ambiguous) == ["not_in_referenced_call"]
-    assert q1.valid is True, q1.issues
-    assert _reasons(wrong_call) == ["not_in_referenced_call"]
+    ambiguous = answer("historical_var")
+    assert _reasons(ambiguous) == ["ambiguous_field_ref"]
+    assert ambiguous.issues[0]["ambiguous_sources"] == ["q1::historical_var", "q2::historical_var"]
+    assert answer("q1::historical_var").valid is True
+    assert _reasons(answer("q2::historical_var")) == ["not_in_referenced_call"]
+
+
+def test_a_field_two_calls_returned_identically_is_not_ambiguous(tmp_path: Path) -> None:
+    q1, var_95 = _historical_var(0.95, "q1")
+    q2, same = _historical_var(0.95, "q2")
+    assert same == var_95
+    result = _ledger(tmp_path, MARKET_A, q1, q2).validate_final_answer(
+        HDR + f" VaR 95%: {_pct(var_95)}。"
+        + _block(ROW, "95% | count | confidence", f"{_pct(var_95)} | observed | VaR 95% | historical_var")
+    )
+    assert result.valid is True, result.issues
+
+
+def test_another_symbols_field_does_not_make_a_ref_ambiguous(tmp_path: Path) -> None:
+    """Two instruments' bars both carry ``close``; the figure's own symbol
+    decides before any count of calls (#1444 review, P9)."""
+    result = _ledger(tmp_path, MARKET_A, MARKET_B).validate_final_answer(
+        TWO + f"{A} 最新收盘 0.666 元。" + _block("0.666 | observed | close | close")
+    )
+    assert result.valid is True, result.issues
+
+
+def test_the_ambiguity_correction_names_the_refs_to_use() -> None:
+    from src.agent.grounding.release import _correction_line
+
+    line = _correction_line(
+        {
+            "value": "1.98%",
+            "role": "observed",
+            "reason": "ambiguous_field_ref",
+            "source_tool_call_ids": ["historical_var"],
+            "ambiguous_sources": ["q1::historical_var", "q2::historical_var"],
+        }
+    )
+    assert "historical_var names q1::historical_var, q2::historical_var" in line
 
 
 @pytest.mark.parametrize(
@@ -652,13 +675,7 @@ def test_repeated_field_refs_require_call_qualification(tmp_path: Path) -> None:
 def test_tail_risk_prose_does_not_skip_undeclared_numbers(
     tmp_path: Path, claim: str
 ) -> None:
-    risk = (
-        "quantlib_call",
-        {"action": "call", "function": "var"},
-        {"ok": True, "result": {"var_95": -0.0157, "var_99": -0.0263}},
-        "q1",
-    )
-    result = _ledger(tmp_path, MARKET_A, risk).validate_final_answer(HDR + " " + claim)
+    result = _ledger(tmp_path, MARKET_A, XRAY).validate_final_answer(HDR + " " + claim)
     assert result.valid is False
 
 

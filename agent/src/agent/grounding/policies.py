@@ -682,45 +682,18 @@ class _PolicyMixin:
             call_id, field = (part.strip() for part in key.split("::", 1))
             if not call_id or not field:
                 return [], []
-            records = [
-                record
-                for record in self._evidence
-                if record.call_id == call_id
-                and record.field == field
-                and record.status == "observed"
-                and record.value is not None
-            ]
-            metrics = [
-                float(entry["value"])
-                for entry in self._analysis_metrics
-                if entry.get("call_id") == call_id
-                and entry.get("field") == field
-                and entry.get("value") is not None
-            ]
+            records, entries = self._field_sources(field, symbol)
+            records = [record for record in records if record.call_id == call_id]
+            metrics = [float(entry["value"]) for entry in entries if entry.get("call_id") == call_id]
         else:
-            field_records = [
-                record
-                for record in self._evidence
-                if record.field == key
-                and record.status == "observed"
-                and record.value is not None
-            ]
-            field_metric_entries = [
-                entry
-                for entry in self._analysis_metrics
-                if entry.get("field") == key and entry.get("value") is not None
-            ]
-            field_call_ids = {record.call_id for record in field_records if record.call_id} | {
-                str(entry.get("call_id")) for entry in field_metric_entries if entry.get("call_id")
-            }
-            field_scoped = bool(field_records or field_metric_entries)
-            if field_scoped and len(field_call_ids) > 1:
-                # A field-only ref that occurs in multiple calls is ambiguous.
-                # Fail closed rather than pooling values from different runs.
-                return [], []
-            if field_scoped:
-                records = field_records
-                metrics = [float(entry["value"]) for entry in field_metric_entries]
+            records, entries = self._field_sources(key, symbol)
+            if records or entries:
+                if self._ambiguous_field_sources(key, symbol):
+                    # Calls disagree on this field, so the ref cannot say
+                    # which value it quotes (VaR at 95% vs 99%). Fail closed
+                    # rather than pool them; the issue names the calls.
+                    return [], []
+                metrics = [float(entry["value"]) for entry in entries]
             else:
                 records = [
                     record
@@ -759,6 +732,57 @@ class _PolicyMixin:
             records = [record for record in records if _is_price_kind(record)]
             metrics = []
         return records, metrics
+
+    def _field_sources(
+        self, field: str, symbol: str | None
+    ) -> tuple[list[EvidenceRecord], list[dict[str, Any]]]:
+        """Observed values of the evidence field ``field`` names, for ``symbol``.
+
+        ``field`` is a full path (``data.tail_risk.var_95``) or its trailing
+        part (``var_95``, ``tail_risk.var_95``): a short ref used to fall
+        through to the whole evidence pool, where a VaR 99% claim quoting the
+        95% value found its match (#1444 review). Another symbol's records are
+        dropped here, before any count of calls, so two instruments' closes do
+        not make ``close`` ambiguous.
+        """
+        def named(path: Any) -> bool:
+            return isinstance(path, str) and (path == field or path.endswith("." + field))
+
+        records = [
+            record
+            for record in self._evidence
+            if named(record.field)
+            and record.status == "observed"
+            and record.value is not None
+            and (not symbol or not record.symbol or record.symbol == symbol)
+        ]
+        entries = [
+            entry
+            for entry in self._analysis_metrics
+            if named(entry.get("field")) and entry.get("value") is not None
+        ]
+        return records, entries
+
+    def _ambiguous_field_sources(self, field: str, symbol: str | None) -> list[str]:
+        """The ``call::path`` sources a field-only ref cannot choose between.
+
+        Ambiguous means more than one (call, path) source AND more than one
+        value among them: two runs of one call returning the same number leave
+        nothing to choose. Each source is written as the ref that names it.
+
+        Returns:
+            Sorted ``call::path`` refs, or an empty list when the ref is exact.
+        """
+        if not field or "::" in field:
+            return []
+        records, entries = self._field_sources(field, symbol)
+        sources = {(record.call_id, record.field, float(record.value)) for record in records}
+        sources |= {
+            (str(entry.get("call_id")), entry.get("field"), float(entry["value"])) for entry in entries
+        }
+        if len({(call, path) for call, path, _ in sources}) < 2 or len({value for *_, value in sources}) < 2:
+            return []
+        return sorted({f"{call}::{path}" for call, path, _ in sources})
 
     def _price_pool(
         self,
@@ -1009,6 +1033,21 @@ class _PolicyMixin:
             money = figure.currency and not figure.percent
             if self._matches_evidence(figure, values, [] if money else values):
                 return []
+            ambiguous = self._ambiguous_field_sources(declaration.ref, symbol)
+            if ambiguous:
+                return [
+                    self._figure_issue(
+                        "numeric_claim_conflict",
+                        figure,
+                        "observed",
+                        symbol,
+                        "ambiguous_field_ref",
+                        f"is declared observed from {declaration.ref}, which names "
+                        f"{', '.join(ambiguous)}, and they hold different values",
+                        source_tool_call_ids=[declaration.ref],
+                        ambiguous_sources=ambiguous,
+                    )
+                ]
             return [
                 self._figure_issue(
                     "numeric_claim_conflict",
@@ -1037,7 +1076,6 @@ class _PolicyMixin:
         else:
             direct, scaled = prices + self._row_pool(symbol), self._metric_pool(symbol)
         if not direct and not scaled:
-            detail = "no matching tool evidence"
             return [
                 self._figure_issue(
                     "numeric_claim_unavailable",
@@ -1045,8 +1083,8 @@ class _PolicyMixin:
                     "observed",
                     symbol,
                     "no_evidence",
-                    f"is declared observed but this session holds {detail} "
-                    "to check it against",
+                    "is declared observed but this session holds no matching tool "
+                    "evidence to check it against",
                     field=figure.column,
                     date=figure.date,
                 )

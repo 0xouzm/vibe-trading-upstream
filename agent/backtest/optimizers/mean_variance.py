@@ -18,8 +18,17 @@ class MeanVarianceOptimizer(BaseOptimizer):
     def _build_context(
         self, window: pd.DataFrame, active: List[str]
     ) -> "Dict[str, Any] | None":
-        """Mean vector and covariance."""
-        mu = window.mean().values
+        """Mean vector and covariance.
+
+        ``mu`` is the expected return of the position actually being sized
+        (``sign(pos) * raw asset drift``), not the raw asset drift -- a
+        short's expected return is the negative of the asset's own drift.
+        Without this, a strong short candidate (very negative raw drift)
+        scores as a bad "long" in the Sharpe objective below and is starved
+        of capital relative to a weak short (near-zero drift).
+        """
+        signs = self._active_signs
+        mu = signs * window.mean().values
         cov = window.cov().values
         if np.isnan(cov).any() or np.isnan(mu).any():
             return None

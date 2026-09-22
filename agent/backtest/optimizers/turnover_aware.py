@@ -95,8 +95,16 @@ class TurnoverAwareOptimizer(BaseOptimizer):
     def _build_context(
         self, window: pd.DataFrame, active: List[str]
     ) -> "Dict[str, Any] | None":
-        """Mean vector, covariance, and active codes for the current window."""
-        mu = window.mean().values
+        """Mean vector, covariance, and active codes for the current window.
+
+        ``mu`` is the expected return of the position actually being sized
+        (``sign(pos) * raw asset drift``), not the raw asset drift -- see
+        ``MeanVarianceOptimizer._build_context`` for the same fix and its
+        rationale; this optimizer's ``objective`` has the identical
+        ``w @ mu`` return term.
+        """
+        signs = self._active_signs
+        mu = signs * window.mean().values
         cov = window.cov().values
         if np.isnan(cov).any() or np.isnan(mu).any():
             return None

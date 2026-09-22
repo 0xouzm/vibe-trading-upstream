@@ -81,10 +81,10 @@ SUMMARY_CHUNK_CHARS = 80_000
 MAX_CONSECUTIVE_EMPTY_RESPONSE_SKIPS = 1
 
 # Compaction recovery is a bounded reliability aid, not an alternate research
-# loop. This mirrors the grounding recovery design: once the run has restored
-# enough lost readonly payloads, later context loss keeps those exact calls
-# locked so the planner must continue from summaries/other evidence instead of
-# churning through replay forever.
+# loop: a run restores at most this many lost readonly payloads from its replay
+# cache. Past the cap a lost call runs again as it does without replay, so the
+# model is never told to use a result it can no longer see, and a loop of
+# identical re-runs still ends at the no-progress limit.
 MAX_READONLY_REPLAY_RECOVERIES = 6
 
 
@@ -2419,6 +2419,7 @@ class AgentLoop:
             if (
                 dedup_key is not None
                 and dedup_key in self._readonly_replay_ready
+                and self._readonly_replay_recoveries < MAX_READONLY_REPLAY_RECOVERIES
                 and self._readonly_replay_allowed(tool_def, tc.arguments)
                 and dedup_key in self._readonly_replay_cache
             ):
@@ -2433,6 +2434,11 @@ class AgentLoop:
                 self._called_ok.add(dedup_key)
                 self._readonly_replay_ready.discard(dedup_key)
                 self._readonly_replay_recoveries += 1
+                # A repeatable tool would otherwise re-fetch on the very next
+                # identical call; the restored payload is visible now, so that
+                # call is refused until compaction removes it again.
+                if getattr(tool_def, "repeatable", False):
+                    self._readonly_replay_protected.add(dedup_key)
                 # Restoring data that compaction removed is forward progress for
                 # the working context, but not a new external observation.
                 self._tool_progress.mark_context_restored()
@@ -3082,25 +3088,16 @@ class AgentLoop:
     ) -> list[str]:
         """Recover only lost exact queries; context loss cannot replay writes."""
         lost = readable_before - self._readable_success_keys(messages)
-        candidates = {
+        reopened = {
             key for key in lost & self._called_ok if self._is_tool_readonly(key[0])
         }
-        replay_budget_available = (
-            self._readonly_replay_recoveries < MAX_READONLY_REPLAY_RECOVERIES
-        )
-        reopened = candidates if replay_budget_available else set()
         self._called_ok.difference_update(reopened)
-        replayable = {key for key in reopened if key in self._readonly_replay_cache}
-        self._readonly_replay_ready.update(replayable)
-        for key in replayable:
-            tool_def = self.registry.get(key[0])
-            if (
-                getattr(tool_def, "is_readonly", False)
-                and getattr(tool_def, "repeatable", False)
-                and getattr(tool_def, "replay_after_compaction", False)
-                and not getattr(tool_def, "deterministic", False)
-            ):
-                self._readonly_replay_protected.add(key)
+        # Every lost call reopens, as before replay existed; the replay budget
+        # only decides, at call time, whether it is restored or run again.
+        self._readonly_replay_protected.difference_update(reopened)
+        self._readonly_replay_ready.update(
+            key for key in reopened if key in self._readonly_replay_cache
+        )
         return sorted({key[0] for key in reopened})
 
     def _identical_call_key(self, tool_name: str, arguments: Mapping[str, Any]) -> tuple[str, str] | None:
@@ -3213,6 +3210,14 @@ class AgentLoop:
                 and self._readonly_replay_allowed(tool_def, tc.arguments)
             ):
                 self._readonly_replay_cache[cache_key] = result
+            # Its payload is visible again, so nothing is waiting to be restored.
+            self._readonly_replay_ready.discard(cache_key)
+            # A write can change what a readonly call reads (a factor file, a
+            # config), so no result cached before it may be replayed after it.
+            if update_memory and not self._is_tool_readonly(tc.name):
+                self._readonly_replay_cache.clear()
+                self._readonly_replay_ready.clear()
+                self._readonly_replay_protected.clear()
 
         status = "ok" if success else "error"
         truncated = truncate_tool_result(result)

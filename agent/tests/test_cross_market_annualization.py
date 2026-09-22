@@ -287,6 +287,19 @@ class TestSingleMarketAnnualisationChecksTheServedData:
         assert resolved == {"1W": 52, "1M": 12}[declared]
         assert caplog.records == []
 
+    @pytest.mark.parametrize("declared", ["1W", "1M"])
+    def test_a_period_run_served_daily_bars_is_caught(self, declared, caplog):
+        """The spacing check covers the new intervals too: daily bars under a
+        weekly or monthly declaration annualise as daily, and say so."""
+        from backtest.runner import _annualisation_bars
+
+        data = self._frame(pd.bdate_range("2024-01-01", periods=120))
+        with caplog.at_level("WARNING", logger="backtest.runner"):
+            resolved = _annualisation_bars(declared, "tushare", data, ["600519.SH"])
+
+        assert resolved == 252
+        assert any("annualising as 1D (252 bars/year)" in r.getMessage() for r in caplog.records)
+
     def test_a_quarterly_file_is_annualised_from_the_calendar(self, caplog):
         """Wider than every supported interval: four bars a year, from the
         spacing, since no interval has a count to look up."""

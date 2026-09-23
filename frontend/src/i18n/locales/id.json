@@ -576,6 +576,9 @@
         "kr_equity": "Saham Korea",
         "ca_equity": "Saham Kanada",
         "vietnam_equity": "Saham Vietnam",
+        "ar_equity": "Saham Argentina",
+        "uk_equity": "Saham Inggris",
+        "index": "Indeks",
         "crypto": "Crypto",
         "futures": "Futures",
         "fund": "Fund",
@@ -875,6 +878,9 @@
         "crypto": "Crypto",
         "futures": "Futures",
         "forex": "Forex",
+        "ar_equity": "Saham Argentina",
+        "uk_equity": "Saham Inggris",
+        "vietnam_equity": "Saham Vietnam",
         "other": "Lainnya"
       }
     },

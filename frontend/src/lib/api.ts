@@ -1227,6 +1227,10 @@ export type SectorAssetClass =
   | "india_equity"
   | "kr_equity"
   | "ca_equity"
+  | "ar_equity"
+  | "uk_equity"
+  | "vietnam_equity"
+  | "index"
   | "crypto"
   | "futures"
   | "forex";

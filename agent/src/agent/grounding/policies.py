@@ -650,13 +650,16 @@ class _PolicyMixin:
         symbol: str | None,
         figure: Figure | None,
     ) -> tuple[list[EvidenceRecord], list[float]] | None:
-        """The evidence one call, or every call of one tool, produced.
+        """The evidence named by an exact field, call+field, one call, or one tool.
 
-        A ``ref`` naming a call id or a tool name is the tightest scoping, and the
-        only one that can ground a non-price figure (revenue, IC, volume). Records
-        of another symbol are dropped when the figure's symbol is known; a
-        currency-marked figure keeps only money-denominated records, a percent
-        only the others, less metadata counts.
+        An exact evidence-field ref is accepted only when that field occurs in
+        one call. When it repeats across calls, ``call_id::field`` is the
+        unambiguous tightest scope. Otherwise a ``ref`` naming a call id or a
+        tool name keeps the existing call/tool scope, and the only one that can
+        ground a non-price figure (revenue, IC, volume). Records of another
+        symbol are dropped when the figure's symbol is known; a currency-marked
+        figure keeps only money-denominated records, a percent only the others,
+        less metadata counts.
 
         Args:
             ref: The declaration's ``ref``.
@@ -665,26 +668,52 @@ class _PolicyMixin:
                 operands of a derivation.
 
         Returns:
-            ``(records, metric values)``, or None when ``ref`` names no call or tool.
+            ``(records, metric values)``, or None when ``ref`` names no field,
+            call, or tool.
         """
         key = (ref or "").strip()
         if not key:
             return None
-        records = [
-            record
-            for record in self._evidence
-            if key in (record.call_id, record.tool)
-            and record.status == "observed"
-            and record.value is not None
-        ]
-        metrics = [
-            float(entry["value"])
-            for entry in self._analysis_metrics
-            if key in (entry.get("call_id"), entry.get("tool"))
-            and entry.get("value") is not None
-        ]
-        if not records and not metrics:
-            return None
+
+        # A composite ref names one exact field from one exact call. This is
+        # the unambiguous form when the same analysis field appears in more
+        # than one tool call during a run.
+        if "::" in key:
+            call_id, field = (part.strip() for part in key.split("::", 1))
+            if not call_id or not field:
+                return [], []
+            records, entries = self._field_sources(field, symbol)
+            records = [record for record in records if record.call_id == call_id]
+            metrics = [float(entry["value"]) for entry in entries if entry.get("call_id") == call_id]
+        else:
+            records, entries = self._field_sources(key, symbol)
+            if records or entries:
+                if self._ambiguous_field_sources(key, symbol):
+                    # Calls disagree on this field, so the ref cannot say
+                    # which value it quotes (VaR at 95% vs 99%). Fail closed
+                    # rather than pool them; the issue names the calls.
+                    return [], []
+                metrics = [float(entry["value"]) for entry in entries]
+            else:
+                records = [
+                    record
+                    for record in self._evidence
+                    if key in (record.call_id, record.tool)
+                    and record.status == "observed"
+                    and record.value is not None
+                ]
+                metrics = [
+                    float(entry["value"])
+                    for entry in self._analysis_metrics
+                    if key in (entry.get("call_id"), entry.get("tool"))
+                    and entry.get("value") is not None
+                ]
+                if not records and not metrics:
+                    # Preserve the legacy loose-ref contract: a ref such as a
+                    # symbol that names no field/call/tool falls back to the
+                    # ordinary evidence path. Ambiguous or composite field
+                    # refs return earlier as an explicit empty scope instead.
+                    return None
         if symbol:
             records = [
                 record for record in records if not record.symbol or record.symbol == symbol
@@ -703,6 +732,57 @@ class _PolicyMixin:
             records = [record for record in records if _is_price_kind(record)]
             metrics = []
         return records, metrics
+
+    def _field_sources(
+        self, field: str, symbol: str | None
+    ) -> tuple[list[EvidenceRecord], list[dict[str, Any]]]:
+        """Observed values of the evidence field ``field`` names, for ``symbol``.
+
+        ``field`` is a full path (``data.tail_risk.var_95``) or its trailing
+        part (``var_95``, ``tail_risk.var_95``): a short ref used to fall
+        through to the whole evidence pool, where a VaR 99% claim quoting the
+        95% value found its match (#1444 review). Another symbol's records are
+        dropped here, before any count of calls, so two instruments' closes do
+        not make ``close`` ambiguous.
+        """
+        def named(path: Any) -> bool:
+            return isinstance(path, str) and (path == field or path.endswith("." + field))
+
+        records = [
+            record
+            for record in self._evidence
+            if named(record.field)
+            and record.status == "observed"
+            and record.value is not None
+            and (not symbol or not record.symbol or record.symbol == symbol)
+        ]
+        entries = [
+            entry
+            for entry in self._analysis_metrics
+            if named(entry.get("field")) and entry.get("value") is not None
+        ]
+        return records, entries
+
+    def _ambiguous_field_sources(self, field: str, symbol: str | None) -> list[str]:
+        """The ``call::path`` sources a field-only ref cannot choose between.
+
+        Ambiguous means more than one (call, path) source AND more than one
+        value among them: two runs of one call returning the same number leave
+        nothing to choose. Each source is written as the ref that names it.
+
+        Returns:
+            Sorted ``call::path`` refs, or an empty list when the ref is exact.
+        """
+        if not field or "::" in field:
+            return []
+        records, entries = self._field_sources(field, symbol)
+        sources = {(record.call_id, record.field, float(record.value)) for record in records}
+        sources |= {
+            (str(entry.get("call_id")), entry.get("field"), float(entry["value"])) for entry in entries
+        }
+        if len({(call, path) for call, path, _ in sources}) < 2 or len({value for *_, value in sources}) < 2:
+            return []
+        return sorted({f"{call}::{path}" for call, path, _ in sources})
 
     def _price_pool(
         self,
@@ -953,6 +1033,21 @@ class _PolicyMixin:
             money = figure.currency and not figure.percent
             if self._matches_evidence(figure, values, [] if money else values):
                 return []
+            ambiguous = self._ambiguous_field_sources(declaration.ref, symbol)
+            if ambiguous:
+                return [
+                    self._figure_issue(
+                        "numeric_claim_conflict",
+                        figure,
+                        "observed",
+                        symbol,
+                        "ambiguous_field_ref",
+                        f"is declared observed from {declaration.ref}, which names "
+                        f"{', '.join(ambiguous)}, and they hold different values",
+                        source_tool_call_ids=[declaration.ref],
+                        ambiguous_sources=ambiguous,
+                    )
+                ]
             return [
                 self._figure_issue(
                     "numeric_claim_conflict",

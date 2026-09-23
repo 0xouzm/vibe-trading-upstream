@@ -438,16 +438,31 @@ class PersistentMemory:
                 linker = SemanticLinker(self._dir)
                 all_entries = self._scan_entries()
                 linked_ids: set[str] = set()
+                linked_paths: set[str] = set()
                 for r in results:
                     relations = linker.load_relations(r.path)
                     for target_file, _score in relations:
-                        linked_ids.add(Path(target_file).stem)
+                        # A target written since the hierarchy fix is the path
+                        # relative to the memory dir; older sidecars hold a
+                        # bare filename or an absolute path, and a bare one can
+                        # only ever be matched by stem.
+                        if "/" in target_file or "\\" in target_file:
+                            linked_paths.add(Path(target_file).as_posix())
+                        else:
+                            linked_ids.add(Path(target_file).stem)
                 # Add linked entries not already in results
                 result_paths = {r.path for r in results}
                 for entry in all_entries:
                     if len(results) >= max_results:
                         break
-                    if entry.path.stem in linked_ids and entry.path not in result_paths:
+                    if entry.path in result_paths:
+                        continue
+                    relative = entry.path.relative_to(self._dir).as_posix()
+                    if (
+                        relative in linked_paths
+                        or entry.path.as_posix() in linked_paths
+                        or entry.path.stem in linked_ids
+                    ):
                         results.append(entry)
             except Exception:
                 logger.debug("semantic link expansion failed", exc_info=True)
@@ -571,14 +586,22 @@ class PersistentMemory:
                         entry_tokens = _tokenize_for_bm25(
                             f"{new_entry.title} {new_entry.description} {new_entry.body}"
                         )
+                        # Same key as the index row above, for the same
+                        # reason: under hierarchy mode two entries sharing a
+                        # title have the same path.name, so keying the link
+                        # graph by it made discover_links() drop the OTHER
+                        # entry as "self" and mint an ambiguous target.
                         all_entries_data = [
-                            (e.path.name, _tokenize_for_bm25(
-                                f"{e.title} {e.description} {e.body}"
-                            ))
+                            (e.path.relative_to(self._dir).as_posix(),
+                             _tokenize_for_bm25(
+                                 f"{e.title} {e.description} {e.body}"
+                             ))
                             for e in all_entries if e.path != path
                         ]
                         links = linker.discover_links(
-                            entry_title=new_entry.path.name,
+                            entry_title=new_entry.path.relative_to(
+                                self._dir
+                            ).as_posix(),
                             entry_tokens=entry_tokens,
                             all_entries_data=all_entries_data,
                         )

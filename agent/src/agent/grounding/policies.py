@@ -11,7 +11,7 @@ import ast
 import json
 import math
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from src.agent.grounding.identity import (
     _CANONICAL_SYMBOL_RE,
@@ -26,6 +26,7 @@ from src.agent.grounding.evidence import (
     _metric_kind_for_path,
     _price_field_for_path,
     _timestamp_matches_claim_date,
+    tail_risk_identity,
 )
 from src.agent.grounding.figures import (
     Declaration,
@@ -784,6 +785,61 @@ class _PolicyMixin:
             return []
         return sorted({f"{call}::{path}" for call, path, _ in sources})
 
+    def _tail_risk_sources(
+        self,
+        records: Sequence[EvidenceRecord],
+        entries: Iterable[Mapping[str, Any]] = (),
+    ) -> list[tuple[str, float]]:
+        """``(identity, value)`` for every tail-risk value among these sources.
+
+        Identity is read off the field name (:func:`tail_risk_identity`), so
+        ``var_95`` and ``es_95`` are two identities and ``cvar_99`` / ``es_99``
+        are one.
+        """
+        sources: list[tuple[str, float]] = []
+        for record in records:
+            identity = tail_risk_identity(record.field)
+            if identity and record.status == "observed" and record.value is not None:
+                sources.append((identity, float(record.value)))
+        for entry in entries:
+            identity = tail_risk_identity(str(entry.get("field") or ""))
+            if identity and entry.get("value") is not None:
+                sources.append((identity, float(entry["value"])))
+        return sources
+
+    def _tail_risk_ref_required(
+        self,
+        figure: Figure,
+        records: Sequence[EvidenceRecord],
+        entries: Iterable[Mapping[str, Any]] = (),
+    ) -> list[str]:
+        """Tail-risk identities this figure could be quoting, when there are several.
+
+        #1425's remaining half, decided as a policy rather than patched: a
+        session that observed more than one tail-risk identity cannot tell which
+        one an undeclared or call-scoped figure means — the gate reads a
+        number's shape, never the words "VaR 99%" beside it — so the figure has
+        to name its field. A ref that names the field narrows the scope to one
+        identity before this runs, so a declared figure never reaches here.
+
+        Empty when the scope holds at most one identity (nothing to confuse) or
+        when the figure matches none of the tail-risk values, which keeps every
+        other kind of figure on exactly today's path.
+
+        Returns:
+            Sorted identities, or an empty list when no ref is required.
+        """
+        sources = self._tail_risk_sources(records, entries)
+        if len({identity for identity, _ in sources}) < 2:
+            return []
+        return sorted(
+            {
+                identity
+                for identity, value in sources
+                if self._matches_evidence(figure, [value], [value])
+            }
+        )
+
     def _price_pool(
         self,
         symbol: str | None,
@@ -1031,8 +1087,43 @@ class _PolicyMixin:
             scoped_records, metric_values = scoped
             values = [float(record.value) for record in scoped_records] + metric_values
             money = figure.currency and not figure.percent
+            # A call- or tool-scoped ref pools every field that call returned,
+            # so it cannot choose between the tail-risk identities in it (#1425).
+            scoped_entries = [
+                entry
+                for entry in self._analysis_metrics
+                if declaration.ref in (entry.get("call_id"), entry.get("tool"))
+            ]
+            tail_risk = self._tail_risk_ref_required(
+                figure, scoped_records, scoped_entries
+            )
+            scoped_identities: list[str] = []
+            if tail_risk:
+                scoped_sources = self._tail_risk_sources(scoped_records, scoped_entries)
+                scoped_identities = sorted({identity for identity, _ in scoped_sources})
+                # Whatever else the call returned may still answer the figure.
+                blocked = {
+                    value for identity, value in scoped_sources if identity in tail_risk
+                }
+                values = [value for value in values if value not in blocked]
             if self._matches_evidence(figure, values, [] if money else values):
                 return []
+            if tail_risk:
+                return [
+                    self._figure_issue(
+                        "numeric_claim_conflict",
+                        figure,
+                        "observed",
+                        symbol,
+                        "tail_risk_needs_field_ref",
+                        f"is declared observed from {declaration.ref}, which returned "
+                        f"{', '.join(scoped_identities)} and matches "
+                        f"{', '.join(tail_risk)}; a tail-risk figure has to name the "
+                        "field it quotes",
+                        source_tool_call_ids=[declaration.ref],
+                        ambiguous_sources=scoped_identities,
+                    )
+                ]
             ambiguous = self._ambiguous_field_sources(declaration.ref, symbol)
             if ambiguous:
                 return [
@@ -1075,7 +1166,29 @@ class _PolicyMixin:
             direct, scaled = prices + self._row_pool(symbol, money_only=True), []
         else:
             direct, scaled = prices + self._row_pool(symbol), self._metric_pool(symbol)
-        if not direct and not scaled:
+        # An undeclared tail-risk figure is matched against every tail-risk
+        # value in the session, so it needs a field ref for the same reason a
+        # call-scoped one does (#1425).
+        session_records = [
+            record
+            for record in self._evidence
+            if not symbol or not record.symbol or record.symbol == symbol
+        ]
+        tail_risk = self._tail_risk_ref_required(
+            figure, session_records, self._analysis_metrics
+        )
+        session_identities: list[str] = []
+        if tail_risk:
+            session_sources = self._tail_risk_sources(
+                session_records, self._analysis_metrics
+            )
+            session_identities = sorted({identity for identity, _ in session_sources})
+            blocked = {
+                value for identity, value in session_sources if identity in tail_risk
+            }
+            direct = [value for value in direct if value not in blocked]
+            scaled = [value for value in scaled if value not in blocked]
+        if not direct and not scaled and not tail_risk:
             return [
                 self._figure_issue(
                     "numeric_claim_unavailable",
@@ -1091,6 +1204,20 @@ class _PolicyMixin:
             ]
         if self._matches_evidence(figure, direct, scaled, legacy_direct=True):
             return []
+        if tail_risk:
+            return [
+                self._figure_issue(
+                    "numeric_claim_conflict",
+                    figure,
+                    "observed",
+                    symbol,
+                    "tail_risk_needs_field_ref",
+                    f"matches {', '.join(tail_risk)}, and this session observed "
+                    f"{', '.join(session_identities)}, so the figure has to name "
+                    "the field it quotes",
+                    ambiguous_sources=session_identities,
+                )
+            ]
         observed = sorted(direct or scaled)
         attributable = symbol is not None or len(
             {record.symbol for record in records if record.symbol}

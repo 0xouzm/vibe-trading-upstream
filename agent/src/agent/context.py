@@ -196,7 +196,11 @@ Decide which workflow to use based on the request:
   a metric whose identity matters (VaR vs ES, 95% vs 99%), use the result field
   as `ref`: `data.tail_risk.var_95` or just `var_95` from `portfolio_risk_xray`,
   `historical_var` from `quantlib_call`. When more than one call returned that
-  field (historical_var at 95% and at 99%), name the call: `q1::historical_var`;
+  field (historical_var at 95% and at 99%), name the call: `q1::historical_var`.
+  Once this session holds more than one tail-risk measurement (a VaR and an ES,
+  or 95% and 99%), EVERY tail-risk figure needs that field ref — a call id or no
+  declaration at all cannot say which of them you are quoting, and the figure is
+  sent back for correction;
   `derived` — arithmetic on observed values (`note`: the formula; every number
   added or subtracted must itself be an observed value);
   `proposed` — a price level you suggest, such as an entry, stop or target: inside

@@ -448,6 +448,15 @@ def run_bench_strict(
             oos_ts = pd.Timestamp(oos_split)
         except (TypeError, ValueError) as exc:
             return _finish_error(f"invalid oos_split {oos_split!r}: {exc}")
+        close = panel.get("close")
+        if close is not None and len(close.index):
+            first = pd.Timestamp(close.index.min())
+            last = pd.Timestamp(close.index.max())
+            if not first <= oos_ts < last:
+                return _finish_error(
+                    f"oos_split {oos_split!r} must fall within the loaded sample "
+                    f"[{first.date()}, {last.date()})"
+                )
 
     def _fire_progress(idx: int, aid: str) -> None:
         if on_progress is None:

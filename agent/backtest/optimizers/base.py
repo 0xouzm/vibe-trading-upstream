@@ -70,6 +70,13 @@ class BaseOptimizer(ABC):
             if len(window) < max(self.lookback // 2, 5):
                 continue
 
+            signs = np.array([np.sign(pos.at[dt, c]) for c in active])
+            # Exposed for subclasses (e.g. mean-variance style optimizers)
+            # that need the direction of the position actually being sized,
+            # not just its unsigned covariance/volatility structure -- a
+            # short's expected return is -1 * the asset's raw drift, not the
+            # raw drift itself.
+            self._active_signs = signs
             ctx = self._build_context(window, active)
             if ctx is None:
                 continue
@@ -79,8 +86,7 @@ class BaseOptimizer(ABC):
                 continue
 
             for j, c in enumerate(active):
-                sign = np.sign(pos.at[dt, c])
-                result.at[dt, c] = sign * weights[j]
+                result.at[dt, c] = signs[j] * weights[j]
 
         return result
 

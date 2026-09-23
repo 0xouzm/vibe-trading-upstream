@@ -120,6 +120,26 @@ class TestTurnoverAwareOptimize:
         assert (result.iloc[61:, 0] >= 0).all()
         assert (result.iloc[61:, 1] <= 0).all()
 
+    def test_strong_short_sized_above_weak_short(self) -> None:
+        """Regression: mu was the raw unsigned asset drift, so a strong short
+        (very negative raw mu) scored as a bad "long" in the mean-variance
+        utility term and was starved of capital relative to a weak short
+        (near-zero raw mu) -- sizing was inverted for the short book."""
+        dates = pd.bdate_range("2025-01-01", periods=140)
+        codes = ["WEAK", "STRONG"]
+        rng = np.random.default_rng(7)
+        weak_ret = rng.normal(-0.0005, 0.01, 140)
+        strong_ret = rng.normal(-0.02, 0.01, 140)
+        ret = pd.DataFrame({"WEAK": weak_ret, "STRONG": strong_ret}, index=dates)
+
+        pos = pd.DataFrame(0.0, index=dates, columns=codes)
+        pos.iloc[120:, 0] = -1.0
+        pos.iloc[120:, 1] = -1.0
+
+        result = optimize(ret, pos, dates, lookback=120, turnover_penalty=0.0)
+        last = result.iloc[-1]
+        assert abs(last["STRONG"]) > abs(last["WEAK"])
+
     def test_short_window_and_nan_do_not_raise(self) -> None:
         ret, pos, dates = _sample_data(n_days=80)
         ret.iloc[10:20, 0] = np.nan

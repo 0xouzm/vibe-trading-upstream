@@ -65,3 +65,26 @@ class TestPortfolioAllocation:
             hierarchical_risk_parity(np.array([1.0, 2.0]))
         with pytest.raises(ValueError, match="strictly positive"):
             hierarchical_risk_parity(np.array([[0.0, 0.0], [0.0, 0.04]]))
+
+
+def test_hrp_aligns_dataframe_correlation_to_covariance_labels() -> None:
+    labels = ["A", "B", "C"]
+    cov = pd.DataFrame(
+        [[0.04, 0.01, 0.00], [0.01, 0.09, 0.02], [0.00, 0.02, 0.16]],
+        index=labels,
+        columns=labels,
+    )
+    corr = cov.div(np.sqrt(np.diag(cov)), axis=0).div(np.sqrt(np.diag(cov)), axis=1)
+    reordered = corr.loc[["C", "A", "B"], ["C", "A", "B"]]
+
+    expected = hierarchical_risk_parity(cov, corr)
+    actual = hierarchical_risk_parity(cov, reordered)
+
+    pd.testing.assert_series_equal(actual, expected)
+
+
+def test_hrp_rejects_correlation_with_different_labels() -> None:
+    cov = pd.DataFrame(np.eye(2), index=["A", "B"], columns=["A", "B"])
+    corr = pd.DataFrame(np.eye(2), index=["A", "C"], columns=["A", "C"])
+    with pytest.raises(ValueError, match="labels must match"):
+        hierarchical_risk_parity(cov, corr)

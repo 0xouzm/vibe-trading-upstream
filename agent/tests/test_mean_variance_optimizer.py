@@ -53,6 +53,41 @@ class TestMeanVarianceOptimize:
 
         assert abs(last["STRONG"]) > abs(last["WEAK"])
 
+    def test_hedged_pair_is_not_starved_by_asset_space_covariance(self) -> None:
+        """A long and a short of two positively correlated assets hedge each
+        other, so both legs must be funded.
+
+        Regression on the other half of the same bug: signing only ``mu`` left
+        the variance term in ASSET space, where the pair still reads +0.92
+        correlated and diversification looks worthless. Measured on this
+        fixture, the asset-covariance objective put 100% of the book on the
+        long and 0% on the short; the position covariance (D Sigma D, off
+        diagonal -9.4e-05 instead of +9.4e-05) splits it 0.514 / -0.486.
+        """
+        rng = np.random.default_rng(11)
+        n = 200
+        common = rng.normal(0, 0.01, n)
+        dates = pd.bdate_range("2025-01-01", periods=n)
+        ret = pd.DataFrame(
+            {
+                "LONG": 0.002 + common + rng.normal(0, 0.003, n),
+                "SHORT": -0.0015 + common + rng.normal(0, 0.003, n),
+            },
+            index=dates,
+        )
+        assert ret.corr().iloc[0, 1] > 0.9  # the pair really is correlated
+
+        pos = pd.DataFrame(0.0, index=dates, columns=["LONG", "SHORT"])
+        pos.iloc[150:, 0] = 1.0
+        pos.iloc[150:, 1] = -1.0
+
+        result = MeanVarianceOptimizer(lookback=150).optimize(ret, pos, dates)
+        last = result.iloc[-1]
+
+        assert last["LONG"] > 0 and last["SHORT"] < 0
+        assert abs(last["SHORT"]) > 0.3, "the hedging short must be funded"
+        assert abs(last["LONG"]) > 0.3
+
     def test_single_asset_unchanged(self) -> None:
         dates = pd.bdate_range("2025-01-01", periods=100)
         ret = pd.DataFrame(

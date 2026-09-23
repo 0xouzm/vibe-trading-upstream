@@ -71,13 +71,17 @@ class BaseOptimizer(ABC):
                 continue
 
             signs = np.array([np.sign(pos.at[dt, c]) for c in active])
-            # Exposed for subclasses (e.g. mean-variance style optimizers)
-            # that need the direction of the position actually being sized,
-            # not just its unsigned covariance/volatility structure -- a
-            # short's expected return is -1 * the asset's raw drift, not the
-            # raw drift itself.
-            self._active_signs = signs
-            ctx = self._build_context(window, active)
+            # Hand subclasses the window in POSITION space: a short's column is
+            # negated, so every context built from it describes what is actually
+            # being sized. ``mu`` becomes the position's expected return (a
+            # short earns the negative of its asset's drift) and ``cov`` becomes
+            # D Sigma D, whose cross terms flip sign for a long/short pair --
+            # signing only ``mu`` would score the numerator in position space
+            # and the variance in asset space, so a hedged pair would still
+            # read as correlated. Volatility-only contexts are unaffected
+            # (std(-r) == std(r)).
+            signed = window.mul(pd.Series(signs, index=window.columns), axis=1)
+            ctx = self._build_context(signed, active)
             if ctx is None:
                 continue
 
@@ -103,7 +107,10 @@ class BaseOptimizer(ABC):
         Return None to skip the date.
 
         Args:
-            window: Return window for active assets.
+            window: Return window for active assets, in POSITION space -- a
+                short's column is already negated by ``optimize``, so a mean
+                taken here is the position's expected return and a covariance
+                is the position covariance.
             active: Active asset codes.
 
         Returns:

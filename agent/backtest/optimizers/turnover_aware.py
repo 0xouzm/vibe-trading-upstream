@@ -97,14 +97,13 @@ class TurnoverAwareOptimizer(BaseOptimizer):
     ) -> "Dict[str, Any] | None":
         """Mean vector, covariance, and active codes for the current window.
 
-        ``mu`` is the expected return of the position actually being sized
-        (``sign(pos) * raw asset drift``), not the raw asset drift -- see
-        ``MeanVarianceOptimizer._build_context`` for the same fix and its
-        rationale; this optimizer's ``objective`` has the identical
-        ``w @ mu`` return term.
+        ``window`` arrives in position space (see ``BaseOptimizer.optimize``),
+        so ``mu`` is the position's expected return and ``cov`` the position
+        covariance -- this optimizer's ``objective`` has the same ``w @ mu``
+        term and the same ``w @ cov @ w`` variance term as the mean-variance
+        one, and needs both in the same space.
         """
-        signs = self._active_signs
-        mu = signs * window.mean().values
+        mu = window.mean().values
         cov = window.cov().values
         if np.isnan(cov).any() or np.isnan(mu).any():
             return None

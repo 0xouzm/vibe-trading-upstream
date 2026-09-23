@@ -140,6 +140,42 @@ class TestTurnoverAwareOptimize:
         last = result.iloc[-1]
         assert abs(last["STRONG"]) > abs(last["WEAK"])
 
+    def test_hedged_pair_is_not_starved_by_asset_space_covariance(self) -> None:
+        """Same second half as the mean-variance optimizer: this objective's
+        ``lam * (w @ cov @ w)`` risk term needs the POSITION covariance, or a
+        long/short pair of correlated assets reads as correlated and the
+        hedging short is starved.
+
+        Measured on this fixture at ``risk_aversion=100`` (daily variances run
+        ~1e-4, so the default lam=1 makes the risk term negligible and either
+        covariance concentrates): asset covariance gives 0.972 / -0.028, the
+        position covariance 0.521 / -0.479.
+        """
+        rng = np.random.default_rng(11)
+        n = 200
+        common = rng.normal(0, 0.01, n)
+        dates = pd.bdate_range("2025-01-01", periods=n)
+        ret = pd.DataFrame(
+            {
+                "LONG": 0.002 + common + rng.normal(0, 0.003, n),
+                "SHORT": -0.0015 + common + rng.normal(0, 0.003, n),
+            },
+            index=dates,
+        )
+        pos = pd.DataFrame(0.0, index=dates, columns=["LONG", "SHORT"])
+        pos.iloc[150:, 0] = 1.0
+        pos.iloc[150:, 1] = -1.0
+
+        result = optimize(
+            ret, pos, dates, lookback=150, turnover_penalty=0.0,
+            risk_aversion=100.0,
+        )
+        last = result.iloc[-1]
+
+        assert last["LONG"] > 0 and last["SHORT"] < 0
+        assert abs(last["SHORT"]) > 0.3, "the hedging short must be funded"
+        assert abs(last["LONG"]) > 0.3
+
     def test_short_window_and_nan_do_not_raise(self) -> None:
         ret, pos, dates = _sample_data(n_days=80)
         ret.iloc[10:20, 0] = np.nan

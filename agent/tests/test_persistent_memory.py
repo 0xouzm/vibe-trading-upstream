@@ -293,6 +293,30 @@ class TestAdd:
         assert entries[0].title == "routed-mem"
         assert pm.find("routed-mem") is not None
 
+    def test_hierarchy_same_title_different_types_keep_separate_index_rows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Sibling of test_same_title_different_types_keep_separate_index_rows,
+        # but under VT_MEMORY_HIERARCHY. There, route_entry() drops the
+        # memory_type prefix from the filename (it lives in the category
+        # subdirectory instead), so both entries shared the same bare
+        # "{slug}.md" and the second add() clobbered the first entry's
+        # index row.
+        monkeypatch.setenv("VT_MEMORY_HIERARCHY", "1")
+        pm = PersistentMemory(memory_dir=tmp_path)
+        pm.add(
+            "kb-entry", "raw material notes", "reference", description="reference doc"
+        )
+        pm.add("kb-entry", "user preference notes", "user", description="user pref")
+
+        assert (tmp_path / "reference" / "kb-entry.md").exists()
+        assert (tmp_path / "user" / "kb-entry.md").exists()
+
+        index = (tmp_path / "MEMORY.md").read_text(encoding="utf-8")
+        assert index.count("[kb-entry]") == 2
+        assert "reference/kb-entry.md" in index
+        assert "user/kb-entry.md" in index
+
     def test_recovered_orphan_and_new_write_agree_on_the_same_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:

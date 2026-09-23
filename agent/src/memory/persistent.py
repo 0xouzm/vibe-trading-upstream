@@ -551,7 +551,15 @@ class PersistentMemory:
                     "add(%s): lock timeout, best-effort write", stripped_name
                 )
             path.write_text(frontmatter, encoding="utf-8")
-            self._update_index(stripped_name, path.name, description or stripped_name)
+            # path.relative_to(self._dir), not path.name: under
+            # VT_MEMORY_HIERARCHY the file lives at
+            # "{memory_type}/{slug}.md", so path.name alone is just
+            # "{slug}.md" -- identical for two entries sharing a title but
+            # different memory_type. That collapsed _update_index's match
+            # key, so the second add() silently overwrote the first
+            # entry's row instead of keeping both, per #1525's intent.
+            index_key = path.relative_to(self._dir).as_posix()
+            self._update_index(stripped_name, index_key, description or stripped_name)
 
             if get_env_config().memory.links_enabled:
                 try:
@@ -676,7 +684,10 @@ class PersistentMemory:
     def _rebuild_index(self) -> None:
         """Rebuild MEMORY.md from all existing entry files."""
         entries = self._scan_entries()
-        lines = [f"- [{e.title}]({e.path.name}) — {e.description}" for e in entries]
+        lines = [
+            f"- [{e.title}]({e.path.relative_to(self._dir).as_posix()}) — {e.description}"
+            for e in entries
+        ]
         self._index_path.write_text(
             "\n".join(lines[:MAX_INDEX_LINES]), encoding="utf-8"
         )

@@ -722,6 +722,8 @@ def fit_yield_curve(
     obs = np.asarray(yields, dtype=float)
     if tau.shape != obs.shape or tau.ndim != 1:
         raise ValueError("maturities and yields must be 1-D and the same length")
+    if not np.isfinite(tau).all() or not np.isfinite(obs).all():
+        raise ValueError("maturities and yields must contain only finite values")
     if np.any(tau <= 0):
         raise ValueError("maturities must be strictly positive")
 
@@ -733,6 +735,8 @@ def fit_yield_curve(
         )
 
     low, high = decay_bounds
+    if not np.isfinite(low) or not np.isfinite(high):
+        raise ValueError("decay_bounds must contain only finite values")
     if not 0 < low < high:
         raise ValueError(f"decay_bounds must satisfy 0 < low < high, got {decay_bounds}")
     grid = np.geomspace(low, high, grid_points)

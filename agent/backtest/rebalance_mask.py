@@ -57,7 +57,12 @@ def resolve_rebalance_dates(
 
     if isinstance(validated, str):
         offset = to_offset(validated)
-        bounds: list[int] = dates.asi8.tolist()
+        # as_unit("ns"): asi8 is in the index's own storage unit (ns/us/ms/s
+        # since pandas 2.0), not always nanoseconds, while offset_nanos and
+        # Timestamp.value below are always nanoseconds. A non-ns index (the
+        # loader cache's duckdb/parquet round-trip can produce one) silently
+        # defeated this guard by comparing mismatched units.
+        bounds: list[int] = dates.as_unit("ns").asi8.tolist()
         spacings = [
             current - previous
             for previous, current in zip(bounds, bounds[1:])
@@ -83,7 +88,9 @@ def resolve_rebalance_dates(
             selected.append(timestamp)
     else:
         selected = []
-        bounds: list[int] = dates.asi8.tolist()
+        # See the as_unit("ns") note above: bisect_left below compares
+        # against Timestamp.value, which is always nanoseconds.
+        bounds: list[int] = dates.as_unit("ns").asi8.tolist()
         for item in validated:
             requested = cast(pd.Timestamp, pd.Timestamp(item))
             if dates.tz is not None:

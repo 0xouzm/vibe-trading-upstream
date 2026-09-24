@@ -555,6 +555,10 @@
             "label": "SSL do IMAP",
             "help": "Conectar ao IMAP via SSL (ativado por padrão; necessário para a porta 993)."
           },
+          "imap_use_tls": {
+            "label": "STARTTLS do IMAP",
+            "help": "Com o SSL do IMAP desativado, criptografar a conexão com STARTTLS antes do login (ativado por padrão; o usual na porta 143). Desative apenas para um servidor sem TLS em uma rede confiável: a senha passa a ser enviada em texto puro."
+          },
           "smtp_host": {
             "label": "Host SMTP",
             "help": "Servidor de e-mail de saída, por exemplo smtp.gmail.com. As respostas são enviadas por esse servidor."

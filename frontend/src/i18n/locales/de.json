@@ -555,6 +555,10 @@
             "label": "IMAP-SSL",
             "help": "IMAP über SSL verbinden (standardmäßig aktiv; erforderlich für Port 993)."
           },
+          "imap_use_tls": {
+            "label": "IMAP-STARTTLS",
+            "help": "Ist IMAP-SSL aus, die Verbindung vor der Anmeldung per STARTTLS verschlüsseln (standardmäßig aktiv; üblich für Port 143). Nur für einen Server ohne TLS in einem vertrauenswürdigen Netz abschalten – das Passwort wird dann im Klartext gesendet."
+          },
           "smtp_host": {
             "label": "SMTP-Host",
             "help": "Server für ausgehende E-Mails, z. B. smtp.gmail.com. Antworten werden über diesen Server versendet."

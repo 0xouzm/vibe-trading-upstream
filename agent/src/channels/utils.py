@@ -125,14 +125,14 @@ def send_imap_id(client: Any) -> None:
 
 
 def email_tls_context(verify: bool) -> ssl.SSLContext:
-    """Return a TLS context for implicit-SSL (IMAP4_SSL/SMTP_SSL) email connections.
+    """Return the TLS context for every email connection, implicit SSL or STARTTLS.
 
     ``verify=True`` (the default) verifies the server certificate and hostname
     against the system CA bundle, so a credential is never sent to an
     unverified server. ``verify=False`` disables verification — an explicit,
     documented opt-out for self-signed or internal-CA mail servers that trades
-    MITM protection for connectivity. Mirrors the STARTTLS path, which already
-    uses :func:`ssl.create_default_context`.
+    MITM protection for connectivity. IMAP and SMTP, implicit SSL and STARTTLS,
+    all take their context here, so ``verify_tls`` is one switch for all four.
     """
     if verify:
         return ssl.create_default_context()

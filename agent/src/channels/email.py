@@ -6,7 +6,6 @@ import imaplib
 import mimetypes
 import re
 import smtplib
-import ssl
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date
@@ -43,6 +42,9 @@ class EmailConfig(BaseModel):
     imap_password: str = ""
     imap_mailbox: str = "INBOX"
     imap_use_ssl: bool = True
+    # With imap_use_ssl off, upgrade with STARTTLS before LOGIN, as
+    # smtp_use_tls does for SMTP. Off sends the password in plain text.
+    imap_use_tls: bool = True
 
     smtp_host: str = ""
     smtp_port: int = 587
@@ -50,8 +52,8 @@ class EmailConfig(BaseModel):
     smtp_password: str = ""
     smtp_use_tls: bool = True
     smtp_use_ssl: bool = False
-    # TLS certificate verification for implicit-SSL (IMAP4_SSL/SMTP_SSL)
-    # connections; set False only for self-signed / internal-CA mail servers.
+    # Certificate + hostname verification on every TLS path (implicit SSL and
+    # STARTTLS, IMAP and SMTP); False only for self-signed / internal-CA servers.
     verify_tls: bool = True
     from_address: str = ""
 
@@ -366,7 +368,7 @@ class EmailChannel(BaseChannel):
 
         with smtplib.SMTP(self.config.smtp_host, self.config.smtp_port, timeout=timeout) as smtp:
             if self.config.smtp_use_tls:
-                smtp.starttls(context=ssl.create_default_context())
+                smtp.starttls(context=email_tls_context(self.config.verify_tls))
             smtp.login(self.config.smtp_username, self.config.smtp_password)
             smtp.send_message(msg)
 
@@ -587,6 +589,8 @@ class EmailChannel(BaseChannel):
             client = imaplib.IMAP4(self.config.imap_host, self.config.imap_port)
 
         try:
+            if not self.config.imap_use_ssl and self.config.imap_use_tls:
+                client.starttls(ssl_context=email_tls_context(self.config.verify_tls))
             client.login(self.config.imap_username, self.config.imap_password)
             # NetEase (163/126/yeah.net) rejects SELECT with "Unsafe Login"
             # unless the client sent an IMAP ID first; harmless elsewhere.

@@ -11,7 +11,8 @@ blocking transports are driven through :func:`asyncio.to_thread`.
 Classification mirrors the adapter's own transport semantics
 (:meth:`EmailChannel._open_imap_client` and :meth:`EmailChannel._smtp_send`):
 
-- IMAP: ``imap_use_ssl`` → ``IMAP4_SSL`` else ``IMAP4``; a connect failure is
+- IMAP: ``imap_use_ssl`` → ``IMAP4_SSL`` else ``IMAP4`` + ``starttls`` when
+  ``imap_use_tls``; a connect or upgrade failure is
   ``network``, a rejected login is ``invalid_credentials``, and a mailbox
   that cannot be selected is ``invalid_credentials`` naming the mailbox.
 - SMTP: ``smtp_use_ssl`` → ``SMTP_SSL`` else ``SMTP`` + ``starttls`` when
@@ -30,7 +31,6 @@ import asyncio
 import contextlib
 import imaplib
 import smtplib
-import ssl
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
@@ -93,7 +93,11 @@ def _probe_imap(config: EmailConfig) -> tuple[str, str] | None:
                 client = imaplib.IMAP4(
                     config.imap_host, config.imap_port, timeout=_CONNECT_TIMEOUT_S
                 )
+                if config.imap_use_tls:
+                    client.starttls(ssl_context=email_tls_context(config.verify_tls))
         except (OSError, _IMAP4_ERROR) as exc:
+            # A transport that cannot be established or upgraded (no STARTTLS
+            # offered, a failed handshake) is network-class, as for SMTP.
             return "network", _bounded("imap", exc, secrets)
 
         try:
@@ -140,7 +144,7 @@ def _probe_smtp(config: EmailConfig) -> tuple[str, str] | None:
                     config.smtp_host, config.smtp_port, timeout=_CONNECT_TIMEOUT_S
                 )
                 if config.smtp_use_tls:
-                    client.starttls(context=ssl.create_default_context())
+                    client.starttls(context=email_tls_context(config.verify_tls))
         except (smtplib.SMTPException, OSError) as exc:
             # Covers SMTPConnectError / SMTPServerDisconnected / socket.timeout;
             # a transport that cannot be established or upgraded is network-class.

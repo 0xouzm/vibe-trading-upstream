@@ -127,6 +127,7 @@ def _email_hints() -> list[FieldHint]:
         ("imap_password", "password", True, True),
         ("imap_mailbox", "text", False, False),
         ("imap_use_ssl", "bool", False, False),
+        ("imap_use_tls", "bool", False, False),
         ("smtp_host", "text", False, True),
         ("smtp_port", "text", False, False),
         ("smtp_username", "text", False, True),

@@ -550,6 +550,10 @@
             "label": "IMAP SSL",
             "help": "通过 SSL 连接 IMAP（默认开启；993 端口需要）。"
           },
+          "imap_use_tls": {
+            "label": "IMAP STARTTLS",
+            "help": "IMAP SSL 关闭时，登录前先用 STARTTLS 加密连接（默认开启，适用于 143 端口）。只有在可信网络中、服务器不支持 TLS 时才关闭——关闭后密码会以明文发送。"
+          },
           "smtp_host": {
             "label": "SMTP 服务器",
             "help": "发件（出站）邮件服务器地址，例如 smtp.gmail.com。回复邮件经由该服务器发送。"

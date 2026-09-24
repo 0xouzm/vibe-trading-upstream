@@ -222,6 +222,7 @@ export function ChannelConfigPanel({
       "settings.channels.fields.email.imap_password": { label: t("settings.channels.fields.email.imap_password.label"), help: t("settings.channels.fields.email.imap_password.help") },
       "settings.channels.fields.email.imap_mailbox": { label: t("settings.channels.fields.email.imap_mailbox.label"), help: t("settings.channels.fields.email.imap_mailbox.help") },
       "settings.channels.fields.email.imap_use_ssl": { label: t("settings.channels.fields.email.imap_use_ssl.label"), help: t("settings.channels.fields.email.imap_use_ssl.help") },
+      "settings.channels.fields.email.imap_use_tls": { label: t("settings.channels.fields.email.imap_use_tls.label"), help: t("settings.channels.fields.email.imap_use_tls.help") },
       "settings.channels.fields.email.smtp_host": { label: t("settings.channels.fields.email.smtp_host.label"), help: t("settings.channels.fields.email.smtp_host.help") },
       "settings.channels.fields.email.smtp_port": { label: t("settings.channels.fields.email.smtp_port.label"), help: t("settings.channels.fields.email.smtp_port.help") },
       "settings.channels.fields.email.smtp_username": { label: t("settings.channels.fields.email.smtp_username.label"), help: t("settings.channels.fields.email.smtp_username.help") },

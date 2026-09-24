@@ -74,11 +74,14 @@ def _install_imap_fakes(
     login_error: BaseException | None = None,
     select_result: tuple[str, list[Any]] = ("OK", [b"1"]),
     select_error: BaseException | None = None,
+    starttls_error: BaseException | None = None,
 ) -> dict[str, Any]:
     """Replace ``imaplib.IMAP4``/``IMAP4_SSL`` with recording fakes."""
     calls: dict[str, Any] = {
         "constructed": [],
         "ssl_contexts": [],
+        "starttls": [],
+        "order": [],
         "logins": [],
         "ids": [],
         "selects": [],
@@ -100,8 +103,16 @@ def _install_imap_fakes(
             if connect_error is not None:
                 raise connect_error
 
+        def starttls(self, ssl_context: Any = None) -> tuple[str, list[bytes]]:
+            calls["starttls"].append(ssl_context)
+            calls["order"].append("starttls")
+            if starttls_error is not None:
+                raise starttls_error
+            return ("OK", [b"Begin TLS negotiation now"])
+
         def login(self, user: str, password: str) -> tuple[str, list[bytes]]:
             calls["logins"].append((user, password))
+            calls["order"].append("login")
             if login_error is not None:
                 raise login_error
             return ("OK", [b"LOGIN completed"])
@@ -371,6 +382,40 @@ def test_plain_imap_transport_when_ssl_disabled(
 
     assert result["ok"] is True
     assert imap_calls["constructed"] == [("IMAP4", IMAP_HOST, 993, 10)]
+    # Plain IMAP is upgraded before the password goes out (imap_use_tls default).
+    assert imap_calls["order"] == ["starttls", "login"]
+
+
+def test_plain_imap_login_needs_an_explicit_opt_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``imap_use_tls=false`` is the one way to log in without TLS, as smtp_use_tls is."""
+    imap_calls = _install_imap_fakes(monkeypatch)
+    _install_smtp_fakes(monkeypatch)
+
+    result = _run(_make_channel(imap_use_ssl=False, imap_use_tls=False).test_connection())
+
+    assert result["ok"] is True
+    assert imap_calls["starttls"] == []
+    assert imap_calls["order"] == ["login"]
+
+
+def test_a_server_without_starttls_never_receives_the_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refused upgrade is a transport failure, reported before any LOGIN."""
+    imap_calls = _install_imap_fakes(
+        monkeypatch,
+        starttls_error=imaplib.IMAP4.error("STARTTLS extension not supported by server."),
+    )
+    _install_smtp_fakes(monkeypatch)
+
+    result = _run(_make_channel(imap_use_ssl=False).test_connection())
+
+    assert result["ok"] is False
+    assert result["code"] == "network"
+    assert result["detail"].startswith("imap: ")
+    assert imap_calls["logins"] == []
 
 
 # --------------------------------------------------------------------------- #
@@ -513,7 +558,7 @@ def test_probe_smtp_ssl_context_follows_verify_tls(
 def test_probe_plain_transports_pass_no_ssl_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Non-SSL transports take no context; STARTTLS keeps its own verifying one."""
+    """Non-SSL transports take no constructor context; both upgrade with STARTTLS."""
     imap_calls = _install_imap_fakes(monkeypatch)
     smtp_calls = _install_smtp_fakes(monkeypatch)
 
@@ -524,7 +569,37 @@ def test_probe_plain_transports_pass_no_ssl_context(
     assert result["ok"] is True
     assert imap_calls["ssl_contexts"] == [None]
     assert smtp_calls["ssl_contexts"] == [None]
+    assert len(imap_calls["starttls"]) == 1
     assert smtp_calls["starttls"] == [True]
+
+
+@pytest.mark.parametrize("verify_tls", [True, False])
+def test_starttls_follows_verify_tls_on_both_sides(
+    monkeypatch: pytest.MonkeyPatch, verify_tls: bool
+) -> None:
+    """``verify_tls`` is one switch for every TLS path, STARTTLS included."""
+    imap_calls = _install_imap_fakes(monkeypatch)
+    smtp_contexts: list[Any] = []
+    _install_smtp_fakes(monkeypatch)
+    real_starttls = smtplib.SMTP.starttls
+
+    def record(self: Any, context: Any = None) -> Any:
+        smtp_contexts.append(context)
+        return real_starttls(self, context=context)
+
+    monkeypatch.setattr(smtplib.SMTP, "starttls", record)
+
+    result = _run(
+        _make_channel(
+            imap_use_ssl=False, smtp_use_ssl=False, verify_tls=verify_tls
+        ).test_connection()
+    )
+
+    assert result["ok"] is True
+    expected = ssl.CERT_REQUIRED if verify_tls else ssl.CERT_NONE
+    for ctx in (imap_calls["starttls"][0], smtp_contexts[0]):
+        assert ctx.verify_mode == expected
+        assert ctx.check_hostname is verify_tls
 
 
 @pytest.mark.parametrize("verify_tls", [True, False])
@@ -759,3 +834,38 @@ def test_probe_sends_imap_id_before_select(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert result["ok"] is True
     assert order[:4] == ["connect", "login", "id:ID", "select"]
+
+
+def test_adapter_upgrades_plain_imap_before_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The polling connection follows the probe: STARTTLS, then LOGIN."""
+    imap_calls = _install_imap_fakes(monkeypatch)
+    channel = _make_channel(imap_use_ssl=False)
+
+    client = channel._open_imap_client("INBOX")
+
+    assert client is not None
+    assert imap_calls["order"] == ["starttls", "login"]
+    assert imap_calls["starttls"][0].verify_mode == ssl.CERT_REQUIRED
+
+
+@pytest.mark.parametrize("verify_tls", [True, False])
+def test_adapter_smtp_starttls_follows_verify_tls(
+    monkeypatch: pytest.MonkeyPatch, verify_tls: bool
+) -> None:
+    """The send path's STARTTLS takes the same context as implicit SSL."""
+    _install_smtp_fakes(monkeypatch)
+    contexts: list[Any] = []
+    real_starttls = smtplib.SMTP.starttls
+
+    def record(self: Any, context: Any = None) -> Any:
+        contexts.append(context)
+        return real_starttls(self, context=context)
+
+    monkeypatch.setattr(smtplib.SMTP, "starttls", record)
+    channel = _make_channel(smtp_use_ssl=False, verify_tls=verify_tls)
+
+    channel._smtp_send(EmailMessage())
+
+    expected = ssl.CERT_REQUIRED if verify_tls else ssl.CERT_NONE
+    assert contexts[0].verify_mode == expected
+    assert contexts[0].check_hostname is verify_tls

@@ -7,6 +7,9 @@ elsewhere) and the security acceptance criterion: no key matching
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from src.channels import config_meta as _config_meta
@@ -183,6 +186,7 @@ _EMAIL_HINT_KEYS = (
     "imap_password",
     "imap_mailbox",
     "imap_use_ssl",
+    "imap_use_tls",
     "smtp_host",
     "smtp_port",
     "smtp_username",
@@ -234,7 +238,7 @@ def test_email_field_hints_contract() -> None:
     keys = tuple(hint["key"] for hint in hints)
     assert keys == _EMAIL_HINT_KEYS
     assert "enabled" not in keys
-    assert len(hints) == 30
+    assert len(hints) == 31
 
     by_key = {hint["key"]: hint for hint in hints}
     assert {key for key, hint in by_key.items() if hint["secret"]} == {
@@ -653,3 +657,29 @@ def test_every_hint_that_unmasks_a_secret_shaped_key_is_audited() -> None:
         if not hint["secret"] and SECRET_KEY_RE.search(hint["key"])
     }
     assert unmasked == _AUDITED_NON_SECRETS
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize("name", sorted(_config_meta.FIELD_HINTS))
+def test_every_hand_written_hint_is_labelled_in_the_web_ui(name: str) -> None:
+    """The panel's label map and the hint table are two hand-written lists.
+
+    A hint missing from ``ChannelConfigPanel.tsx`` still renders, as its raw
+    key with no help text, so nothing fails; the help is where a field like
+    ``imap_use_tls`` says that turning it off sends the password in plain text.
+    """
+    panel = (
+        _REPO_ROOT / "frontend/src/components/settings/ChannelConfigPanel.tsx"
+    ).read_text(encoding="utf-8")
+    en = json.loads(
+        (_REPO_ROOT / "frontend/src/i18n/locales/en.json").read_text(encoding="utf-8")
+    )
+    for hint in _config_meta.FIELD_HINTS[name]:
+        key = hint["help_key"]
+        assert f'"{key}":' in panel, f"{key} has no label entry in ChannelConfigPanel.tsx"
+        node = en
+        for part in key.split("."):
+            node = node[part]
+        assert node.get("label") and node.get("help"), f"{key} lacks an en label or help"

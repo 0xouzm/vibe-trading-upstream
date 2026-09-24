@@ -550,6 +550,10 @@
             "label": "IMAP SSL",
             "help": "SSL 経由で IMAP に接続します（既定オン。ポート 993 では必須）。"
           },
+          "imap_use_tls": {
+            "label": "IMAP STARTTLS",
+            "help": "IMAP SSL がオフのとき、ログイン前に STARTTLS で接続を暗号化します（既定オン。ポート 143 の標準）。TLS に対応しないサーバーを信頼できるネットワークで使う場合のみオフにしてください。オフにするとパスワードが平文で送信されます。"
+          },
           "smtp_host": {
             "label": "SMTP ホスト",
             "help": "送信メールサーバーのホスト名（例: smtp.gmail.com）。返信はこのサーバー経由で送信されます。"

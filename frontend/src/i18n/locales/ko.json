@@ -550,6 +550,10 @@
             "label": "IMAP SSL",
             "help": "SSL로 IMAP에 연결합니다(기본 켜짐, 포트 993에 필요)."
           },
+          "imap_use_tls": {
+            "label": "IMAP STARTTLS",
+            "help": "IMAP SSL이 꺼져 있으면 로그인 전에 STARTTLS로 연결을 암호화합니다(기본 켜짐, 포트 143의 표준). TLS를 지원하지 않는 서버를 신뢰할 수 있는 네트워크에서 쓸 때만 끄세요. 끄면 비밀번호가 평문으로 전송됩니다."
+          },
           "smtp_host": {
             "label": "SMTP 호스트",
             "help": "발신 메일 서버 호스트입니다(예: smtp.gmail.com). 답장은 이 서버를 통해 전송됩니다."

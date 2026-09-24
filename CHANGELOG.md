@@ -330,6 +330,17 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   documented opt-out for self-signed or internal-CA servers. **Upgrade note:**
   a mail server with such a certificate connected before this change and now
   fails the TLS handshake until `verify_tls` is set to `false` for it.
+- **Plain IMAP no longer sends the mailbox password in clear text** (after
+  #1544). With `imap_use_ssl` off, the Email channel and its connection test
+  logged in over an unencrypted connection, and the guided setup put that
+  switch one click away. A new `imap_use_tls` (on by default, the IMAP twin of
+  `smtp_use_tls`) upgrades the connection with STARTTLS before `LOGIN`; a
+  server that offers no STARTTLS is reported as a network failure before the
+  password is sent. `verify_tls` now governs STARTTLS on IMAP and SMTP as well
+  as implicit SSL, so a self-signed server can opt out on any path. **Upgrade
+  note:** an `imap_use_ssl: false` setup against a server without STARTTLS
+  stops connecting until `imap_use_tls` is set to `false` for it, which sends
+  the password in plain text again.
 - **Settings-write routes reject cross-site browser requests** (#1544).
   `require_settings_write_auth` did not apply the cross-site guard that its
   siblings `require_auth` and `require_event_stream_auth` enforce on unsafe

@@ -555,6 +555,10 @@
             "label": "SSL IMAP",
             "help": "Hubungkan ke IMAP melalui SSL (aktif secara default; diperlukan untuk port 993)."
           },
+          "imap_use_tls": {
+            "label": "STARTTLS IMAP",
+            "help": "Saat SSL IMAP nonaktif, enkripsi koneksi dengan STARTTLS sebelum login (aktif secara default; lazim untuk port 143). Matikan hanya untuk server tanpa TLS di jaringan tepercaya — kata sandi akan dikirim sebagai teks biasa."
+          },
           "smtp_host": {
             "label": "Host SMTP",
             "help": "Host server email keluar, misalnya smtp.gmail.com. Balasan dikirim melalui server ini."

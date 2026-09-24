@@ -764,8 +764,14 @@ def _overtrading_pnl(
     median_hold, _ = profile.typical_holding_days
     if median_hold <= 0:
         return 0.0
+    # roundtrips is appended in sell-chronological order (pair_trades_fifo
+    # closes each position as its sell/cover row is processed), so [-1]'s
+    # sell_dt is the true latest sell, but [0]'s buy_dt is only the buy date
+    # of whichever roundtrip happened to sell first -- not the true earliest
+    # buy. A long hold mixed with short trades understates the span.
     span_days = (
-        pd.Timestamp(roundtrips[-1]["sell_dt"]) - pd.Timestamp(roundtrips[0]["buy_dt"])
+        max(pd.Timestamp(rt["sell_dt"]) for rt in roundtrips)
+        - min(pd.Timestamp(rt["buy_dt"]) for rt in roundtrips)
     ).total_seconds() / 86400.0
     expected = max(1.0, span_days / max(2 * median_hold, 1.0))
     actual = len(roundtrips)

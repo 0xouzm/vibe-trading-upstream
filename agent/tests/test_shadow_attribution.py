@@ -12,7 +12,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from src.shadow_account.backtester import _compute_attribution
+from src.shadow_account.backtester import _compute_attribution, _overtrading_pnl
 from src.shadow_account.models import ShadowProfile, ShadowRule
 
 
@@ -126,3 +126,60 @@ def test_early_exit_trade_not_also_counted_as_overtrading() -> None:
     # 120), double-counting trade 1; the fix draws from the three trades not
     # already explained (40+50+60 = 150).
     assert breakdown.overtrading_pnl == pytest.approx(-150.0)
+
+
+def test_overtrading_span_uses_the_true_earliest_buy_and_latest_sell() -> None:
+    # roundtrips is appended in sell-chronological order, not buy order. A
+    # long hold (bought first, sold well before the window's actual end)
+    # mixed with several short, quick trades starting only after it must not
+    # shrink the span to [roundtrips[0].buy_dt, roundtrips[-1].sell_dt] --
+    # that drops the long hold's early buy_dt whenever something else closes
+    # before it does, understating the trading window and spuriously
+    # flagging a normal cadence as overtrading.
+    long_hold = {
+        "symbol": "AAA.US",
+        "buy_dt": pd.Timestamp("2026-01-01"),
+        "sell_dt": pd.Timestamp("2026-01-01") + pd.Timedelta(days=200),
+        "qty": 10.0,
+        "buy_price": 100.0,
+        "sell_price": 105.0,
+        "hold_days": 200.0,
+        "pnl": 50.0,
+        "pnl_pct": 0.5,
+    }
+    short_trades = []
+    for i in range(14):
+        buy = pd.Timestamp("2026-01-01") + pd.Timedelta(days=190 + i * 6)
+        short_trades.append(
+            {
+                "symbol": f"S{i}.US",
+                "buy_dt": buy,
+                "sell_dt": buy + pd.Timedelta(days=2),
+                "qty": 10.0,
+                "buy_price": 20.0,
+                "sell_price": 20.05,
+                "hold_days": 2.0,
+                "pnl": 0.5,
+                "pnl_pct": 0.025,
+            }
+        )
+    # pair_trades_fifo appends each roundtrip when its sell/cover row is
+    # processed, so the real list order is sell-chronological -- reproduce
+    # that here instead of the buy order the trades were built in.
+    roundtrips = sorted([long_hold] + short_trades, key=lambda rt: rt["sell_dt"])
+
+    profile = ShadowProfile(
+        shadow_id="shadow_test",
+        created_at="2026-01-01T00:00:00",
+        journal_hash="test",
+        source_market="us",
+        profitable_roundtrips=len(roundtrips),
+        total_roundtrips=len(roundtrips),
+        date_range=("2026-01-01", "2026-12-31"),
+        profile_text="test",
+        rules=(),
+        preferred_markets=("us",),
+        typical_holding_days=(3.0, 4.0),
+    )
+
+    assert _overtrading_pnl(profile=profile, roundtrips=roundtrips) == 0.0

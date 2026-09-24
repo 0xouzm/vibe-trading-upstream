@@ -1,7 +1,7 @@
 """Read-only technical indicator tool.
 
-Computes RSI, MACD, Bollinger Bands, SMA, and EMA for a given symbol using the
-existing market-data pipeline. All computation is pure Python (numpy/pandas);
+Computes RSI, MACD, Bollinger Bands, SMA, EMA, and volume statistics for a given
+symbol using the existing market-data pipeline. All computation is pure Python (numpy/pandas);
 no new dependencies.
 """
 
@@ -38,6 +38,7 @@ _CALENDAR_DAYS_PER_BAR = {"1W": 7, "1M": 31}
 
 
 _CLOSE_KEYS = ("close", "Close", "CLOSE", "adj_close")
+_VOLUME_KEYS = ("volume", "Volume", "VOLUME")
 _DATE_KEYS = ("trade_date", "date", "datetime", "timestamp", "time")
 
 
@@ -76,10 +77,12 @@ def _extract_close_series(payload: Any) -> pd.Series | None:
         dates = pd.to_datetime(frame[date_key], errors="coerce")
     elif isinstance(frame.index, pd.DatetimeIndex):
         dates = pd.Series(frame.index, index=frame.index)
-    elif not isinstance(frame.index, pd.RangeIndex) and not pd.api.types.is_integer_dtype(
-        frame.index.dtype
-    ):
-        dates = pd.Series(pd.to_datetime(frame.index, errors="coerce"), index=frame.index)
+    elif not isinstance(
+        frame.index, pd.RangeIndex
+    ) and not pd.api.types.is_integer_dtype(frame.index.dtype):
+        dates = pd.Series(
+            pd.to_datetime(frame.index, errors="coerce"), index=frame.index
+        )
     else:
         return close.dropna().reset_index(drop=True).astype(float)
 
@@ -90,6 +93,82 @@ def _extract_close_series(payload: Any) -> pd.Series | None:
         dtype=float,
     )
     return normalized.sort_index(kind="stable")
+
+
+def _extract_volume_series(payload: Any) -> pd.Series | None:
+    """Extract the volume series from a loader payload.
+
+    Missing or non-numeric volume values are preserved as NaN when a date
+    index is available so callers do not silently carry a stale observation
+    forward to the latest bar.
+    """
+    if isinstance(payload, list):
+        if not payload or not isinstance(payload[0], dict):
+            return None
+        frame = pd.DataFrame(payload)
+    elif isinstance(payload, dict):
+        inner = payload.get("data")
+        if isinstance(inner, list):
+            return _extract_volume_series(inner)
+        try:
+            frame = pd.DataFrame(payload)
+        except ValueError:
+            return None
+    elif isinstance(payload, pd.DataFrame):
+        frame = payload.copy()
+    else:
+        return None
+
+    volume_key = next((key for key in _VOLUME_KEYS if key in frame.columns), None)
+    if volume_key is None:
+        return None
+
+    volume = pd.to_numeric(frame[volume_key], errors="coerce")
+    date_key = next((key for key in _DATE_KEYS if key in frame.columns), None)
+    if date_key is not None:
+        dates = pd.to_datetime(frame[date_key], errors="coerce")
+    elif isinstance(frame.index, pd.DatetimeIndex):
+        dates = pd.Series(frame.index, index=frame.index)
+    elif not isinstance(
+        frame.index, pd.RangeIndex
+    ) and not pd.api.types.is_integer_dtype(frame.index.dtype):
+        dates = pd.Series(
+            pd.to_datetime(frame.index, errors="coerce"), index=frame.index
+        )
+    else:
+        return volume.reset_index(drop=True).astype(float)
+
+    valid_dates = dates.notna()
+    normalized = pd.Series(
+        volume.loc[valid_dates].to_numpy(dtype=float),
+        index=pd.DatetimeIndex(dates.loc[valid_dates]),
+        dtype=float,
+    )
+    return normalized.sort_index(kind="stable")
+
+
+def _compute_volume_stats(
+    volume: pd.Series, period: int = 20
+) -> dict[str, float | None]:
+    """Return latest volume, its trailing mean, and latest/mean ratio.
+
+    The trailing mean is reported only when the latest period bars all carry
+    finite volume values, so a missing bar cannot silently change the window.
+    """
+    if volume.empty:
+        return {"latest": None, "sma_20": None, "ratio_20": None}
+
+    latest_raw = volume.iloc[-1]
+    latest = float(latest_raw) if pd.notna(latest_raw) else None
+    window = volume.iloc[-period:]
+    sma = None
+    ratio = None
+    if len(window) == period and window.notna().all():
+        sma = float(window.mean())
+        if latest is not None and sma != 0:
+            ratio = float(latest / sma)
+
+    return {"latest": latest, "sma_20": sma, "ratio_20": ratio}
 
 
 def _compute_sma(close: pd.Series, period: int) -> float | None:
@@ -170,14 +249,16 @@ class TechnicalIndicatorTool(BaseTool):
     """Compute common technical indicators for a symbol.
 
     Fetches OHLCV data through the existing loader pipeline, then computes
-    RSI, MACD, Bollinger Bands, SMA, and EMA. All math is pure Python; no
-    new dependencies, no network calls beyond what the loaders already do.
+    RSI, MACD, Bollinger Bands, SMA, EMA, and volume statistics. All math is
+    pure Python; no new dependencies, no network calls beyond what the loaders
+    already do.
     """
 
     name = "technical_indicators"
     description = (
         "Compute common technical indicators (RSI, MACD, Bollinger Bands, "
-        "SMA, EMA) for a trading symbol. Uses the project's data loaders "
+        "SMA, EMA) plus latest/20-bar volume statistics for a trading symbol. "
+        "Uses the project's data loaders "
         "to fetch price history, then computes indicators locally."
     )
     parameters = {
@@ -221,7 +302,10 @@ class TechnicalIndicatorTool(BaseTool):
         interval = _canonicalize_interval(requested_interval)
         if interval is None:
             return json.dumps(
-                {"ok": False, "error": f"unsupported interval {requested_interval!r}; use 1d, 1wk or 1mo"}
+                {
+                    "ok": False,
+                    "error": f"unsupported interval {requested_interval!r}; use 1d, 1wk or 1mo",
+                }
             )
 
         try:
@@ -271,11 +355,27 @@ class TechnicalIndicatorTool(BaseTool):
             return json.dumps({"ok": False, "error": "No close price column in data"})
         close = close.sort_index(kind="stable").tail(lookback)
 
+        volume = _extract_volume_series(df)
+        if volume is not None:
+            volume = volume.sort_index(kind="stable")
+            if isinstance(close.index, pd.DatetimeIndex) and isinstance(
+                volume.index, pd.DatetimeIndex
+            ):
+                volume = volume.reindex(close.index)
+            else:
+                volume = volume.tail(len(close)).reset_index(drop=True)
+        volume_stats = (
+            _compute_volume_stats(volume)
+            if volume is not None
+            else {"latest": None, "sma_20": None, "ratio_20": None}
+        )
+
         # ── Compute indicators ────────────────────────────────────────────
         indicators: dict[str, Any] = {
             "rsi_14": _compute_rsi(close),
             "macd": _compute_macd(close),
             "bollinger": _compute_bollinger(close),
+            "volume": volume_stats,
         }
         for period in _SMA_PERIODS:
             indicators[f"sma_{period}"] = _compute_sma(close, period)

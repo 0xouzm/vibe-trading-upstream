@@ -143,6 +143,18 @@ class TestSymbolSearchSuccess:
         assert "BK0001" not in by_symbol
         assert data["count"] == len(data["candidates"])
 
+    def test_argentina_candidate_keeps_market_identity(self):
+        quote = {
+            "symbol": "GGAL.BA",
+            "shortname": "Grupo Financiero Galicia",
+            "exchange": "BUE",
+            "quoteType": "EQUITY",
+        }
+        candidate = ss._yahoo_candidate(quote)
+        assert candidate is not None
+        assert candidate["symbol"] == "GGAL.BA"
+        assert candidate["market"] == "ar"
+
     def test_limit_clamped_and_applied(self):
         with patch.object(
             ss.eastmoney_client, "get_json", return_value=_eastmoney_payload()

@@ -305,6 +305,19 @@ def test_market_sensitive_skill_waits_for_prior_identity_batch(
     assert skill.calls == 1
 
 
+def test_argentina_symbols_have_grounding_identity() -> None:
+    """Buenos Aires symbols retain venue and ARS identity."""
+    assert _scan_symbols("Check GOOGL.BA price") == {"GOOGL.BA"}
+    assert _infer_venue("GGAL.BA") == "buenos_aires"
+    assert _infer_currency("GGAL.BA") == "ARS"
+
+
+def test_argentina_symbol_is_seeded_with_market_identity(tmp_path: Path) -> None:
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="Check GOOGL.BA price")
+
+    assert ledger.authorized_symbols == {"GOOGL.BA"}
+
+
 @pytest.mark.parametrize(
     ("tool_name", "arguments"),
     [

@@ -154,6 +154,8 @@ def candidate_market(candidate: Mapping[str, Any]) -> str | None:
         return "hk"
     if suffix == "US":
         return "us"
+    if suffix == "BA":
+        return "ar"
     raw = (
         str(candidate.get("market") or candidate.get("exchange") or "")
         .strip()
@@ -168,6 +170,10 @@ def candidate_market(candidate: Mapping[str, Any]) -> str | None:
         "hong kong": "hk",
         "us": "us",
         "usa": "us",
+        "ar": "ar",
+        "argentina": "ar",
+        "buenos aires": "ar",
+        "bue": "ar",
     }.get(raw)
 
 

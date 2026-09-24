@@ -415,13 +415,26 @@ class TestLoaderMetadata:
         assert loader.is_available() is True
 
 
-@pytest.mark.parametrize("declared", ["USD", ""])
-def test_fetch_rejects_a_byma_line_not_declared_in_pesos(declared: str) -> None:
-    """GGALD.BA is BYMA's dollar line for Galicia; the ar_equity pool is ARS."""
+@pytest.mark.parametrize(
+    ("symbol", "declared", "admitted"),
+    [
+        ("GGAL.BA", "ARS", True),
+        ("GGALD.BA", "USD", False),  # BYMA's dollar line for Galicia
+        ("GGALD.BA", "", False),
+        ("DLR.TO", "CAD", True),
+        ("DLR-U.TO", "USD", False),  # the TSX's US-dollar unit of the same fund
+    ],
+)
+def test_fetch_admits_a_line_only_in_its_markets_currency(
+    symbol: str, declared: str, admitted: bool
+) -> None:
+    """ar_equity is one ARS pool and ca_equity one CAD pool; both venues list USD lines."""
     rows = [_row("2024-01-02", 4.1, 4.3, 4.0, 4.2, 1000)]
     with patch(
         "backtest.loaders.yahoo_loader.yahoo_client.get_chart",
         return_value=(rows, declared),
     ):
-        out = DataLoader().fetch(["GGALD.BA"], "2024-01-01", "2024-01-31")
-    assert "GGALD.BA" not in out
+        out = DataLoader().fetch([symbol], "2024-01-01", "2024-01-31")
+    assert (symbol in out) is admitted
+    if admitted:
+        assert out[symbol].attrs["quote_currency"] == declared

@@ -163,28 +163,37 @@ def test_fetch_declared_currency_failure_is_fail_closed(
     assert yfl._declared_currency("VOD.L") is None
 
 
-@pytest.mark.parametrize(("declared", "admitted"), [("ARS", True), ("USD", False), (None, False)])
-def test_fetch_admits_only_a_peso_quoted_byma_line(
-    monkeypatch: pytest.MonkeyPatch, declared: str | None, admitted: bool
+@pytest.mark.parametrize(
+    ("symbol", "declared", "admitted"),
+    [
+        ("GGALD.BA", "ARS", True),
+        ("GGALD.BA", "USD", False),
+        ("GGALD.BA", None, False),
+        ("DLR-U.TO", "USD", False),
+        ("DLR.TO", "CAD", True),
+    ],
+)
+def test_fetch_admits_a_byma_or_tsx_line_only_in_its_markets_currency(
+    monkeypatch: pytest.MonkeyPatch, symbol: str, declared: str | None, admitted: bool
 ) -> None:
-    """BYMA lists GGAL.BA in ARS and GGALD.BA in USD; the ar_equity pool is ARS.
+    """BYMA and the TSX each list USD lines beside their ARS / CAD pools.
 
-    Yahoo declared USD for SPYD.BA / GGALD.BA / AAPLD.BA (13.37 / 4.20 / 17.53,
-    probed 2026-09-24) -- booked as pesos they are off by the exchange rate.
+    Yahoo declared USD for GGALD.BA (4.20) and DLR-U.TO (10.16) on 2026-09-24,
+    beside ARS for GGAL.BA and CAD for DLR.TO.
     """
     monkeypatch.delenv("VIBE_TRADING_DATA_CACHE", raising=False)
     asked: list[str] = []
 
-    def declared_currency(symbol: str) -> str | None:
-        asked.append(symbol)
+    def declared_currency(requested: str) -> str | None:
+        asked.append(requested)
         return declared
 
     monkeypatch.setattr(yfl, "_download_history", lambda *args: _download_frame())
     monkeypatch.setattr(yfl, "_declared_currency", declared_currency)
 
-    result = yfl.DataLoader().fetch(["GGALD.BA"], "2025-01-01", "2025-01-03")
+    result = yfl.DataLoader().fetch([symbol], "2025-01-01", "2025-01-03")
 
-    assert asked == ["GGALD.BA"]
-    assert ("GGALD.BA" in result) is admitted
+    assert asked == [symbol]
+    assert (symbol in result) is admitted
     if admitted:
-        assert result["GGALD.BA"].attrs["quote_currency"] == "ARS"
+        assert result[symbol].attrs["quote_currency"] == declared

@@ -32,12 +32,21 @@ logger = logging.getLogger(__name__)
 _GBP_PENCE_CURRENCY = "GBp"
 _PRICE_COLUMNS = ("open", "high", "low", "close")
 _UK_EQUITY_PATTERN = re.compile(r"^[A-Z0-9&.\-]+\.L$", re.I)
-# BYMA lists one issuer in pesos and again in dollars (GGAL.BA in ARS,
-# GGALD.BA in USD -- Yahoo declares each; the trailing D is not a rule, since
-# YPFD.BA is a peso line). The ar_equity pool is ARS, so the same contract as
-# LSE applies: read the declared currency, admit only ARS.
-_AR_EQUITY_PATTERN = re.compile(r"^[A-Z0-9&.\-]+\.BA$", re.I)
-_AR_EQUITY_CURRENCY = "ARS"
+# Venues that list lines in a second currency, whose market is one static
+# pool in the first. BYMA quotes GGAL.BA in ARS and GGALD.BA in USD (the
+# trailing D is not a rule: YPFD.BA is a peso line); the TSX quotes DLR.TO in
+# CAD and DLR-U.TO in USD. Yahoo declares each, and every priced source in
+# these markets' chains is Yahoo or yfinance, so the declared currency decides.
+_SINGLE_CURRENCY_VENUES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^[A-Z0-9&.\-]+\.BA$", re.I), "ARS"),
+    (re.compile(r"^[A-Z0-9&.\-]+\.(?:TO|V)$", re.I), "CAD"),
+)
+
+
+def _venue_currency(code: str) -> str | None:
+    """Return the one currency a symbol's venue pool accepts, or None if unconstrained."""
+    code = str(code).strip()
+    return next((cur for pattern, cur in _SINGLE_CURRENCY_VENUES if pattern.match(code)), None)
 
 
 def is_lse_symbol(code: str) -> bool:
@@ -79,8 +88,7 @@ def declared_currency_required(code: str) -> bool:
     A loader must read the source's declared currency for such a symbol and
     pass it to :func:`normalize_declared_quote_currency` before emitting bars.
     """
-    code = str(code).strip()
-    return bool(_UK_EQUITY_PATTERN.match(code) or _AR_EQUITY_PATTERN.match(code))
+    return is_lse_symbol(code) or _venue_currency(code) is not None
 
 
 def normalize_declared_quote_currency(
@@ -98,17 +106,18 @@ def normalize_declared_quote_currency(
         declared (GBP for an LSE line after pence scaling).
 
     Raises:
-        ValueError: If an LSE line is not declared GBP/GBp, or a BYMA line is
-            not declared ARS -- either would enter a single-currency pool in
-            the wrong unit.
+        ValueError: If an LSE line is not declared GBP/GBp, or a BYMA / TSX
+            line is not declared in its market's currency -- each would enter a
+            single-currency pool in the wrong unit.
     """
     if is_lse_symbol(code):
         return normalize_lse_quote_currency(frame, currency)
     declared = currency.strip() if isinstance(currency, str) else ""
-    if _AR_EQUITY_PATTERN.match(str(code).strip()) and declared != _AR_EQUITY_CURRENCY:
+    required = _venue_currency(code)
+    if required is not None and declared != required:
         raise ValueError(
-            f"BYMA quote currency must be declared as {_AR_EQUITY_CURRENCY}; "
-            f"got {declared or 'missing'!r}"
+            f"{code} must be quoted in {required} to enter that market's pool; "
+            f"the source declared {declared or 'no currency'!r}"
         )
     if declared:
         frame.attrs["quote_currency"] = declared

@@ -1131,6 +1131,17 @@ vibe-trading channels login weixin     # run an adapter login hook when needed
 vibe-trading channels pairing --channel telegram list
 ```
 
+Telegram long polling permits only one active `getUpdates` poller per bot
+token. `vibe-trading serve` owns the channel runtime; it starts channels at
+startup when `VIBE_TRADING_CHANNELS_AUTO_START=true`, and the Web UI controls
+that same runtime. `vibe-trading channels start` sends a start request to the
+running API server (`VIBE_TRADING_API_URL`, default
+`http://127.0.0.1:8000`), so running it against that same server after
+auto-start does not create another poller. Keep only one API server process
+with a given Telegram bot token enabled. Separate server processes, or a CLI
+configured to target a different server, each own a runtime and can conflict
+when they use the same token.
+
 `vibe-trading channels login feishu` saves the QR-authorized app credentials to
 `~/.vibe-trading/agent.json` with owner-only file permissions before reporting
 login success.

@@ -561,3 +561,24 @@ def test_fit_yield_curve_rejects_nonfinite_observations(bad):
     yields[3] = bad
     with pytest.raises(ValueError, match="finite"):
         fit_yield_curve(maturities, yields, model="nelson_siegel")
+
+
+@pytest.mark.parametrize(
+    ("call", "name"),
+    [
+        (lambda bad: bond_price(bad, 0.05, 0.05, 10), "face"),
+        (lambda bad: bond_price(100.0, bad, 0.05, 10), "coupon_rate"),
+        (lambda bad: bond_price(100.0, 0.05, bad, 10), "ytm"),
+        (lambda bad: convexity(100.0, 0.05, bad, 10), "ytm"),
+        (lambda bad: key_rate_duration(100.0, 0.05, bad, 10), "ytm"),
+        (lambda bad: effective_duration(lambda y: bond_price(100.0, 0.05, y, 10), bad), "yield_level"),
+        (lambda bad: nelson_siegel(bad, 0.04, -0.01, 0.01, 2.0), "maturities"),
+        (lambda bad: nelson_siegel(5.0, 0.04, bad, 0.01, 2.0), "beta1"),
+        (lambda bad: svensson(5.0, 0.04, -0.01, 0.01, 0.01, 2.0, bad), "decay"),
+    ],
+)
+@pytest.mark.parametrize("bad", [np.nan, np.inf])
+def test_a_non_finite_input_is_named_not_priced(call, name, bad):
+    """Each range check is a comparison, and NaN fails none of them: it came out as a NaN price."""
+    with pytest.raises(ValueError, match=f"{name} must be finite"):
+        call(bad)

@@ -118,6 +118,21 @@ def year_fraction(
     return total
 
 
+def _require_finite(**values: float | np.ndarray) -> None:
+    """Raise when a named numeric input holds NaN or an infinity.
+
+    Every range check in this module is a comparison (``face <= 0``) and a
+    comparison with NaN is False, so a NaN walked past each of them and came
+    out as a NaN price, duration or curve.
+
+    Raises:
+        ValueError: Naming the first non-finite input.
+    """
+    for name, value in values.items():
+        if not np.all(np.isfinite(np.asarray(value, dtype=float))):
+            raise ValueError(f"{name} must be finite, got {value!r}")
+
+
 def _is_leap(year: int) -> bool:
     """Report whether a Gregorian year is a leap year.
 
@@ -215,6 +230,7 @@ def bond_cashflows(
         ValueError: If ``face`` is not positive, if ``n_periods`` is not a
             positive integer, or if ``freq`` is not positive.
     """
+    _require_finite(face=face, coupon_rate=coupon_rate)
     if face <= 0:
         raise ValueError(f"face must be positive, got {face}")
     if isinstance(n_periods, bool) or not isinstance(n_periods, (int, np.integer)) or n_periods <= 0:
@@ -235,6 +251,7 @@ def _discount_factors(
     compounding: str,
 ) -> np.ndarray:
     """Compute discount factors for period indices under discrete or continuous compounding."""
+    _require_finite(ytm=ytm)
     if compounding == "discrete":
         periodic = 1.0 + ytm / freq
         if periodic <= 0.0:
@@ -540,6 +557,7 @@ def effective_duration(
     Raises:
         ValueError: If ``bump`` is not positive or the base price is zero.
     """
+    _require_finite(yield_level=yield_level, bump=bump)
     if bump <= 0:
         raise ValueError(f"bump must be positive, got {bump}")
     base = reprice(yield_level)
@@ -552,6 +570,7 @@ def effective_duration(
 
 def _decay_factors(tau: np.ndarray, lam: float) -> tuple[np.ndarray, np.ndarray]:
     """Compute Nelson-Siegel slope and curvature loadings for decay parameter lam."""
+    _require_finite(decay=lam)
     if lam <= 0:
         raise ValueError(f"decay parameter must be positive, got {lam}")
     x = tau / lam
@@ -565,6 +584,7 @@ def _as_tau(tau: float | Sequence[float] | np.ndarray) -> tuple[np.ndarray, bool
     arr = np.asarray(tau, dtype=float)
     was_scalar = arr.ndim == 0
     arr = np.atleast_1d(arr)
+    _require_finite(maturities=arr)
     if np.any(arr < 0):
         raise ValueError("maturities must be non-negative")
     return arr, was_scalar
@@ -578,6 +598,7 @@ def nelson_siegel(
     lambda1: float,
 ) -> float | np.ndarray:
     """Compute Nelson-Siegel zero rates for given maturities and parameters."""
+    _require_finite(beta0=beta0, beta1=beta1, beta2=beta2)
     arr, was_scalar = _as_tau(tau)
     slope, curve = _decay_factors(arr, lambda1)
     out = beta0 + beta1 * slope + beta2 * curve
@@ -594,6 +615,7 @@ def svensson(
     lambda2: float,
 ) -> float | np.ndarray:
     """Compute Svensson zero rates for given maturities and parameters."""
+    _require_finite(beta0=beta0, beta1=beta1, beta2=beta2, beta3=beta3)
     arr, was_scalar = _as_tau(tau)
     slope, curve1 = _decay_factors(arr, lambda1)
     _, curve2 = _decay_factors(arr, lambda2)

@@ -505,6 +505,16 @@ def run_bench_strict(
                 alpha_t_test = t_stat(test_slice)
                 ic_count_train = int(len(train_slice))
                 ic_count_test = int(len(test_slice))
+                # t_stat reads fewer than two observations as 0.0, so an empty
+                # side would be categorised as if it had been measured. The
+                # sample-range check above cannot see this: the IC series
+                # starts after the alpha's warmup and ends a forward-return
+                # horizon before the last price.
+                if min(ic_count_train, ic_count_test) < 2:
+                    raise SkipAlpha(
+                        f"oos_split {oos_split} leaves {ic_count_train} train / "
+                        f"{ic_count_test} test IC observations; each side needs 2"
+                    )
 
             meta = reg.get(aid).meta or {}
             ic_mean = float(signal_ic.mean())

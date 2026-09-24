@@ -631,3 +631,34 @@ def test_run_bench_strict_rejects_oos_split_outside_loaded_sample(monkeypatch: p
         )
         assert result["status"] == "error"
         assert "must fall within the loaded sample" in result["error"]
+
+
+@pytest.mark.parametrize("split", ["2024-03-19", "2024-01-01"])
+def test_an_oos_split_inside_the_prices_but_outside_the_ic_skips_the_alpha(
+    monkeypatch: pytest.MonkeyPatch, split: str
+) -> None:
+    # Prices run 2024-01-01..03-20 and the forward return drops the last bar, so
+    # 03-19 leaves 0 test IC observations and 01-01 leaves 1 train observation.
+    # Both pass the sample-range check; t_stat read the empty side as 0.0 and the
+    # alpha was still given a category.
+    _stub_panel(monkeypatch, n_rows=80)
+    result = run_bench_strict(
+        zoo="alpha101", universe="csi300", period="2024-2024",
+        random_control=False, oos_split=split, registry=_StubRegistry(panel={}),
+    )
+    assert result["n_alphas_tested"] == 0
+    assert {s["kind"] for s in result["skipped"]} == {"typed"}
+    assert all("each side needs 2" in s["reason"] for s in result["skipped"])
+
+
+def test_an_oos_split_leaving_two_ic_observations_is_still_measured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The other side of the guard above: 03-17 leaves exactly 03-18 and 03-19.
+    _stub_panel(monkeypatch, n_rows=80)
+    result = run_bench_strict(
+        zoo="alpha101", universe="csi300", period="2024-2024",
+        random_control=False, oos_split="2024-03-17", registry=_StubRegistry(panel={}),
+    )
+    assert result["n_alphas_tested"] == 2
+    assert {row["ic_count_test"] for row in result["rows"]} == {2}

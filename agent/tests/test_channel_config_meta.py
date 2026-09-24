@@ -358,7 +358,10 @@ def test_derived_channel_regex_masking_unchanged() -> None:
 def test_fallback_derives_types_and_secret_flags(name: str) -> None:
     """Adapters without hand-written hints derive metadata from default_config()."""
     config = _section_for(name)
-    assert config is not None, f"{name} should expose default_config()"
+    if config is None:
+        # telegram needs the optional python-telegram-bot SDK; the file's other
+        # adapter-loading tests skip the same way.
+        pytest.skip(f"{name} adapter is not loadable in this environment")
     hints = channel_field_hints(name)
     assert hints, f"{name} fallback should derive at least one field"
     by_key = {hint["key"]: hint for hint in hints}
@@ -629,3 +632,24 @@ def test_identifier_fields_stay_visible(name: str) -> None:
 
 def test_unknown_channel_has_no_hints() -> None:
     assert channel_field_hints("definitely_not_a_real_channel") == []
+
+
+# A hand-written hint is authoritative over SECRET_KEY_RE (#1544), which makes
+# it the one place a key the regex calls secret can land in GET ``values``,
+# unmasked, in the browser. Every such exemption is listed here, so adding one
+# -- Feishu's hints are next -- is a reviewed edit, not a flag in a table.
+_AUDITED_NON_SECRETS = {
+    ("websocket", "token_issue_path"),  # a URL path
+    ("websocket", "token_ttl_s"),  # an integer lifetime
+    ("websocket", "websocket_requires_token"),  # a boolean switch
+}
+
+
+def test_every_hint_that_unmasks_a_secret_shaped_key_is_audited() -> None:
+    unmasked = {
+        (name, hint["key"])
+        for name, hints in _config_meta.FIELD_HINTS.items()
+        for hint in hints
+        if not hint["secret"] and SECRET_KEY_RE.search(hint["key"])
+    }
+    assert unmasked == _AUDITED_NON_SECRETS

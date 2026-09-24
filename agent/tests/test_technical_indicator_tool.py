@@ -263,6 +263,7 @@ class TestTechnicalIndicatorToolIntegration:
             "latest": None,
             "sma_20": None,
             "ratio_20": None,
+            "unit": None,
         }
 
     def test_execute_dataframe_with_adj_close(self, monkeypatch, sample_close):
@@ -366,6 +367,37 @@ class TestLoaderPayloadShapes:
         assert result["indicators"]["volume"]["ratio_20"] == pytest.approx(
             1_000_029.0 / 1_000_019.5
         )
+
+    def test_an_undated_bar_with_no_volume_is_not_filled_by_the_bar_before(self, monkeypatch):
+        """Without dates, bars align by position: dropping the gap would report bar 28 as latest."""
+        records = self._records()
+        for record in records:
+            del record["trade_date"]
+        records[-1]["volume"] = None
+        monkeypatch.setattr(
+            "src.tools.technical_indicator_tool.fetch_market_data",
+            lambda **kw: {"MSFT": pd.DataFrame(records)},
+        )
+        result = json.loads(TechnicalIndicatorTool().execute(symbol="MSFT"))
+
+        assert result["indicators"]["volume"]["latest"] is None
+        assert result["indicators"]["volume"]["sma_20"] is None
+
+    @pytest.mark.parametrize("declared", ["lots", "shares", None])
+    def test_volume_carries_the_unit_its_source_declared(self, monkeypatch, declared):
+        """An A-share source counts board lots of 100, the Yahoo family shares (#1062)."""
+        seen: dict = {}
+        provenance = {} if declared is None else {"600519.SH": {"volume_unit": declared}}
+
+        def fetch(**kwargs):
+            seen.update(kwargs)
+            return {"600519.SH": self._records(), "_provenance": provenance}
+
+        monkeypatch.setattr("src.tools.technical_indicator_tool.fetch_market_data", fetch)
+        result = json.loads(TechnicalIndicatorTool().execute(symbol="600519.SH"))
+
+        assert seen["include_provenance"] is True
+        assert result["indicators"]["volume"]["unit"] == declared
 
     def test_wrapped_capped_payload_is_rejected(self, monkeypatch):
         """A discontinuous capped payload must never produce indicators."""

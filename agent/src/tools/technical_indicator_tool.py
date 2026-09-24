@@ -42,13 +42,24 @@ _VOLUME_KEYS = ("volume", "Volume", "VOLUME")
 _DATE_KEYS = ("trade_date", "date", "datetime", "timestamp", "time")
 
 
-def _extract_close_series(payload: Any) -> pd.Series | None:
-    """Extract the close-price series from a loader payload.
+def _extract_series(
+    payload: Any, keys: tuple[str, ...], *, keep_missing: bool = False
+) -> pd.Series | None:
+    """Extract one numeric column from a loader payload, on its dates.
 
     Loader results can be a ``DataFrame``, a plain column mapping, or the
     ``list[dict]`` shape returned by :func:`fetch_market_data`. Preserve a real
     date index when one is available; a payload without dates intentionally
     keeps a ``RangeIndex`` so callers do not report a row number as a date.
+
+    Args:
+        payload: The loader result for one symbol.
+        keys: Column spellings to look for, first match wins.
+        keep_missing: Keep a dated bar whose value is missing as NaN instead
+            of dropping it, so a gap cannot slide an older value into "latest".
+
+    Returns:
+        A float series, or ``None`` when the payload has no such column.
     """
     if isinstance(payload, list):
         if not payload or not isinstance(payload[0], dict):
@@ -57,7 +68,7 @@ def _extract_close_series(payload: Any) -> pd.Series | None:
     elif isinstance(payload, dict):
         inner = payload.get("data")
         if isinstance(inner, list):
-            return _extract_close_series(inner)
+            return _extract_series(inner, keys, keep_missing=keep_missing)
         try:
             frame = pd.DataFrame(payload)
         except ValueError:
@@ -67,11 +78,11 @@ def _extract_close_series(payload: Any) -> pd.Series | None:
     else:
         return None
 
-    close_key = next((key for key in _CLOSE_KEYS if key in frame.columns), None)
-    if close_key is None:
+    key = next((key for key in keys if key in frame.columns), None)
+    if key is None:
         return None
 
-    close = pd.to_numeric(frame[close_key], errors="coerce")
+    values = pd.to_numeric(frame[key], errors="coerce")
     date_key = next((key for key in _DATE_KEYS if key in frame.columns), None)
     if date_key is not None:
         dates = pd.to_datetime(frame[date_key], errors="coerce")
@@ -84,67 +95,26 @@ def _extract_close_series(payload: Any) -> pd.Series | None:
             pd.to_datetime(frame.index, errors="coerce"), index=frame.index
         )
     else:
-        return close.dropna().reset_index(drop=True).astype(float)
+        kept = values if keep_missing else values.dropna()
+        return kept.reset_index(drop=True).astype(float)
 
-    valid = close.notna() & dates.notna()
+    valid = dates.notna() if keep_missing else values.notna() & dates.notna()
     normalized = pd.Series(
-        close.loc[valid].to_numpy(dtype=float),
+        values.loc[valid].to_numpy(dtype=float),
         index=pd.DatetimeIndex(dates.loc[valid]),
         dtype=float,
     )
     return normalized.sort_index(kind="stable")
 
 
+def _extract_close_series(payload: Any) -> pd.Series | None:
+    """Extract the close-price series from a loader payload."""
+    return _extract_series(payload, _CLOSE_KEYS)
+
+
 def _extract_volume_series(payload: Any) -> pd.Series | None:
-    """Extract the volume series from a loader payload.
-
-    Missing or non-numeric volume values are preserved as NaN when a date
-    index is available so callers do not silently carry a stale observation
-    forward to the latest bar.
-    """
-    if isinstance(payload, list):
-        if not payload or not isinstance(payload[0], dict):
-            return None
-        frame = pd.DataFrame(payload)
-    elif isinstance(payload, dict):
-        inner = payload.get("data")
-        if isinstance(inner, list):
-            return _extract_volume_series(inner)
-        try:
-            frame = pd.DataFrame(payload)
-        except ValueError:
-            return None
-    elif isinstance(payload, pd.DataFrame):
-        frame = payload.copy()
-    else:
-        return None
-
-    volume_key = next((key for key in _VOLUME_KEYS if key in frame.columns), None)
-    if volume_key is None:
-        return None
-
-    volume = pd.to_numeric(frame[volume_key], errors="coerce")
-    date_key = next((key for key in _DATE_KEYS if key in frame.columns), None)
-    if date_key is not None:
-        dates = pd.to_datetime(frame[date_key], errors="coerce")
-    elif isinstance(frame.index, pd.DatetimeIndex):
-        dates = pd.Series(frame.index, index=frame.index)
-    elif not isinstance(
-        frame.index, pd.RangeIndex
-    ) and not pd.api.types.is_integer_dtype(frame.index.dtype):
-        dates = pd.Series(
-            pd.to_datetime(frame.index, errors="coerce"), index=frame.index
-        )
-    else:
-        return volume.reset_index(drop=True).astype(float)
-
-    valid_dates = dates.notna()
-    normalized = pd.Series(
-        volume.loc[valid_dates].to_numpy(dtype=float),
-        index=pd.DatetimeIndex(dates.loc[valid_dates]),
-        dtype=float,
-    )
-    return normalized.sort_index(kind="stable")
+    """Extract the volume series, keeping a dated bar with no volume as NaN."""
+    return _extract_series(payload, _VOLUME_KEYS, keep_missing=True)
 
 
 def _compute_volume_stats(
@@ -257,7 +227,9 @@ class TechnicalIndicatorTool(BaseTool):
     name = "technical_indicators"
     description = (
         "Compute common technical indicators (RSI, MACD, Bollinger Bands, "
-        "SMA, EMA) plus latest/20-bar volume statistics for a trading symbol. "
+        "SMA, EMA) plus latest/20-bar volume statistics for a trading symbol "
+        "(volume.unit is the serving source's declared unit -- lots or shares -- "
+        "or null when undeclared). "
         "Uses the project's data loaders "
         "to fetch price history, then computes indicators locally."
     )
@@ -328,6 +300,9 @@ class TechnicalIndicatorTool(BaseTool):
                 # Indicators require consecutive bars. ``max_rows=lookback``
                 # would make the shared helper even-stride sample long windows.
                 max_rows=0,
+                # For volume_unit: lots on the A-share sources, shares on the
+                # Yahoo family (#1062) -- 100x apart, and nothing to infer from.
+                include_provenance=True,
             )
         except Exception as exc:
             logger.debug("fetch_market_data failed for %s: %s", symbol, exc)
@@ -368,6 +343,10 @@ class TechnicalIndicatorTool(BaseTool):
             _compute_volume_stats(volume)
             if volume is not None
             else {"latest": None, "sma_20": None, "ratio_20": None}
+        )
+        provenance = (data.get("_provenance") or {}).get(symbol)
+        volume_stats["unit"] = (
+            provenance.get("volume_unit") if isinstance(provenance, dict) else None
         )
 
         # ── Compute indicators ────────────────────────────────────────────

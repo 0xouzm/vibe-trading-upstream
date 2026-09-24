@@ -322,9 +322,10 @@ if ChatOpenAI is not None:
             # Every ambient spelling is omitted per request, and an explicit
             # header sharing its name in another case is put back after the
             # omits (see _provider_scoped_extra_headers). Excluding the twin
-            # from the omits instead is right only under openai 3.x's
-            # case-insensitive merge; openai 2.x merges with a plain dict and
-            # would send the ambient ``user-agent`` beside ``User-Agent`` (#1573).
+            # from the omits instead is right only under openai >= 3.19.2's
+            # case-insensitive merge; openai 2.53 (the lock) and 3.19.0 merge
+            # with a plain dict and would send the ambient ``user-agent``
+            # beside ``User-Agent`` (#1573).
             self._vibe_ambient_header_names = tuple(
                 name for name in ambient_names if name not in explicit_names
             )
@@ -371,7 +372,7 @@ if ChatOpenAI is not None:
                 ambient_authorization = (
                     ambient_authorization or name.lower() == "authorization"
                 )
-            # openai 3.x applies an omit case-insensitively, so the omit for an
+            # openai >= 3.19.2 applies an omit case-insensitively, so the omit for an
             # ambient ``user-agent`` also took the provider's ``User-Agent``.
             # Inserted after the omits, the explicit value is the one that stays.
             overrides.update(self._vibe_explicit_twin_headers)

@@ -238,7 +238,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   table. An answer may write £, ₫ or AR$ for the currency it has to name.
 - **An explicit provider header survives an ambient twin** (#1573, #1568).
   When `OPENAI_CUSTOM_HEADERS` names a header the provider also sets (a
-  `user-agent` beside the Kimi / NVIDIA / OpenCode `User-Agent`), openai 3.x's
+  `user-agent` beside the Kimi / NVIDIA / OpenCode `User-Agent`), openai 3.19.2's
   case-insensitive merge dropped the provider's value. That turned CI red for
   every PR on 2026-09-24. The first fix proposed would have sent both headers
   under openai 2.53, the version the lock file and the Docker image install.

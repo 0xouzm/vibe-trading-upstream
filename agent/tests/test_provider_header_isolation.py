@@ -163,11 +163,12 @@ def test_openrouter_async_stream_ignores_non_ascii_ambient_headers() -> None:
 def test_an_explicit_header_wins_over_its_ambient_twin_on_the_wire() -> None:
     """One header, the explicit value, whatever spelling the ambient env used (#1573).
 
-    openai 2.x merges OPENAI_CUSTOM_HEADERS under default_headers with a plain
-    dict (an ambient ``user-agent`` beside an explicit ``User-Agent`` sent both);
-    openai 3.x merges case-insensitively and applies a per-request omit the same
-    way (an omit for the ambient spelling stripped the explicit header). The
-    repo's lock pins 2.x and CI installs 3.x, so both must hold.
+    openai 2.53 (and 3.19.0) merge OPENAI_CUSTOM_HEADERS under default_headers
+    with a plain dict (an ambient ``user-agent`` beside an explicit ``User-Agent``
+    sent both); openai 3.19.2 merges case-insensitively and applies a per-request
+    omit the same way (an omit for the ambient spelling stripped the explicit
+    header). The repo's lock pins 2.53 and CI installs the newest, so both must
+    hold.
     """
     seen: list[httpx.Headers] = []
 

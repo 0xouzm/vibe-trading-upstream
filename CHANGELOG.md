@@ -44,6 +44,32 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   `~/.vibe-trading/agent.json` atomically at mode 0600; a YAML config is shown
   read-only. Reloads of one channel are serialized in `ChannelManager`, and
   `stop_all` cancels a reload's start that is still connecting.
+- **Email and WebSocket join the guided Web UI channel setup** (a follow-up
+  to #1519). Both channels get hand-written field metadata — localized
+  labels, masked secrets — plus connection tests and per-channel hot apply.
+  Email's test probes the real IMAP login, mailbox select and SMTP login
+  without ever sending a message; WebSocket is a server channel with no
+  remote credentials, so its test validates the TLS cert/key material and
+  binds every resolved address locally — an address held by the
+  already-running server reads as the expected state, not a failure. Saving
+  a WebSocket config hot-swaps the server: connected clients (including the
+  Web UI chat) briefly disconnect and reconnect. A hand-written field hint's
+  secret flag is now authoritative for the keys it covers — the regex
+  fail-safe still masks every unhinted key — so token-shaped non-secrets
+  such as `websocket_requires_token` stay visible and editable instead of
+  being masked, and a form save can no longer silently flip the stored token
+  requirement. The web config routes now build the WebSocket adapter with
+  the gateway services it requires; previously every WebSocket save or test
+  failed validation. Email's polling loop also skips stale-config
+  delete/move post-actions once a stop or hot swap begins, while the
+  already-fetched batch is still delivered. Both the probe and the polling
+  loop now send an RFC 2971 IMAP `ID` after login: NetEase mailboxes
+  (163/126/yeah.net) accept the login but reject the first `SELECT` with
+  `Unsafe Login` until the client identifies itself, so without this the
+  Email channel could not read the most common Chinese mailboxes. The
+  identification is static and carries no user data or secrets, and servers
+  that ignore `ID` are unaffected; verified end-to-end against a live
+  163.com account.
 - **Bahasa Indonesia** UI locale and `README_id.md` (#1482). The README count
   tests cover it, and `MANIFEST.in` now ships `README_es.md` and
   `README_id.md`.
@@ -219,7 +245,28 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   excluded the other entry as "self" and wrote an ambiguous target. Both key on
   the path relative to the memory dir now; a sidecar written earlier, with a
   bare filename or an absolute path, is still read.
-
+- **The Email channel verifies TLS certificates by default** (#1544). The
+  implicit-SSL paths (`IMAP4_SSL` / `SMTP_SSL`) in both the connection probe
+  and the polling/send adapter used Python's default unverified context
+  (`CERT_NONE`, no hostname check), so the mailbox password travelled to a
+  server whose certificate was never checked — an active network attacker
+  between the operator and their mail provider could harvest it. All four call
+  sites now build their context through a shared `email_tls_context()` that
+  verifies the certificate and hostname against the system CA bundle, matching
+  the STARTTLS path, which already did. A new `verify_tls` field (default
+  `true`, surfaced in the guided Email setup in all nine locales) is the
+  documented opt-out for self-signed or internal-CA servers. **Upgrade note:**
+  a mail server with such a certificate connected before this change and now
+  fails the TLS handshake until `verify_tls` is set to `false` for it.
+- **Settings-write routes reject cross-site browser requests** (#1544).
+  `require_settings_write_auth` did not apply the cross-site guard that its
+  siblings `require_auth` and `require_event_stream_auth` enforce on unsafe
+  methods, so a malicious web page could attempt a CSRF write against any
+  settings route — including the new `POST /channels/email/test`, which merges
+  stored credentials with a caller-supplied patch and could be steered to send
+  the stored mailbox password to an attacker-chosen host. The guard now runs
+  first on every settings-write route; same-origin Web UI calls and
+  non-browser clients (CLI/curl, no `Origin`) are unaffected.
 - **Read-only results lost to context compaction are restored, not refetched**
   (#1488). A successful read-only call whose payload compaction removed is
   replayed from the run's own cache, at most six times a run; past the cap it

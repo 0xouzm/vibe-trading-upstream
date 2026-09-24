@@ -112,6 +112,138 @@ function qqEntry(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function emailEntry(overrides: Record<string, unknown> = {}) {
+  return {
+    display_name: "Email",
+    available: true,
+    loaded: true,
+    install_hint: "",
+    error: "",
+    supports_test: true,
+    sdk_available: true,
+    fields: [
+      { key: "consent_granted", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.consent_granted" },
+      { key: "imap_host", type: "text", secret: false, required: true, help_key: "settings.channels.fields.email.imap_host" },
+      { key: "imap_port", type: "text", secret: false, required: false, help_key: "settings.channels.fields.email.imap_port" },
+      { key: "imap_username", type: "text", secret: false, required: true, help_key: "settings.channels.fields.email.imap_username" },
+      { key: "imap_password", type: "password", secret: true, required: true, help_key: "settings.channels.fields.email.imap_password" },
+      { key: "imap_mailbox", type: "text", secret: false, required: false, help_key: "settings.channels.fields.email.imap_mailbox" },
+      { key: "imap_use_ssl", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.imap_use_ssl" },
+      { key: "smtp_host", type: "text", secret: false, required: true, help_key: "settings.channels.fields.email.smtp_host" },
+      { key: "smtp_port", type: "text", secret: false, required: false, help_key: "settings.channels.fields.email.smtp_port" },
+      { key: "smtp_username", type: "text", secret: false, required: true, help_key: "settings.channels.fields.email.smtp_username" },
+      { key: "smtp_password", type: "password", secret: true, required: true, help_key: "settings.channels.fields.email.smtp_password" },
+      { key: "smtp_use_tls", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.smtp_use_tls" },
+      { key: "smtp_use_ssl", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.smtp_use_ssl" },
+      { key: "verify_tls", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.verify_tls" },
+      { key: "from_address", type: "text", secret: false, required: false, help_key: "settings.channels.fields.email.from_address" },
+      { key: "auto_reply_enabled", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.auto_reply_enabled" },
+      { key: "poll_interval_seconds", type: "text", secret: false, required: false, help_key: "settings.channels.fields.email.poll_interval_seconds" },
+      { key: "mark_seen", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.mark_seen" },
+      { key: "post_action", type: "text", secret: false, required: false, help_key: "settings.channels.fields.email.post_action" },
+      { key: "post_action_move_mailbox", type: "text", secret: false, required: false, help_key: "settings.channels.fields.email.post_action_move_mailbox" },
+      { key: "post_action_expunge", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.post_action_expunge" },
+      { key: "post_action_ignore_skipped", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.post_action_ignore_skipped" },
+      { key: "max_body_chars", type: "text", secret: false, required: false, help_key: "settings.channels.fields.email.max_body_chars" },
+      { key: "subject_prefix", type: "text", secret: false, required: false, help_key: "settings.channels.fields.email.subject_prefix" },
+      { key: "allow_from", type: "list", secret: false, required: false, help_key: "settings.channels.fields.email.allow_from" },
+      { key: "verify_dkim", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.verify_dkim" },
+      { key: "verify_spf", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.email.verify_spf" },
+      { key: "allowed_attachment_types", type: "list", secret: false, required: false, help_key: "settings.channels.fields.email.allowed_attachment_types" },
+      { key: "max_attachment_size", type: "text", secret: false, required: false, help_key: "settings.channels.fields.email.max_attachment_size" },
+      { key: "max_attachments_per_email", type: "text", secret: false, required: false, help_key: "settings.channels.fields.email.max_attachments_per_email" },
+    ],
+    values: {
+      enabled: false,
+      consent_granted: false,
+      imap_host: "imap.example.com",
+      imap_port: 993,
+      imap_username: "bot@example.com",
+      imap_mailbox: "INBOX",
+      imap_use_ssl: true,
+      smtp_host: "smtp.example.com",
+      smtp_port: 587,
+      smtp_username: "bot@example.com",
+      smtp_use_tls: true,
+      smtp_use_ssl: false,
+      verify_tls: true,
+      from_address: "",
+      auto_reply_enabled: true,
+      poll_interval_seconds: 30,
+      mark_seen: true,
+      post_action: "",
+      post_action_move_mailbox: "",
+      post_action_expunge: false,
+      post_action_ignore_skipped: true,
+      max_body_chars: 12000,
+      subject_prefix: "Re: ",
+      allow_from: [],
+      verify_dkim: true,
+      verify_spf: true,
+      allowed_attachment_types: [],
+      max_attachment_size: 2000000,
+      max_attachments_per_email: 5,
+    },
+    secrets: {
+      imap_password: { set: true, masked: "****1a2b" },
+      smtp_password: { set: true, masked: "****c3d4" },
+    },
+    ...overrides,
+  };
+}
+
+function websocketEntry(overrides: Record<string, unknown> = {}) {
+  return {
+    display_name: "WebSocket",
+    available: true,
+    loaded: true,
+    install_hint: "",
+    error: "",
+    supports_test: true,
+    sdk_available: true,
+    fields: [
+      { key: "host", type: "text", secret: false, required: false, help_key: "settings.channels.fields.websocket.host" },
+      { key: "port", type: "text", secret: false, required: false, help_key: "settings.channels.fields.websocket.port" },
+      { key: "unix_socket_path", type: "text", secret: false, required: false, help_key: "settings.channels.fields.websocket.unix_socket_path" },
+      { key: "path", type: "text", secret: false, required: false, help_key: "settings.channels.fields.websocket.path" },
+      { key: "token", type: "password", secret: true, required: false, help_key: "settings.channels.fields.websocket.token" },
+      { key: "token_issue_path", type: "text", secret: false, required: false, help_key: "settings.channels.fields.websocket.token_issue_path" },
+      { key: "token_issue_secret", type: "password", secret: true, required: false, help_key: "settings.channels.fields.websocket.token_issue_secret" },
+      { key: "token_ttl_s", type: "text", secret: false, required: false, help_key: "settings.channels.fields.websocket.token_ttl_s" },
+      { key: "websocket_requires_token", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.websocket.websocket_requires_token" },
+      { key: "allow_from", type: "list", secret: false, required: false, help_key: "settings.channels.fields.websocket.allow_from" },
+      { key: "streaming", type: "bool", secret: false, required: false, help_key: "settings.channels.fields.websocket.streaming" },
+      { key: "max_message_bytes", type: "text", secret: false, required: false, help_key: "settings.channels.fields.websocket.max_message_bytes" },
+      { key: "ping_interval_s", type: "text", secret: false, required: false, help_key: "settings.channels.fields.websocket.ping_interval_s" },
+      { key: "ping_timeout_s", type: "text", secret: false, required: false, help_key: "settings.channels.fields.websocket.ping_timeout_s" },
+      { key: "ssl_certfile", type: "text", secret: false, required: false, help_key: "settings.channels.fields.websocket.ssl_certfile" },
+      { key: "ssl_keyfile", type: "text", secret: false, required: false, help_key: "settings.channels.fields.websocket.ssl_keyfile" },
+    ],
+    values: {
+      enabled: false,
+      host: "127.0.0.1",
+      port: 8765,
+      unix_socket_path: "",
+      path: "/",
+      token_issue_path: "",
+      token_ttl_s: 300,
+      websocket_requires_token: true,
+      allow_from: ["*"],
+      streaming: true,
+      max_message_bytes: 37748736,
+      ping_interval_s: 20,
+      ping_timeout_s: 20,
+      ssl_certfile: "",
+      ssl_keyfile: "",
+    },
+    secrets: {
+      token: { set: true, masked: "****9z8y" },
+      token_issue_secret: { set: true, masked: "****7x6w" },
+    },
+    ...overrides,
+  };
+}
+
 function channelsConfig(overrides: Record<string, unknown> = {}) {
   return {
     config_path: "~/.vibe-trading/agent.json",
@@ -144,6 +276,28 @@ async function renderQqExpanded() {
   await screen.findByText("IM Channels");
   fireEvent.click(await screen.findByRole("button", { name: "Configure QQ" }));
   expect(await screen.findByDisplayValue("102000001")).toBeInTheDocument();
+}
+
+/** Render the card with the Email config panel expanded. */
+async function renderEmailExpanded() {
+  apiMock.getChannelsConfig.mockResolvedValue(channelsConfig({
+    channels: { dingtalk: dingtalkEntry(), email: emailEntry() },
+  }));
+  render(<ChannelSettings />);
+  await screen.findByText("IM Channels");
+  fireEvent.click(await screen.findByRole("button", { name: "Configure Email" }));
+  expect(await screen.findByDisplayValue("imap.example.com")).toBeInTheDocument();
+}
+
+/** Render the card with the WebSocket config panel expanded. */
+async function renderWebsocketExpanded() {
+  apiMock.getChannelsConfig.mockResolvedValue(channelsConfig({
+    channels: { dingtalk: dingtalkEntry(), websocket: websocketEntry() },
+  }));
+  render(<ChannelSettings />);
+  await screen.findByText("IM Channels");
+  fireEvent.click(await screen.findByRole("button", { name: "Configure WebSocket" }));
+  expect(await screen.findByDisplayValue("127.0.0.1")).toBeInTheDocument();
 }
 
 describe("ChannelSettings config panel", () => {
@@ -454,6 +608,104 @@ describe("ChannelSettings config panel", () => {
     fireEvent.click(guideToggle);
     expect(guideToggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText(/Register on the QQ Open Platform/)).not.toBeInTheDocument();
+  });
+
+  it("renders every Email field from the backend help_keys with localized labels", async () => {
+    await renderEmailExpanded();
+
+    expect(screen.getByText("Consent granted")).toBeInTheDocument();
+    expect(screen.getByText("IMAP host")).toBeInTheDocument();
+    expect(screen.getByText("IMAP username")).toBeInTheDocument();
+    expect(screen.getByText("IMAP mailbox")).toBeInTheDocument();
+    expect(screen.getByText("SMTP host")).toBeInTheDocument();
+    expect(screen.getByText("From address")).toBeInTheDocument();
+    expect(screen.getByText("Automatic replies")).toBeInTheDocument();
+    expect(screen.getByText("After processing")).toBeInTheDocument();
+    expect(screen.getByText("Allowed senders")).toBeInTheDocument();
+    expect(screen.getByText("Verify DKIM")).toBeInTheDocument();
+    expect(screen.getByText("Verify TLS certificate")).toBeInTheDocument();
+    expect(screen.getByText("Allowed attachment types")).toBeInTheDocument();
+    expect(screen.getByText("Max attachments per email")).toBeInTheDocument();
+    expect(screen.getByText(/Inbound mail server host, e\.g\. imap\.gmail\.com/)).toBeInTheDocument();
+    // Both anti-spoofing fields carry the same warning, so match them together.
+    expect(screen.getAllByText(/Disabling both DKIM and SPF accepts spoofed From headers/)).toHaveLength(2);
+    // Secrets keep the generic masked placeholder and password type.
+    const imapSecret = screen.getByPlaceholderText("Keep current (****1a2b)");
+    expect(imapSecret).toHaveAttribute("type", "password");
+    expect(imapSecret).toHaveValue("");
+    const smtpSecret = screen.getByPlaceholderText("Keep current (****c3d4)");
+    expect(smtpSecret).toHaveAttribute("type", "password");
+    expect(smtpSecret).toHaveValue("");
+  });
+
+  it("toggles the Email setup guide with its steps and external link", async () => {
+    await renderEmailExpanded();
+
+    expect(screen.queryByText(/IMAP and SMTP host names and ports/)).not.toBeInTheDocument();
+
+    const guideToggle = screen.getByRole("button", { name: "Email setup guide" });
+    expect(guideToggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(guideToggle);
+
+    expect(guideToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/no public callback URL is needed/)).toBeInTheDocument();
+    expect(screen.getByText(/IMAP and SMTP host names and ports/)).toBeInTheDocument();
+    expect(screen.getByText(/create an app password/)).toBeInTheDocument();
+    expect(screen.getByText(/it probes the IMAP login, the mailbox folder, and the SMTP login/)).toBeInTheDocument();
+    expect(screen.getByText(/Tick Consent granted, then enable the channel/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open the Vibe-Trading docs" }))
+      .toHaveAttribute("href", "https://vibetrading.wiki/docs/");
+
+    fireEvent.click(guideToggle);
+    expect(guideToggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(/IMAP and SMTP host names and ports/)).not.toBeInTheDocument();
+  });
+
+  it("renders every WebSocket field from the backend help_keys with localized labels", async () => {
+    await renderWebsocketExpanded();
+
+    expect(screen.getByText("Bind host")).toBeInTheDocument();
+    expect(screen.getByText("Bind port")).toBeInTheDocument();
+    expect(screen.getByText("Unix socket path")).toBeInTheDocument();
+    expect(screen.getByText("Upgrade path")).toBeInTheDocument();
+    expect(screen.getByText("Static token")).toBeInTheDocument();
+    expect(screen.getByText("Token issue path")).toBeInTheDocument();
+    expect(screen.getByText("Require token")).toBeInTheDocument();
+    expect(screen.getByText("Allowed clients")).toBeInTheDocument();
+    expect(screen.getByText("Max message bytes")).toBeInTheDocument();
+    expect(screen.getByText("TLS certificate path")).toBeInTheDocument();
+    expect(screen.getByText(/wildcard host such as 0\.0\.0\.0 or ::/)).toBeInTheDocument();
+    // Certificate and key share the same pairing rule, so match them together.
+    expect(screen.getAllByText(/Set both certificate and key, or neither/)).toHaveLength(2);
+    const tokenSecret = screen.getByPlaceholderText("Keep current (****9z8y)");
+    expect(tokenSecret).toHaveAttribute("type", "password");
+    expect(tokenSecret).toHaveValue("");
+    const issueSecret = screen.getByPlaceholderText("Keep current (****7x6w)");
+    expect(issueSecret).toHaveAttribute("type", "password");
+    expect(issueSecret).toHaveValue("");
+  });
+
+  it("toggles the WebSocket setup guide with its steps and external link", async () => {
+    await renderWebsocketExpanded();
+
+    expect(screen.queryByText(/keep 127\.0\.0\.1 for local-only use/)).not.toBeInTheDocument();
+
+    const guideToggle = screen.getByRole("button", { name: "WebSocket setup guide" });
+    expect(guideToggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(guideToggle);
+
+    expect(guideToggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/keep 127\.0\.0\.1 for local-only use/)).toBeInTheDocument();
+    expect(screen.getByText(/token-issue path plus its bearer secret/)).toBeInTheDocument();
+    expect(screen.getByText(/ws:\/\/host:port\/path\?client_id=\.\.\.&token=\.\.\./)).toBeInTheDocument();
+    expect(screen.getByText(/hot-swaps the server/)).toBeInTheDocument();
+    expect(screen.getByText(/validates the SSL certificate\/key material/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open the Vibe-Trading docs" }))
+      .toHaveAttribute("href", "https://vibetrading.wiki/docs/");
+
+    fireEvent.click(guideToggle);
+    expect(guideToggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(/keep 127\.0\.0\.1 for local-only use/)).not.toBeInTheDocument();
   });
 
   it("renders no setup guide for a channel without a guide definition", async () => {

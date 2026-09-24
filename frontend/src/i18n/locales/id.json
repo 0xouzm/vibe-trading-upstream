@@ -525,6 +525,194 @@
             "label": "Ukuran unduhan maksimum (byte)",
             "help": "Batas pengaman untuk satu unduhan lampiran (default 209715200 = 200 MB)."
           }
+        },
+        "email": {
+          "consent_granted": {
+            "label": "Persetujuan diberikan",
+            "help": "Sakelar izin utama. Kanal hanya membaca dan mengirim email setelah Anda memberikan persetujuan secara eksplisit."
+          },
+          "imap_host": {
+            "label": "Host IMAP",
+            "help": "Host server email masuk, misalnya imap.gmail.com. Email masuk diambil dari server ini melalui IMAP."
+          },
+          "imap_port": {
+            "label": "Port IMAP",
+            "help": "Port masuk (default 993 dengan SSL)."
+          },
+          "imap_username": {
+            "label": "Nama pengguna IMAP",
+            "help": "Akun kotak surat untuk masuk melalui IMAP, biasanya alamat email lengkap."
+          },
+          "imap_password": {
+            "label": "Kata sandi IMAP",
+            "help": "Kata sandi kotak surat atau kata sandi aplikasi untuk IMAP. Disimpan di sisi server dan tidak pernah dikirim kembali ke browser."
+          },
+          "imap_mailbox": {
+            "label": "Kotak surat IMAP",
+            "help": "Folder yang dipantau untuk email baru (default INBOX)."
+          },
+          "imap_use_ssl": {
+            "label": "SSL IMAP",
+            "help": "Hubungkan ke IMAP melalui SSL (aktif secara default; diperlukan untuk port 993)."
+          },
+          "smtp_host": {
+            "label": "Host SMTP",
+            "help": "Host server email keluar, misalnya smtp.gmail.com. Balasan dikirim melalui server ini."
+          },
+          "smtp_port": {
+            "label": "Port SMTP",
+            "help": "Port keluar (default 587 dengan STARTTLS; 465 untuk SSL implisit)."
+          },
+          "smtp_username": {
+            "label": "Nama pengguna SMTP",
+            "help": "Akun untuk autentikasi ke server SMTP, biasanya alamat email lengkap."
+          },
+          "smtp_password": {
+            "label": "Kata sandi SMTP",
+            "help": "Kata sandi atau kata sandi aplikasi untuk SMTP. Disimpan di sisi server dan tidak pernah dikirim kembali ke browser."
+          },
+          "smtp_use_tls": {
+            "label": "STARTTLS SMTP",
+            "help": "Enkripsi koneksi SMTP dengan STARTTLS (aktif secara default; lazim untuk port 587). Dalam praktik tidak dipakai bersama SSL SMTP."
+          },
+          "smtp_use_ssl": {
+            "label": "SSL SMTP",
+            "help": "Hubungkan ke SMTP melalui TLS implisit, misalnya port 465 (nonaktif secara default). Dalam praktik tidak dipakai bersama STARTTLS."
+          },
+          "verify_tls": {
+            "label": "Verifikasi sertifikat TLS",
+            "help": "Verifikasi sertifikat TLS dan nama host server email (disarankan). Nonaktifkan hanya untuk server dengan sertifikat self-signed atau CA internal."
+          },
+          "from_address": {
+            "label": "Alamat pengirim",
+            "help": "Alamat asal balasan dikirim. Jika kosong, memakai nama pengguna SMTP."
+          },
+          "auto_reply_enabled": {
+            "label": "Balasan otomatis",
+            "help": "Membalas email masuk secara otomatis. Pengiriman yang dimulai agen tidak terpengaruh."
+          },
+          "poll_interval_seconds": {
+            "label": "Interval pemantauan (dtk)",
+            "help": "Seberapa sering kotak IMAP diperiksa untuk email baru (default 30, minimum 5)."
+          },
+          "mark_seen": {
+            "label": "Tandai sudah dibaca",
+            "help": "Tandai email yang sudah diproses sebagai sudah dibaca di kotak surat."
+          },
+          "post_action": {
+            "label": "Tindakan setelah proses",
+            "help": "Perlakuan email yang sudah diproses: delete (hapus), move (pindahkan ke folder lain), atau kosongkan untuk menyimpannya."
+          },
+          "post_action_move_mailbox": {
+            "label": "Pindahkan ke folder",
+            "help": "Folder tujuan saat tindakan setelah proses adalah move."
+          },
+          "post_action_expunge": {
+            "label": "Hapus permanen setelah delete",
+            "help": "Hapus permanen email yang sudah dihapus (expunge), bukan sekadar menandainya."
+          },
+          "post_action_ignore_skipped": {
+            "label": "Lewati email sendiri dan tersaring",
+            "help": "Email yang dilewati (milik Anda sendiri dan pengirim yang tersaring daftar) tidak dikenai tindakan setelah proses (aktif secara default)."
+          },
+          "max_body_chars": {
+            "label": "Maks. karakter isi",
+            "help": "Potong isi setiap email pada jumlah karakter ini (default 12000)."
+          },
+          "subject_prefix": {
+            "label": "Prefiks subjek balasan",
+            "help": "Prefiks yang ditambahkan ke subjek balasan (default \"Re: \")."
+          },
+          "allow_from": {
+            "label": "Pengirim yang diizinkan",
+            "help": "Daftar alamat email yang boleh berbicara dengan agen (opsional, \"*\" mengizinkan semua). Pengirim yang belum dipasangkan menerima kode pemasangan melalui balasan."
+          },
+          "verify_dkim": {
+            "label": "Verifikasi DKIM",
+            "help": "Wajibkan header Authentication-Results dengan dkim=pass. Menonaktifkan DKIM dan SPF sekaligus akan menerima header From palsu."
+          },
+          "verify_spf": {
+            "label": "Verifikasi SPF",
+            "help": "Wajibkan header Authentication-Results dengan spf=pass. Menonaktifkan DKIM dan SPF sekaligus akan menerima header From palsu."
+          },
+          "allowed_attachment_types": {
+            "label": "Jenis lampiran yang diizinkan",
+            "help": "Daftar MIME untuk lampiran masuk, misalnya application/pdf atau image/*. Kosongkan untuk menonaktifkan lampiran."
+          },
+          "max_attachment_size": {
+            "label": "Ukuran maks. lampiran (byte)",
+            "help": "Ukuran byte terbesar untuk satu lampiran (default 2000000 = 2 MB)."
+          },
+          "max_attachments_per_email": {
+            "label": "Maks. lampiran per email",
+            "help": "Berapa banyak lampiran yang diterima dari satu email (default 5)."
+          }
+        },
+        "websocket": {
+          "host": {
+            "label": "Host bind",
+            "help": "Alamat lokal tempat server WebSocket terikat (default 127.0.0.1, hanya lokal). Host wildcard seperti 0.0.0.0 atau :: mengekspos server di semua antarmuka dan ditolak kecuali token atau rahasia penerbitan token diatur."
+          },
+          "port": {
+            "label": "Port bind",
+            "help": "Port lokal yang didengarkan server WebSocket (default 8765). Diabaikan bila path socket Unix diatur."
+          },
+          "unix_socket_path": {
+            "label": "Path socket Unix",
+            "help": "Path absolut opsional. Bila diatur, server mendengarkan socket Unix ini alih-alih host dan port."
+          },
+          "path": {
+            "label": "Path upgrade",
+            "help": "Path upgrade WebSocket yang dihubungi klien (default /). Harus diawali \"/\"."
+          },
+          "token": {
+            "label": "Token statis",
+            "help": "Rahasia bersama yang diperiksa melalui parameter token saat handshake. Disimpan di sisi server dan tidak pernah dikirim kembali ke browser."
+          },
+          "token_issue_path": {
+            "label": "Path penerbitan token",
+            "help": "Rute HTTP GET yang menerbitkan token sekali pakai berumur pendek dalam JSON. Harus berbeda dari path upgrade."
+          },
+          "token_issue_secret": {
+            "label": "Rahasia penerbitan token",
+            "help": "Rahasia Bearer yang diminta rute penerbitan (Authorization: Bearer atau X-Vibe-Trading-Auth). Disimpan di sisi server dan tidak pernah dikirim kembali ke browser."
+          },
+          "token_ttl_s": {
+            "label": "TTL token terbitan (dtk)",
+            "help": "Masa berlaku token yang diterbitkan rute penerbitan, dalam detik (30-86400, default 300)."
+          },
+          "websocket_requires_token": {
+            "label": "Wajibkan token",
+            "help": "Tolak handshake tanpa token statis atau token terbitan yang valid (aktif secara default)."
+          },
+          "allow_from": {
+            "label": "Klien yang diizinkan",
+            "help": "Daftar ID klien yang boleh terhubung (opsional, \"*\" mengizinkan semua, default)."
+          },
+          "streaming": {
+            "label": "Streaming keluaran",
+            "help": "Kirim delta keluaran model ke klien yang terhubung saat dihasilkan."
+          },
+          "max_message_bytes": {
+            "label": "Maks. byte pesan",
+            "help": "Frame masuk terbesar yang diterima, dalam byte (default 37748736; 1024-41943040)."
+          },
+          "ping_interval_s": {
+            "label": "Interval ping (dtk)",
+            "help": "Detik antar ping keepalive (5-300, default 20)."
+          },
+          "ping_timeout_s": {
+            "label": "Timeout ping (dtk)",
+            "help": "Detik menunggu balasan ping sebelum koneksi diputus (5-300, default 20)."
+          },
+          "ssl_certfile": {
+            "label": "Path sertifikat TLS",
+            "help": "Path sertifikat PEM di server untuk WSS. Atur sertifikat dan kunci bersamaan, atau kosongkan keduanya; ini path berkas di server, bukan materi yang diunggah."
+          },
+          "ssl_keyfile": {
+            "label": "Path kunci TLS",
+            "help": "Path kunci privat PEM di server untuk WSS. Atur sertifikat dan kunci bersamaan, atau kosongkan keduanya; ini path berkas di server, bukan materi yang diunggah."
+          }
         }
       },
       "guides": {
@@ -547,6 +735,26 @@
           "step4": "Tambahkan bot ke grup QQ atau chat dengannya secara pribadi, sesuai aturan sandbox/publikasi platform.",
           "step5": "Kembali ke sini, klik Uji koneksi, lalu aktifkan channel.",
           "docsLabel": "Buka QQ Open Platform"
+        },
+        "email": {
+          "title": "Panduan penyiapan email",
+          "intro": "Kanal email mengambil email masuk melalui IMAP dan membalas melalui SMTP, jadi tidak perlu URL callback publik.",
+          "step1": "Dapatkan host dan port IMAP serta SMTP dari penyedia email Anda (biasanya imap.<penyedia> port 993 dan smtp.<penyedia> port 587).",
+          "step2": "Aktifkan IMAP dan SMTP di pengaturan kotak surat, lalu buat kata sandi aplikasi jika penyedia mensyaratkannya (Gmail, QQ Mail, dan lain-lain dengan verifikasi dua langkah).",
+          "step3": "Isi kredensial IMAP dan SMTP di atas, atur alamat pengirim, dan tambahkan alamat Anda ke «Pengirim yang diizinkan».",
+          "step4": "Klik «Uji koneksi»; pengujian memeriksa login IMAP, folder kotak surat, dan login SMTP.",
+          "step5": "Centang «Persetujuan diberikan» lalu aktifkan kanal; balasan otomatis akan sampai ke pengirim yang lolos pemeriksaan DKIM/SPF.",
+          "docsLabel": "Buka dokumentasi Vibe-Trading"
+        },
+        "websocket": {
+          "title": "Panduan penyiapan WebSocket",
+          "intro": "Kanal WebSocket menjalankan server lokalnya sendiri yang dihubungi klien melalui URL WebSocket, jadi tidak perlu URL callback publik.",
+          "step1": "Pilih alamat bind: biarkan 127.0.0.1 untuk penggunaan lokal saja, atau atur 0.0.0.0 / :: untuk mengekspos server — host wildcard mewajibkan token atau rahasia penerbitan token.",
+          "step2": "Atur token statis, atau path penerbitan token beserta rahasia Bearer-nya agar klien bisa meminta token berumur pendek.",
+          "step3": "Hubungkan klien dengan ws://host:port/path?client_id=...&token=...",
+          "step4": "Menyimpan saat kanal berjalan akan menukar server secara panas: klien yang terhubung (termasuk obrolan Web UI ini) sempat terputus lalu tersambung kembali.",
+          "step5": "Klik «Uji koneksi»; pengujian memvalidasi materi sertifikat/kunci SSL dan ketersediaan alamat secara lokal.",
+          "docsLabel": "Buka dokumentasi Vibe-Trading"
         }
       }
     },

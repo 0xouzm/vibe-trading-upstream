@@ -18,6 +18,7 @@ from websockets.asyncio.server import ServerConnection, serve, unix_serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 
+from src.channels import websocket_probe
 from src.channels.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from src.channels.bus.queue import MessageBus
 from src.channels.base import BaseChannel
@@ -266,6 +267,7 @@ class WebSocketChannel(BaseChannel):
 
     name = "websocket"
     display_name = "WebSocket"
+    supports_connection_test = True
 
     def __init__(
         self,
@@ -363,6 +365,14 @@ class WebSocketChannel(BaseChannel):
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return WebSocketConfig().model_dump(by_alias=True)
+
+    async def test_connection(self) -> dict[str, Any]:
+        """Validate the WebSocket local configuration with a standalone probe.
+
+        Delegates to :func:`src.channels.websocket_probe.test_connection`; see
+        that function for the full contract (SSL material, TCP bind, codes).
+        """
+        return await websocket_probe.test_connection(self.config)
 
     def _expected_path(self) -> str:
         return _normalize_config_path(self.config.path)

@@ -525,6 +525,194 @@
             "label": "Tamaño máximo de descarga (bytes)",
             "help": "Límite de seguridad para la descarga de un solo archivo adjunto (predeterminado 209715200 = 200 MB)."
           }
+        },
+        "email": {
+          "consent_granted": {
+            "label": "Consentimiento otorgado",
+            "help": "Interruptor de permiso principal. El canal solo lee y envía correo después de que otorgues el consentimiento explícitamente."
+          },
+          "imap_host": {
+            "label": "Host IMAP",
+            "help": "Servidor de correo entrante, p. ej. imap.gmail.com. El correo entrante se sondea desde este servidor."
+          },
+          "imap_port": {
+            "label": "Puerto IMAP",
+            "help": "Puerto entrante (predeterminado 993 con SSL)."
+          },
+          "imap_username": {
+            "label": "Usuario IMAP",
+            "help": "Cuenta del buzón para iniciar sesión por IMAP; normalmente es la dirección de correo completa."
+          },
+          "imap_password": {
+            "label": "Contraseña IMAP",
+            "help": "Contraseña del buzón o contraseña de aplicación para IMAP. Se guarda en el servidor y nunca se devuelve al navegador."
+          },
+          "imap_mailbox": {
+            "label": "Buzón IMAP",
+            "help": "Carpeta que se sondea en busca de correo nuevo (predeterminada INBOX)."
+          },
+          "imap_use_ssl": {
+            "label": "SSL de IMAP",
+            "help": "Conectar a IMAP mediante SSL (activado de forma predeterminada; necesario para el puerto 993)."
+          },
+          "smtp_host": {
+            "label": "Host SMTP",
+            "help": "Servidor de correo saliente, p. ej. smtp.gmail.com. Las respuestas se envían a través de este servidor."
+          },
+          "smtp_port": {
+            "label": "Puerto SMTP",
+            "help": "Puerto saliente (predeterminado 587 con STARTTLS; 465 para SSL implícito)."
+          },
+          "smtp_username": {
+            "label": "Usuario SMTP",
+            "help": "Cuenta para autenticarse con el servidor SMTP; normalmente es la dirección de correo completa."
+          },
+          "smtp_password": {
+            "label": "Contraseña SMTP",
+            "help": "Contraseña o contraseña de aplicación para SMTP. Se guarda en el servidor y nunca se devuelve al navegador."
+          },
+          "smtp_use_tls": {
+            "label": "STARTTLS de SMTP",
+            "help": "Cifrar la conexión SMTP con STARTTLS (activado de forma predeterminada; lo habitual en el puerto 587). En la práctica es excluyente con SSL de SMTP."
+          },
+          "smtp_use_ssl": {
+            "label": "SSL de SMTP",
+            "help": "Conectar a SMTP mediante TLS implícito, p. ej. el puerto 465 (desactivado de forma predeterminada). En la práctica es excluyente con STARTTLS."
+          },
+          "verify_tls": {
+            "label": "Verificar el certificado TLS",
+            "help": "Verificar el certificado TLS y el nombre de host del servidor de correo (recomendado). Desactivar solo para servidores con certificados autofirmados o de CA interna."
+          },
+          "from_address": {
+            "label": "Dirección de remitente",
+            "help": "Dirección desde la que se envían las respuestas. Si se deja vacía, se usa el usuario SMTP."
+          },
+          "auto_reply_enabled": {
+            "label": "Respuestas automáticas",
+            "help": "Responder automáticamente al correo entrante. Los envíos iniciados por el agente no se ven afectados."
+          },
+          "poll_interval_seconds": {
+            "label": "Intervalo de sondeo (s)",
+            "help": "Con qué frecuencia se comprueba el buzón IMAP en busca de correo nuevo (predeterminado 30, mínimo 5)."
+          },
+          "mark_seen": {
+            "label": "Marcar como leído",
+            "help": "Marcar como leídos los correos procesados en el buzón."
+          },
+          "post_action": {
+            "label": "Acción posterior",
+            "help": "Qué hacer con los correos procesados: delete (eliminar), move (mover a otro buzón) o vacío para conservarlos."
+          },
+          "post_action_move_mailbox": {
+            "label": "Mover a buzón",
+            "help": "Buzón de destino usado cuando la acción posterior es move."
+          },
+          "post_action_expunge": {
+            "label": "Expurgar tras eliminar",
+            "help": "Eliminar definitivamente los correos borrados (expunge) en lugar de dejarlos marcados."
+          },
+          "post_action_ignore_skipped": {
+            "label": "Omitir propios y filtrados",
+            "help": "No aplicar la acción posterior a los correos omitidos (los tuyos y los de remitentes filtrados por la lista) (activado de forma predeterminada)."
+          },
+          "max_body_chars": {
+            "label": "Máx. de caracteres del cuerpo",
+            "help": "Truncar el cuerpo de cada correo a este número de caracteres (predeterminado 12000)."
+          },
+          "subject_prefix": {
+            "label": "Prefijo del asunto",
+            "help": "Prefijo que se añade al asunto de las respuestas (predeterminado \"Re: \")."
+          },
+          "allow_from": {
+            "label": "Remitentes permitidos",
+            "help": "Lista de direcciones autorizadas que pueden hablar con el agente (\"*\" permite a todos). Los remitentes no emparejados reciben un código de emparejamiento en la respuesta."
+          },
+          "verify_dkim": {
+            "label": "Verificar DKIM",
+            "help": "Exigir una cabecera Authentication-Results con dkim=pass. Desactivar DKIM y SPF a la vez acepta cabeceras From falsificadas."
+          },
+          "verify_spf": {
+            "label": "Verificar SPF",
+            "help": "Exigir una cabecera Authentication-Results con spf=pass. Desactivar DKIM y SPF a la vez acepta cabeceras From falsificadas."
+          },
+          "allowed_attachment_types": {
+            "label": "Tipos de adjunto permitidos",
+            "help": "Lista MIME permitida para adjuntos entrantes, p. ej. application/pdf o image/*. Déjala vacía para desactivar los adjuntos."
+          },
+          "max_attachment_size": {
+            "label": "Tamaño máx. de adjunto (bytes)",
+            "help": "Tamaño máximo por adjunto, en bytes (predeterminado 2000000 = 2 MB)."
+          },
+          "max_attachments_per_email": {
+            "label": "Máx. adjuntos por correo",
+            "help": "Cuántos adjuntos se aceptan de un mismo correo (predeterminado 5)."
+          }
+        },
+        "websocket": {
+          "host": {
+            "label": "Host de escucha",
+            "help": "Dirección local a la que se enlaza el servidor WebSocket (predeterminada 127.0.0.1, solo local). Un host comodín como 0.0.0.0 o :: expone el servidor en todas las interfaces y se rechaza salvo que se configure un token o un secreto de emisión."
+          },
+          "port": {
+            "label": "Puerto de escucha",
+            "help": "Puerto local en el que escucha el servidor WebSocket (predeterminado 8765). Se ignora si se define una ruta de socket Unix."
+          },
+          "unix_socket_path": {
+            "label": "Ruta de socket Unix",
+            "help": "Ruta absoluta opcional. Si se define, el servidor escucha en este socket Unix en lugar del host y el puerto."
+          },
+          "path": {
+            "label": "Ruta de actualización",
+            "help": "Ruta de actualización WebSocket a la que se conectan los clientes (predeterminada /). Debe empezar por \"/\"."
+          },
+          "token": {
+            "label": "Token estático",
+            "help": "Secreto compartido que se valida con el parámetro token durante el handshake. Se guarda en el servidor y nunca se devuelve al navegador."
+          },
+          "token_issue_path": {
+            "label": "Ruta de emisión de tokens",
+            "help": "Ruta HTTP GET que entrega tokens de un solo uso y corta vida en JSON. Debe ser distinta de la ruta de actualización."
+          },
+          "token_issue_secret": {
+            "label": "Secreto de emisión",
+            "help": "Secreto Bearer que exige la ruta de emisión (Authorization: Bearer o X-Vibe-Trading-Auth). Se guarda en el servidor y nunca se devuelve al navegador."
+          },
+          "token_ttl_s": {
+            "label": "TTL del token emitido (s)",
+            "help": "Vida útil del token emitido por la ruta de emisión, en segundos (30-86400, predeterminado 300)."
+          },
+          "websocket_requires_token": {
+            "label": "Exigir token",
+            "help": "Rechazar los handshakes que no presenten un token estático o emitido válido (activado de forma predeterminada)."
+          },
+          "allow_from": {
+            "label": "Clientes permitidos",
+            "help": "Lista de IDs de cliente autorizados a conectarse (\"*\" permite a todos, valor predeterminado)."
+          },
+          "streaming": {
+            "label": "Transmitir salida",
+            "help": "Enviar los deltas de salida del modelo a los clientes conectados mientras se generan."
+          },
+          "max_message_bytes": {
+            "label": "Máx. bytes por mensaje",
+            "help": "Tamaño máximo del frame entrante, en bytes (predeterminado 37748736; 1024-41943040)."
+          },
+          "ping_interval_s": {
+            "label": "Intervalo de ping (s)",
+            "help": "Segundos entre pings de keepalive (5-300, predeterminado 20)."
+          },
+          "ping_timeout_s": {
+            "label": "Timeout de ping (s)",
+            "help": "Segundos de espera de una respuesta de ping antes de cerrar la conexión (5-300, predeterminado 20)."
+          },
+          "ssl_certfile": {
+            "label": "Ruta del certificado TLS",
+            "help": "Ruta del certificado PEM en el servidor para WSS. Configura certificado y clave juntos o ninguno; son rutas de archivo del servidor, no material subido."
+          },
+          "ssl_keyfile": {
+            "label": "Ruta de la clave TLS",
+            "help": "Ruta de la clave privada PEM en el servidor para WSS. Configura certificado y clave juntos o ninguno; son rutas de archivo del servidor, no material subido."
+          }
         }
       },
       "guides": {
@@ -547,6 +735,26 @@
           "step4": "Añade el bot a un grupo de QQ o chatea con él en privado, siguiendo las reglas de sandbox/publicación de la plataforma.",
           "step5": "Vuelve aquí, pulsa «Probar conexión» y activa el canal.",
           "docsLabel": "Abrir la QQ Open Platform"
+        },
+        "email": {
+          "title": "Guía de configuración de correo",
+          "intro": "El canal de correo sondea el buzón por IMAP y responde por SMTP, así que no necesita una URL de callback pública.",
+          "step1": "Obtén los hosts y puertos de IMAP y SMTP de tu proveedor (normalmente imap.<proveedor> en 993 y smtp.<proveedor> en 587).",
+          "step2": "Activa IMAP y SMTP en los ajustes de tu buzón y, si el proveedor lo exige (Gmail, QQ Mail y otros con verificación en dos pasos), crea una contraseña de aplicación.",
+          "step3": "Rellena las credenciales de IMAP y SMTP de arriba, define la dirección de remitente y añade tu propia dirección a «Remitentes permitidos».",
+          "step4": "Haz clic en «Probar conexión»: comprueba el inicio de sesión IMAP, la carpeta del buzón y el inicio de sesión SMTP.",
+          "step5": "Marca «Consentimiento otorgado» y activa el canal; las respuestas automáticas llegarán a los remitentes que superen las comprobaciones DKIM/SPF.",
+          "docsLabel": "Abrir la documentación de Vibe-Trading"
+        },
+        "websocket": {
+          "title": "Guía de configuración de WebSocket",
+          "intro": "El canal WebSocket ejecuta su propio servidor local al que los clientes se conectan por una URL WebSocket, así que no necesita una URL de callback pública.",
+          "step1": "Elige una dirección de escucha: mantén 127.0.0.1 para uso solo local, o define 0.0.0.0 / :: para exponer el servidor; un host comodín exige un token o un secreto de emisión.",
+          "step2": "Define un token estático, o una ruta de emisión con su secreto Bearer para que los clientes pidan tokens de corta vida.",
+          "step3": "Conecta los clientes con ws://host:port/path?client_id=...&token=...",
+          "step4": "Guardar con el canal en marcha cambia el servidor en caliente: los clientes conectados (incluido este chat de la interfaz web) se desconectan un momento y vuelven a conectarse.",
+          "step5": "Haz clic en «Probar conexión»: valida localmente el certificado y la clave SSL y la disponibilidad de la dirección.",
+          "docsLabel": "Abrir la documentación de Vibe-Trading"
         }
       }
     },

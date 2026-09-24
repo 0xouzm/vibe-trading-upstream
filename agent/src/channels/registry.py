@@ -27,6 +27,7 @@ _INTERNAL = frozenset(
         "config_meta",
         "dingtalk_media",
         "dingtalk_probe",
+        "email_probe",
         "manager",
         "pairing",
         "qq_probe",
@@ -35,6 +36,7 @@ _INTERNAL = frozenset(
         "targets",
         "token_probe",
         "utils",
+        "websocket_probe",
     }
 )
 _LEGACY_GLOBAL_CONFIG_KEYS = frozenset(

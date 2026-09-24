@@ -32,7 +32,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from src.api import state as _state
 from src.channels import config as _channels_config
 from src.channels.bus.queue import MessageBus
-from src.channels.config_meta import SECRET_KEY_RE, channel_field_hints, split_values_secrets
+from src.channels.config_meta import (
+    channel_field_hints,
+    is_secret_key,
+    split_values_secrets,
+)
 from src.channels.registry import (
     discover_channel_names,
     inspect_channel,
@@ -40,7 +44,7 @@ from src.channels.registry import (
     load_channel_class,
 )
 from src.config import writer as _config_writer
-from src.config.paths import get_config_path
+from src.config.paths import get_config_path, get_workspace_path
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +118,7 @@ def _known_channel_names() -> set[str]:
 
 def _is_secret_key(name: str, key: str) -> bool:
     """Return whether a config key must never cross the wire in clear."""
-    if SECRET_KEY_RE.search(key):
-        return True
-    return any(hint["key"] == key and hint["secret"] for hint in channel_field_hints(name))
+    return is_secret_key(name, key)
 
 
 def _stored_section(name: str) -> dict[str, Any]:
@@ -257,6 +259,23 @@ def _reject_validation(fields: list[str]) -> HTTPException:
     )
 
 
+def _ephemeral_kwargs(name: str) -> dict[str, Any]:
+    """Return adapter-specific constructor kwargs for ephemeral instances.
+
+    Mirrors ``ChannelManager._build_channel_kwargs``: ``WebSocketChannel``
+    requires a keyword-only ``gateway``. The ephemeral instance is throwaway
+    (validation + probe only, it never serves), so a bare
+    ``build_gateway_services`` bundle — all in-memory dataclasses, no
+    filesystem or network side effects — is sufficient and
+    ``session_manager`` / ``cron_service`` may stay ``None``.
+    """
+    if name == "websocket":
+        from src.channelsui.gateway_services import build_gateway_services
+
+        return {"gateway": build_gateway_services(workspace_path=get_workspace_path())}
+    return {}
+
+
 def _build_ephemeral(name: str, section: dict[str, Any]) -> tuple[type, Any]:
     """Construct a throwaway adapter instance to validate *section*.
 
@@ -269,7 +288,7 @@ def _build_ephemeral(name: str, section: dict[str, Any]) -> tuple[type, Any]:
     except Exception as exc:  # noqa: BLE001 - an unloadable adapter cannot validate
         raise _reject_validation([type(exc).__name__]) from None
     try:
-        return cls, cls(section, MessageBus())
+        return cls, cls(section, MessageBus(), **_ephemeral_kwargs(name))
     except ValidationError as exc:
         raise _reject_validation(_validation_fields(exc)) from None
     except Exception as exc:  # noqa: BLE001 - any construction error is a config error
@@ -396,7 +415,7 @@ async def _run_test(name: str, body: dict[str, Any] | None, clears: list[str]) -
         raise _reject_validation(unknown)
 
     try:
-        instance = cls(merged, MessageBus())
+        instance = cls(merged, MessageBus(), **_ephemeral_kwargs(name))
     except ValidationError as exc:
         detail = "validation_error: " + ", ".join(_validation_fields(exc))
         return _result(False, "invalid_credentials", detail, sdk_fallback)

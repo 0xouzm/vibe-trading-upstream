@@ -319,7 +319,7 @@ if ChatOpenAI is not None:
             # shares a stable conversation identity.
             self._vibe_fallback_session_id = uuid.uuid4().hex
             self._vibe_ambient_header_names = tuple(
-                name for name in ambient_names if name not in explicit_names
+                name for name in ambient_names if name.lower() not in explicit_names_lower
             )
             self._vibe_has_explicit_authorization = (
                 "authorization" in explicit_names_lower

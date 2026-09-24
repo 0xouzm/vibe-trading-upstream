@@ -116,6 +116,13 @@ def hierarchical_risk_parity(
     """
     is_df = isinstance(cov, pd.DataFrame)
     labels = cov.columns.tolist() if is_df else None
+    if is_df:
+        # The matrix is read positionally below, so a frame whose rows are in
+        # another order than its columns is the same misalignment as a
+        # reordered corr: align it by label, reject a different label set.
+        if set(cov.index) != set(labels):
+            raise ValueError("Covariance matrix row labels must match its column labels")
+        cov = cov.loc[labels, labels]
 
     cov_mat = np.asarray(cov, dtype=float)
     if cov_mat.ndim != 2 or cov_mat.shape[0] != cov_mat.shape[1]:

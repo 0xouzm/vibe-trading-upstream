@@ -88,3 +88,29 @@ def test_hrp_rejects_correlation_with_different_labels() -> None:
     corr = pd.DataFrame(np.eye(2), index=["A", "C"], columns=["A", "C"])
     with pytest.raises(ValueError, match="labels must match"):
         hierarchical_risk_parity(cov, corr)
+
+
+def test_hrp_aligns_covariance_rows_to_its_columns() -> None:
+    """Swapping two rows of a labelled cov moved weights silently (0.0351/0.0403 → 0.0375/0.0375)."""
+    tickers = ["AAPL", "MSFT", "GOOGL", "TLT"]
+    std = np.array([0.30, 0.28, 0.32, 0.08])
+    corr = np.array(
+        [
+            [1.00, 0.70, 0.65, -0.10],
+            [0.70, 1.00, 0.60, -0.05],
+            [0.65, 0.60, 1.00, -0.08],
+            [-0.10, -0.05, -0.08, 1.00],
+        ]
+    )
+    cov = pd.DataFrame(corr * np.outer(std, std), index=tickers, columns=tickers)
+    rows_swapped = cov.loc[["MSFT", "AAPL", "GOOGL", "TLT"], tickers]
+
+    pd.testing.assert_series_equal(
+        hierarchical_risk_parity(rows_swapped), hierarchical_risk_parity(cov)
+    )
+
+
+def test_hrp_rejects_covariance_rows_labelled_differently_from_columns() -> None:
+    cov = pd.DataFrame(np.eye(2) * 0.04, index=["A", "C"], columns=["A", "B"])
+    with pytest.raises(ValueError, match="row labels must match"):
+        hierarchical_risk_parity(cov)

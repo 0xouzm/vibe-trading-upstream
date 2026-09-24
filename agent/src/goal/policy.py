@@ -6,8 +6,13 @@ import re
 
 _EXECUTION_PATTERNS = (
     re.compile(r"\b(place|submit|execute|send)\b.{0,40}\b(order|trade)\b", re.I),
+    # No bare asset noun (shares/contracts/btc/...) here: this is a research
+    # product whose whole purpose is evaluating whether to buy/sell/short a
+    # security, so "buy NVDA shares" alone in a research objective is the
+    # normal case, not an execution request. Only fire on an actual
+    # execution-imminent cue alongside the buy/sell verb.
     re.compile(
-        r"\b(buy|sell|short|long)\b.{0,40}\b(now|immediately|market order|limit order|shares?|contracts?|btc|eth|usdt)\b",
+        r"\b(buy|sell|short|long)\b.{0,40}\b(now|immediately|right away|market order|limit order)\b",
         re.I,
     ),
     re.compile(r"(下单|市价单|限价单|马上买|立即买|现在买|马上卖|立即卖|现在卖)"),

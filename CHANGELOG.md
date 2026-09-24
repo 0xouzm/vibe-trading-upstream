@@ -217,19 +217,26 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- **A dollar-quoted BYMA or TSX line no longer enters a peso or Canadian-dollar
-  backtest** (#1576, after #1543). Both venues list USD lines beside their
-  home-currency ones. On 2026-09-24 Yahoo declared USD for GGALD.BA (4.20),
-  SPYD.BA and AAPLD.BA, and for DLR-U.TO and XUS-U.TO. `ar_equity` and
-  `ca_equity` are each one static-currency pool, so such a line was priced as
-  pesos or Canadian dollars. As on the LSE, the loaders now read the declared
-  currency. They admit a `.BA` line only in ARS and a `.TO` / `.V` line only
-  in CAD. A trailing `D` does not decide it: YPFD.BA is a peso line. Every
-  other declared quote currency is recorded in market-data provenance, and the
-  grounding gate asks an answer to name that currency rather than the one the
-  suffix implies. Hong Kong RMB counters are unchanged (80700.HK is declared
-  CNY), because the Hong Kong chain starts with sources that declare no
-  currency.
+- **A dollar-quoted BYMA or TSX line, or a Hong Kong RMB or USD counter, no
+  longer enters a single-currency backtest** (#1576, after #1543). Both venues
+  list USD lines beside their home-currency ones. On 2026-09-24 Yahoo declared
+  USD for GGALD.BA (4.20), SPYD.BA and AAPLD.BA, and for DLR-U.TO and
+  XUS-U.TO. `ar_equity` and `ca_equity` are each one static-currency pool, so
+  such a line was priced as pesos or Canadian dollars. As on the LSE, the
+  loaders now read the declared currency. They admit a `.BA` line only in ARS
+  and a `.TO` / `.V` line only in CAD. A trailing `D` does not decide it:
+  YPFD.BA is a peso line. Every other declared quote currency is recorded in
+  market-data provenance, and the grounding gate asks an answer to name that
+  currency rather than the one the suffix implies. Hong Kong is decided by the
+  code, because the Hong Kong chain starts with sources that declare no
+  currency: HKEX's Stock Code Allocation Plan assigns 80000-89999 to products
+  traded in renminbi and several 09xxx ranges (plus 10900-10999 and
+  41500-41599) to products traded in USD. So an RMB counter (80700.HK, 375.40
+  CNY on 2026-09-24) or a USD ETF (9834.HK) is refused in a Hong Kong or
+  cross-market backtest, is counted in its own currency by the mixed-currency
+  guard, and is quoted in that currency by the grounding gate, whichever
+  source served it. The table matched the currency Yahoo declared for all 24
+  codes probed across the ranges.
 - **Grounding identity and symbol search know every market the data layer
   routes** (#1565, #1575). `.BA`, `.L` and `.VN` symbols had no
   canonical-symbol scan, venue or currency in grounding. Symbol search

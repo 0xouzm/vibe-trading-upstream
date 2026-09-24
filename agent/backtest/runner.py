@@ -48,6 +48,7 @@ from backtest.engines._market_hooks import (  # noqa: F401  (re-exported)
     _detect_market,
     _detect_submarket,
     _is_china_futures,
+    hk_counter_currency,
     strip_local_prefix,
 )
 from backtest.rebalance_mask import RebalanceMask, validate_rebalance_mask
@@ -1493,6 +1494,21 @@ def _create_market_engine(source: str, config: dict, codes: List[str]):
     """
     # Detect dominant market type from codes
     markets = {_detect_market(c) for c in codes} if codes else set()
+
+    # The Hong Kong pool books in HKD. HKEX numbers its RMB and USD counters
+    # in their own code ranges, and no source in the hk_equity chain but Yahoo
+    # declares a currency, so the code decides before any engine prices them.
+    foreign_counters = sorted(
+        f"{c} ({hk_counter_currency(c)})"
+        for c in codes
+        if _detect_market(c) == "hk_equity" and hk_counter_currency(c) not in (None, "HKD")
+    )
+    if foreign_counters:
+        raise ValueError(
+            "Hong Kong backtests book in HKD, but these codes are HKEX counters traded "
+            f"in another currency: {', '.join(foreign_counters)}. Use the HKD-traded "
+            "counter of the same security instead."
+        )
 
     # Cross-market -> CompositeEngine
     if len(markets) > 1:

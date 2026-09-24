@@ -185,6 +185,47 @@ _MARKET_CURRENCY = {
 _FUTURES_EXCHANGE_CURRENCY = {"EUREX": "EUR"}
 
 
+# HKEX's Stock Code Allocation Plan (updated 2026-03-12) assigns a trading
+# currency by code range: 80000-89999 are "Products traded in Renminbi" (the
+# RMB counters, 80700.HK beside 00700.HK), and these sub-ranges trade in USD.
+# Every other .HK code trades in HKD. The venue publishes the rule, so the
+# currency is known whichever source served the bars -- unlike BYMA's dollar
+# lines, where a trailing D is only a habit. Checked against the currency Yahoo
+# declares for 24 codes across the ranges on 2026-09-24 (6 CNY, 10 USD, 8 HKD).
+_HK_COUNTER_CURRENCY_RANGES: tuple[tuple[int, int, str], ...] = (
+    (80000, 89999, "CNY"),
+    (9000, 9199, "USD"),  # ETFs
+    (9200, 9399, "USD"),  # leveraged and inverse products
+    (9400, 9499, "USD"),  # ETFs
+    (9500, 9599, "USD"),  # leveraged and inverse products
+    (9700, 9799, "USD"),  # leveraged and inverse products
+    (9800, 9849, "USD"),  # ETFs
+    (10900, 10999, "USD"),  # derivative warrants
+    (41500, 41599, "USD"),  # ETFs
+)
+_HK_CODE = re.compile(r"^(\d{3,5})\.HK$", re.I)
+
+
+def hk_counter_currency(code: str) -> str | None:
+    """Return the currency HKEX's code allocation assigns to a ``.HK`` code.
+
+    Args:
+        code: Ticker / symbol string, optionally ``local:``-prefixed.
+
+    Returns:
+        ``"CNY"``, ``"USD"`` or ``"HKD"`` for a Hong Kong code, ``None`` for
+        anything else.
+    """
+    match = _HK_CODE.match(strip_local_prefix(code).strip())
+    if match is None:
+        return None
+    number = int(match.group(1))
+    return next(
+        (cur for low, high, cur in _HK_COUNTER_CURRENCY_RANGES if low <= number <= high),
+        "HKD",
+    )
+
+
 def code_currency(code: str) -> str:
     """Return the supported settlement-currency contract for a symbol.
 
@@ -200,6 +241,8 @@ def code_currency(code: str) -> str:
     """
     code = strip_local_prefix(code)
     market = _detect_market(code)
+    if market == "hk_equity":
+        return hk_counter_currency(code) or _MARKET_CURRENCY[market]
     if market in _MARKET_CURRENCY:
         return _MARKET_CURRENCY[market]
     if market == "forex":

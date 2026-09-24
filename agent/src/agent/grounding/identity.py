@@ -301,6 +301,14 @@ def _infer_venue(symbol: str) -> str | None:
 def _infer_currency(symbol: str) -> str | None:
     """Infer quote currency without performing an implicit conversion."""
     upper = _normalize_symbol(symbol)
+    # HKEX assigns the currency by code range (RMB counters 80000-89999, a few
+    # USD ranges), so 80700.HK is a CNY line beside 00700.HK in HKD. One table,
+    # shared with the backtest's currency guard.
+    from backtest.engines._market_hooks import hk_counter_currency
+
+    hk_currency = hk_counter_currency(upper)
+    if hk_currency is not None:
+        return hk_currency
     suffixes = {
         ".US": "USD",
         ".SH": "CNY",

@@ -700,7 +700,13 @@ class SessionService:
 
     @staticmethod
     def _load_metrics(run_dir: Path) -> Optional[Dict[str, Any]]:
-        """Load metrics.csv from a run directory."""
+        """Load metrics.csv from a run directory.
+
+        A run's metrics row can carry a non-numeric column (e.g.
+        ``benchmark_ticker``) alongside the numeric metrics, so each field is
+        converted independently: one unconvertible field is skipped rather
+        than discarding every metric in the row.
+        """
         import csv
         metrics_path = run_dir / "artifacts" / "metrics.csv"
         if not metrics_path.exists():
@@ -708,11 +714,19 @@ class SessionService:
         try:
             with open(metrics_path, "r", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
-                if rows:
-                    return {k: float(v) for k, v in rows[0].items() if v}
         except Exception:
-            pass
-        return None
+            return None
+        if not rows:
+            return None
+        metrics: Dict[str, Any] = {}
+        for key, value in rows[0].items():
+            if not value:
+                continue
+            try:
+                metrics[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return metrics or None
 
     @staticmethod
     def _format_result_message(attempt: Attempt) -> str:

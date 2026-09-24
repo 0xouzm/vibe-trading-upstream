@@ -706,6 +706,15 @@ class _EvidenceMixin:
                 and symbol_provenance.get("currency_conversion")
                 else None
             )
+            # The currency the source declared for this line wins over the
+            # one its suffix implies: a venue can list lines in more than one
+            # (#1566), and the answer is required to name this one.
+            quote_currency = (
+                str(symbol_provenance.get("quote_currency"))
+                if isinstance(symbol_provenance, dict)
+                and symbol_provenance.get("quote_currency")
+                else _infer_currency(symbol)
+            )
             for row in rows:
                 if not isinstance(row, dict):
                     continue
@@ -727,7 +736,7 @@ class _EvidenceMixin:
                             field=normalized_field,
                             value=value,
                             status="observed",
-                            currency=_infer_currency(symbol),
+                            currency=quote_currency,
                             venue=_infer_venue(symbol),
                             currency_conversion=currency_conversion,
                         )

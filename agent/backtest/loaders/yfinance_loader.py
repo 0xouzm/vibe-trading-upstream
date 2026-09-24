@@ -10,10 +10,10 @@ import pandas as pd
 import yfinance as yf
 
 from backtest.loaders.base import (
-    is_lse_symbol,
+    declared_currency_required,
     loader_cache_get,
     loader_cache_put,
-    normalize_lse_quote_currency,
+    normalize_declared_quote_currency,
     validate_date_range,
     validate_ohlc,
 )
@@ -350,13 +350,16 @@ class DataLoader:
                     logger.warning("yfinance returned no usable data for %s", symbol)
                     continue
 
-                # The engine currently has one static GBP pool for uk_equity.
-                # Normalize declared GBp/p to GBP, pass declared GBP unchanged,
-                # and reject USD/other/unknown .L lines before they can enter
-                # that pool. The suffix identifies LSE, never the currency.
-                if is_lse_symbol(symbol):
+                # uk_equity is one static GBP pool and ar_equity one ARS pool,
+                # while LSE and BYMA each list lines in other currencies. The
+                # suffix identifies the venue, never the currency, so read the
+                # declared one (a metadata request, made only for these venues)
+                # and reject a line outside the pool's unit.
+                if declared_currency_required(symbol):
                     declared = _declared_currency(symbol)
-                    normalized = normalize_lse_quote_currency(normalized, declared)
+                    normalized = normalize_declared_quote_currency(
+                        normalized, symbol, declared
+                    )
 
                 loader_cache_put(
                     source=self.name,

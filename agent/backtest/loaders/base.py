@@ -32,6 +32,12 @@ logger = logging.getLogger(__name__)
 _GBP_PENCE_CURRENCY = "GBp"
 _PRICE_COLUMNS = ("open", "high", "low", "close")
 _UK_EQUITY_PATTERN = re.compile(r"^[A-Z0-9&.\-]+\.L$", re.I)
+# BYMA lists one issuer in pesos and again in dollars (GGAL.BA in ARS,
+# GGALD.BA in USD -- Yahoo declares each; the trailing D is not a rule, since
+# YPFD.BA is a peso line). The ar_equity pool is ARS, so the same contract as
+# LSE applies: read the declared currency, admit only ARS.
+_AR_EQUITY_PATTERN = re.compile(r"^[A-Z0-9&.\-]+\.BA$", re.I)
+_AR_EQUITY_CURRENCY = "ARS"
 
 
 def is_lse_symbol(code: str) -> bool:
@@ -65,6 +71,48 @@ def scale_pence_to_currency(
     for column in _PRICE_COLUMNS:
         scaled[column] = scaled[column] / 100.0
     return scaled, "GBp→GBP (÷100)"
+
+
+def declared_currency_required(code: str) -> bool:
+    """Return whether ``code``'s suffix names a venue that quotes in several currencies.
+
+    A loader must read the source's declared currency for such a symbol and
+    pass it to :func:`normalize_declared_quote_currency` before emitting bars.
+    """
+    code = str(code).strip()
+    return bool(_UK_EQUITY_PATTERN.match(code) or _AR_EQUITY_PATTERN.match(code))
+
+
+def normalize_declared_quote_currency(
+    frame: pd.DataFrame, code: str, currency: str | None
+) -> pd.DataFrame:
+    """Hold a frame to its market's currency contract and record the declared quote.
+
+    Args:
+        frame: Normalized OHLCV frame.
+        code: The project symbol the frame belongs to.
+        currency: Quote currency declared by the source, if any.
+
+    Returns:
+        The frame with ``attrs["quote_currency"]`` set whenever a currency was
+        declared (GBP for an LSE line after pence scaling).
+
+    Raises:
+        ValueError: If an LSE line is not declared GBP/GBp, or a BYMA line is
+            not declared ARS -- either would enter a single-currency pool in
+            the wrong unit.
+    """
+    if is_lse_symbol(code):
+        return normalize_lse_quote_currency(frame, currency)
+    declared = currency.strip() if isinstance(currency, str) else ""
+    if _AR_EQUITY_PATTERN.match(str(code).strip()) and declared != _AR_EQUITY_CURRENCY:
+        raise ValueError(
+            f"BYMA quote currency must be declared as {_AR_EQUITY_CURRENCY}; "
+            f"got {declared or 'missing'!r}"
+        )
+    if declared:
+        frame.attrs["quote_currency"] = declared
+    return frame
 
 
 def normalize_lse_quote_currency(

@@ -26,8 +26,7 @@ import pandas as pd
 from backtest.loaders import yahoo_client
 from backtest.loaders.base import (
     cached_loader_fetch,
-    is_lse_symbol,
-    normalize_lse_quote_currency,
+    normalize_declared_quote_currency,
     validate_date_range,
 )
 from backtest.loaders.registry import register
@@ -287,8 +286,5 @@ class DataLoader:
             period2=period2,
         )
         frame = _rows_to_frame(rows, start_date, end_date, interval)
-        if is_lse_symbol(code):
-            frame = normalize_lse_quote_currency(frame, currency)
-        elif currency:
-            frame.attrs["quote_currency"] = currency
+        frame = normalize_declared_quote_currency(frame, code, currency)
         return frame if not frame.empty else None

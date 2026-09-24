@@ -76,6 +76,9 @@ _CURRENCY_ALIASES = {
     "KRW": ("krw", "韩元", "韩圜"),
     "INR": ("inr", "印度卢比", "卢比"),
     "CAD": ("cad", "c$", "加元", "加拿大元"),
+    "GBP": ("gbp", "£", "英镑"),
+    "VND": ("vnd", "₫", "越南盾"),
+    "ARS": ("ars", "ar$", "阿根廷比索"),
 }
 
 # "元" counts as CNY only when no other currency's character precedes it

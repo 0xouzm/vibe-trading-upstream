@@ -9,6 +9,7 @@ import datetime as dt
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 from backtest.loaders.yahoo_loader import (
     DataLoader,
@@ -412,3 +413,15 @@ class TestLoaderMetadata:
         }
         assert loader.requires_auth is False
         assert loader.is_available() is True
+
+
+@pytest.mark.parametrize("declared", ["USD", ""])
+def test_fetch_rejects_a_byma_line_not_declared_in_pesos(declared: str) -> None:
+    """GGALD.BA is BYMA's dollar line for Galicia; the ar_equity pool is ARS."""
+    rows = [_row("2024-01-02", 4.1, 4.3, 4.0, 4.2, 1000)]
+    with patch(
+        "backtest.loaders.yahoo_loader.yahoo_client.get_chart",
+        return_value=(rows, declared),
+    ):
+        out = DataLoader().fetch(["GGALD.BA"], "2024-01-01", "2024-01-31")
+    assert "GGALD.BA" not in out

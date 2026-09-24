@@ -613,12 +613,19 @@ def _context_collapse(messages: list) -> None:
 def _msg_estimate_chars(msg: dict) -> int:
     """Rough character size of a message for token budgeting.
 
-    Sizes ``content`` plus every tool-call ``arguments`` payload. Assistant
-    tool-call messages carry their payload in ``tool_calls[].function.
-    arguments`` with empty ``content``; sizing them by content alone made the
-    layer-3 tail budget count a 100 KB arguments blob as ~10 tokens.
+    Sizes ``content`` plus ``reasoning_content`` plus every tool-call
+    ``arguments`` payload. Assistant tool-call messages carry their payload in
+    ``tool_calls[].function.arguments`` with empty ``content``; sizing them by
+    content alone made the layer-3 tail budget count a 100 KB arguments blob
+    as ~10 tokens. A thinking-model turn's ``reasoning_content`` (Kimi K2.5,
+    DeepSeek reasoner, Qwen thinking) is the same failure mode: ``estimate_tokens``
+    counts it via full JSON serialization, so leaving it out here undercounts
+    the tail relative to the trigger that decided compaction was needed.
     """
     size = len(str(msg.get("content", "")))
+    reasoning_content = msg.get("reasoning_content")
+    if reasoning_content is not None:
+        size += len(str(reasoning_content))
     for tc in msg.get("tool_calls") or []:
         fn = tc.get("function")
         if isinstance(fn, dict) and fn.get("arguments") is not None:

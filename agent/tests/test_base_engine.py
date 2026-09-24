@@ -985,3 +985,30 @@ def test_rebalance_with_negative_cash_still_executes_its_reductions():
 
     assert _sizes(engine.bar_positions[1]) == {"A": 9.0}
     assert ("B", "insufficient_capital") in engine.rejected
+
+
+@pytest.mark.parametrize("units", [("us", "us"), ("ns", "us"), ("s", "ms")])
+def test_align_is_the_same_at_any_index_resolution(units: tuple[str, str]) -> None:
+    """_align works on int64 epochs; a duckdb local source arrives as datetime64[us].
+
+    Read as nanoseconds, a microsecond index put the whole run in 1970, and beside
+    a nanosecond source it matched none of that symbol's bars (an all-NaN column).
+    """
+    days = pd.bdate_range("2026-01-02", periods=5)
+    closes = np.array([10.0, 11.0, 12.0, 13.0, 14.0])
+
+    def run(unit_a: str, unit_b: str):
+        idx_a, idx_b = days.as_unit(unit_a), days.as_unit(unit_b)
+        data_map = {
+            "A": pd.DataFrame({"open": closes, "high": closes, "low": closes, "close": closes}, index=idx_a),
+            "B": pd.DataFrame({"open": closes, "high": closes, "low": closes, "close": closes * 2}, index=idx_b),
+        }
+        signal_map = {"A": pd.Series([1.0, 0, 1, 0, 1], index=idx_a), "B": pd.Series(0.5, index=idx_b)}
+        return _align(data_map, signal_map, ["A", "B"])
+
+    expected_dates, expected_close, _, expected_pos, _ = run("ns", "ns")
+    dates, close_df, _, pos_df, _ = run(*units)
+
+    assert list(dates) == list(expected_dates)
+    np.testing.assert_array_equal(close_df.to_numpy(), expected_close.to_numpy())
+    np.testing.assert_array_equal(pos_df.to_numpy(), expected_pos.to_numpy())

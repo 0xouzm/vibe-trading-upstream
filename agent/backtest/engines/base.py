@@ -257,8 +257,12 @@ def _align(
         is the bounded-ffill trading view; ``close_val_df`` carries the last
         traded close through halts of any length and is only for valuation.
     """
-    # Build unified sorted date index from all symbols' trading calendars
-    indexes = [data_map[c].index for c in codes]
+    # Build unified sorted date index from all symbols' trading calendars.
+    # Everything below works on int64 epochs, and ``asi8`` / ``view("i8")``
+    # count in the index's own unit: a duckdb-backed local source arrives as
+    # datetime64[us], which read as nanoseconds put the run in 1970 and, beside
+    # a nanosecond source, matched none of its bars. One unit for all of them.
+    indexes = [data_map[c].index.as_unit("ns") for c in codes]
     merged = np.unique(np.concatenate([index.asi8 for index in indexes]))
     common_tz = indexes[0].tz
     if all(index.tz == common_tz for index in indexes) and common_tz is not None:
@@ -280,7 +284,7 @@ def _align(
     close_arr = np.full((n_dates, n_codes), np.nan)
     for j, c in enumerate(codes):
         series = data_map[c]["close"]
-        row_idx = np.searchsorted(dates_i8, series.index.values.view("i8"))
+        row_idx = np.searchsorted(dates_i8, indexes[j].asi8)
         close_arr[row_idx, j] = series.values
 
     # Vectorized ffill with limit using pandas (C-optimized internals)
@@ -320,7 +324,7 @@ def _align(
         shifted_vals[0] = 0.0
         shifted_vals[1:] = sig_vals[:-1]
         # Place into unified grid via searchsorted
-        row_idx = np.searchsorted(dates_i8, own_idx.values.view("i8"))
+        row_idx = np.searchsorted(dates_i8, own_idx.as_unit("ns").asi8)
         pos_arr[row_idx, j] = shifted_vals
 
     # Vectorized ffill with limit using pandas (C-optimized)

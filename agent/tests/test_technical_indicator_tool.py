@@ -12,6 +12,7 @@ from src.tools.technical_indicator_tool import (
     _compute_macd,
     _compute_rsi,
     _compute_sma,
+    _compute_volume_stats,
 )
 
 
@@ -150,6 +151,22 @@ class TestRSI:
         assert rsi == pytest.approx(18.8237, abs=0.01)
 
 
+class TestVolume:
+    def test_volume_stats_normal(self):
+        volume = pd.Series([float(1000 + i) for i in range(20)])
+        result = _compute_volume_stats(volume)
+        assert result["latest"] == 1019.0
+        assert result["sma_20"] == pytest.approx(1009.5)
+        assert result["ratio_20"] == pytest.approx(1019.0 / 1009.5)
+
+    def test_volume_stats_require_complete_window(self):
+        volume = pd.Series([float(1000 + i) for i in range(19)] + [float("nan")])
+        result = _compute_volume_stats(volume)
+        assert result["latest"] is None
+        assert result["sma_20"] is None
+        assert result["ratio_20"] is None
+
+
 class TestMACD:
     def test_macd_normal(self):
         close = pd.Series(range(1, 101), dtype=float)
@@ -221,8 +238,10 @@ class TestTechnicalIndicatorToolIntegration:
 
     def test_execute_success(self, monkeypatch, sample_df):
         """Full pipeline: fetch → compute → JSON output."""
+
         def _mock_fetch(**kwargs):
             return {"AAPL": sample_df}
+
         monkeypatch.setattr(
             "src.tools.technical_indicator_tool.fetch_market_data",
             _mock_fetch,
@@ -240,6 +259,11 @@ class TestTechnicalIndicatorToolIntegration:
         assert result["indicators"]["ema_20"] is not None
         assert result["latest_close"] == 349.0
         assert result["latest_date"] == str(sample_df.index[-1].date())
+        assert result["indicators"]["volume"] == {
+            "latest": None,
+            "sma_20": None,
+            "ratio_20": None,
+        }
 
     def test_execute_dataframe_with_adj_close(self, monkeypatch, sample_close):
         """Loader returns 'adj_close' instead of 'close'."""
@@ -288,8 +312,10 @@ class TestTechnicalIndicatorToolIntegration:
 
     def test_execute_short_data_returns_nulls(self, monkeypatch):
         """Too few bars → indicators return null, but not error."""
-        short_close = pd.Series([float(100 + i) for i in range(10)],
-                                index=pd.date_range("2026-06-01", periods=10, freq="B"))
+        short_close = pd.Series(
+            [float(100 + i) for i in range(10)],
+            index=pd.date_range("2026-06-01", periods=10, freq="B"),
+        )
         monkeypatch.setattr(
             "src.tools.technical_indicator_tool.fetch_market_data",
             lambda **kw: {"AAPL": pd.DataFrame({"close": short_close})},
@@ -335,6 +361,11 @@ class TestLoaderPayloadShapes:
         assert result["indicators"]["rsi_14"] is not None
         assert result["latest_close"] == 129.0
         assert result["latest_date"] == "2026-01-30"
+        assert result["indicators"]["volume"]["latest"] == 1_000_029.0
+        assert result["indicators"]["volume"]["sma_20"] == pytest.approx(1_000_019.5)
+        assert result["indicators"]["volume"]["ratio_20"] == pytest.approx(
+            1_000_029.0 / 1_000_019.5
+        )
 
     def test_wrapped_capped_payload_is_rejected(self, monkeypatch):
         """A discontinuous capped payload must never produce indicators."""

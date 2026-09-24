@@ -122,7 +122,7 @@ _CANONICAL_SYMBOL_RE = re.compile(
     # match turns any "…/us.reuters/…" host inside a source URL into the
     # symbol REUTERS.US and fails the answer for an unsourced figure.
     r"(?-i:US\.[A-Z][A-Z0-9&-]{0,19})|"
-    r"[A-Z][A-Z0-9&.-]{0,19}\.(?:US|NS|BO|FX|TO|V)|"
+    r"[A-Z][A-Z0-9&.-]{0,19}\.(?:US|NS|BO|FX|TO|V|BA)|"
     r"[A-Z0-9]{2,15}(?:-|/)(?:USDT|USDC|USD|BTC|ETH)|"
     r"[A-Z]{2,15}(?:" + "|".join(_JOINED_CRYPTO_QUOTE_SUFFIXES) + r")|"
     r"\^[A-Z0-9&.\-]{1,20}|"
@@ -251,6 +251,7 @@ def _infer_venue(symbol: str) -> str | None:
         ".FX": "forex",
         ".TO": "toronto",
         ".V": "tsx_venture",
+        ".BA": "buenos_aires",
     }
     for suffix, venue in suffixes.items():
         if upper.endswith(suffix):
@@ -307,6 +308,7 @@ def _infer_currency(symbol: str) -> str | None:
         ".BO": "INR",
         ".TO": "CAD",
         ".V": "CAD",
+        ".BA": "ARS",
     }
     for suffix, currency in suffixes.items():
         if upper.endswith(suffix):

@@ -790,6 +790,8 @@ def _from_yahoo_symbol(raw_symbol: str, quote: Dict[str, Any]) -> tuple[str, str
         return f"{base.zfill(5)}.HK", "hk"
     if upper.endswith((".TO", ".V")):
         return upper, "ca"
+    if upper.endswith(".BA"):
+        return upper, "ar"
     # Yahoo quotes Shanghai as ``.SS`` where this project (and Eastmoney) use
     # ``.SH``. Emitting both spellings published one listing as two rival
     # candidates, which the identity gate could not choose between, so every

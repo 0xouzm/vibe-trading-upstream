@@ -134,6 +134,25 @@ def test_monthly_alias_executes_first_trading_bar_of_each_month() -> None:
     assert engine.bar_sizes == pytest.approx([2.0, 8.0, 8.0])
 
 
+@pytest.mark.parametrize("unit", ["s", "ms", "us"])
+def test_explicit_date_list_matches_at_any_index_resolution(unit: str) -> None:
+    # bisect_left compares asi8 bounds against Timestamp.value (always
+    # nanoseconds); a non-ns index's asi8 is in its own storage unit, which
+    # silently mismatched every explicit rebalance date without raising.
+    dates = pd.DatetimeIndex(
+        [
+            pd.Timestamp("2026-01-02"),
+            pd.Timestamp("2026-01-05"),
+            pd.Timestamp("2026-01-06"),
+        ]
+    ).as_unit(unit)
+    engine = _MaskEngine(rebalance_mask=["2026-01-05"])
+
+    _run_masked(engine, [0.2, 0.8, 0.2], dates=dates)
+
+    assert engine.bar_sizes == pytest.approx([None, 8.0, 8.0])
+
+
 def test_mask_without_trading_date_intersection_is_rejected() -> None:
     engine = _MaskEngine(rebalance_mask=["2030-01-01"])
 
@@ -150,6 +169,22 @@ def test_invalid_mask_alias_is_rejected() -> None:
 def test_alias_finer_than_aligned_bar_spacing_is_rejected(alias: str) -> None:
     dates = pd.bdate_range("2026-01-02", periods=3)
     engine = _MaskEngine(rebalance_mask=alias)
+
+    with pytest.raises(ValueError, match="rebalance_mask.*finer"):
+        _run_masked(engine, [0.2, 0.8, 0.2], dates=dates)
+
+
+@pytest.mark.parametrize("unit", ["s", "ms", "us"])
+def test_alias_finer_than_aligned_bar_spacing_is_rejected_at_any_index_resolution(
+    unit: str,
+) -> None:
+    # asi8 is in the index's own storage unit since pandas 2.0, not always
+    # nanoseconds, while the offset/Timestamp comparisons it feeds are. A
+    # non-ns index -- e.g. one that round-tripped through the loader's
+    # duckdb/parquet cache, which can rewrite datetime resolution -- must
+    # still be rejected exactly like the default ns-resolution index.
+    dates = pd.bdate_range("2026-01-02", periods=3).as_unit(unit)
+    engine = _MaskEngine(rebalance_mask="h")
 
     with pytest.raises(ValueError, match="rebalance_mask.*finer"):
         _run_masked(engine, [0.2, 0.8, 0.2], dates=dates)

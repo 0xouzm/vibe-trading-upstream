@@ -289,4 +289,6 @@ class DataLoader:
         frame = _rows_to_frame(rows, start_date, end_date, interval)
         if is_lse_symbol(code):
             frame = normalize_lse_quote_currency(frame, currency)
+        elif currency:
+            frame.attrs["quote_currency"] = currency
         return frame if not frame.empty else None

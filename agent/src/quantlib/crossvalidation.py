@@ -132,6 +132,10 @@ def _as_label_spans(
         if label_end_times.empty:
             raise ValueError("label_end_times is empty")
         starts = label_end_times.index
+        if not starts.is_monotonic_increasing or not starts.is_unique:
+            raise ValueError(
+                "label_end_times index must be unique and monotonically increasing"
+            )
         ends = label_end_times.to_numpy()
         # searchsorted on the start index converts label end *times* into label
         # end *positions*; the right insertion point minus one keeps a label

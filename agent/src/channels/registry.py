@@ -261,9 +261,9 @@ def discover_plugins(
         try:
             cls = ep.load()
             plugins[ep.name] = cls
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "Failed to load channel plugin '%s': %s", ep.name, exc_info=True
+                "Failed to load channel plugin '%s': %s", ep.name, exc, exc_info=True
             )
     return plugins
 
@@ -287,8 +287,10 @@ def discover_enabled(
             continue
         try:
             result[modname] = load_channel_class(modname)
-        except ImportError:
-            logger.debug("Skipping built-in channel '%s': %s", modname, exc_info=True)
+        except ImportError as exc:
+            logger.debug(
+                "Skipping built-in channel '%s': %s", modname, exc, exc_info=True
+            )
 
     external = discover_plugins(None if _include_all_external else enabled_names)
     shadowed = set(external) & set(result)

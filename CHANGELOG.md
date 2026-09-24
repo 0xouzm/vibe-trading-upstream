@@ -7,6 +7,21 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Stock profiles carry the listing's own identity** (#1577). `get_stock_profile`
+  returns a `listing` block beside the issuer's fundamentals: Yahoo's symbol,
+  exchange, quote type and quote currency, plus the financial currency and
+  underlying symbol when Yahoo declares them. A secondary listing no longer
+  reads as the primary one. `GOOGL.BA` is an ARS line in Buenos Aires carrying
+  Alphabet's USD financials, and `GGALD.BA` is a USD line whose issuer reports
+  in ARS. Nothing is inferred from the ticker.
+
+- **Volume statistics in `technical_indicators`** (#1571). The tool returns the
+  latest volume, its 20-bar mean and their ratio, computed from the bars it
+  already fetched. The mean needs a complete 20-bar window. `volume.unit` is
+  the unit the serving source declares (board lots on the A-share sources,
+  shares on the Yahoo family, `null` when undeclared), because the two are
+  100x apart and nothing in the numbers tells them apart.
+
 - **Argentina (BYMA) market data** (#1543). A `.BA` symbol — a BYMA listing or a
   locally traded CEDEAR — is its own market `ar_equity`, quoted in ARS, served
   by `yahoo` → `yfinance` → `local`, and reported as market `ar` by
@@ -44,8 +59,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   `~/.vibe-trading/agent.json` atomically at mode 0600; a YAML config is shown
   read-only. Reloads of one channel are serialized in `ChannelManager`, and
   `stop_all` cancels a reload's start that is still connecting.
-- **Email and WebSocket join the guided Web UI channel setup** (a follow-up
-  to #1519). Both channels get hand-written field metadata — localized
+- **Email and WebSocket join the guided Web UI channel setup** (#1544, after
+  #1519). Both channels get hand-written field metadata — localized
   labels, masked secrets — plus connection tests and per-channel hot apply.
   Email's test probes the real IMAP login, mailbox select and SMTP login
   without ever sending a message; WebSocket is a server channel with no
@@ -202,6 +217,63 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A dollar-quoted BYMA or TSX line no longer enters a peso or Canadian-dollar
+  backtest** (#1576, after #1543). Both venues list USD lines beside their
+  home-currency ones. On 2026-09-24 Yahoo declared USD for GGALD.BA (4.20),
+  SPYD.BA and AAPLD.BA, and for DLR-U.TO and XUS-U.TO. `ar_equity` and
+  `ca_equity` are each one static-currency pool, so such a line was priced as
+  pesos or Canadian dollars. As on the LSE, the loaders now read the declared
+  currency. They admit a `.BA` line only in ARS and a `.TO` / `.V` line only
+  in CAD. A trailing `D` does not decide it: YPFD.BA is a peso line. Every
+  other declared quote currency is recorded in market-data provenance, and the
+  grounding gate asks an answer to name that currency rather than the one the
+  suffix implies. Hong Kong RMB counters are unchanged (80700.HK is declared
+  CNY), because the Hong Kong chain starts with sources that declare no
+  currency.
+- **Grounding identity and symbol search know every market the data layer
+  routes** (#1565, #1575). `.BA`, `.L` and `.VN` symbols had no
+  canonical-symbol scan, venue or currency in grounding. Symbol search
+  labelled Indian, Korean, British, Vietnamese and Argentine results `global`.
+  A parity test now takes the market list from the backtest's own currency
+  table. An answer may write £, ₫ or AR$ for the currency it has to name.
+- **An explicit provider header survives an ambient twin** (#1573, #1568).
+  When `OPENAI_CUSTOM_HEADERS` names a header the provider also sets (a
+  `user-agent` beside the Kimi / NVIDIA / OpenCode `User-Agent`), openai 3.x's
+  case-insensitive merge dropped the provider's value. That turned CI red for
+  every PR on 2026-09-24. The first fix proposed would have sent both headers
+  under openai 2.53, the version the lock file and the Docker image install.
+  Every ambient spelling is now omitted and the explicit value re-set after
+  the omits, which holds under both.
+- **Backtests align calendars at any timestamp resolution** (#1560). The engine
+  merged symbol calendars and placed prices through raw nanosecond integers,
+  but a local duckdb source serves microseconds. Such a run was dated
+  1970-01-21, and beside a nanosecond source one symbol's closes came back
+  empty. The rebalance mask had the same unit mismatch.
+- **A research goal that is an order is still refused** (#1562). The execution
+  filter no longer rejects research that mentions shares or coins ("should the
+  fund sell its GOOGL shares"). It refuses an objective that opens with buy or
+  sell, puts a quantity right after the verb, or writes 买入 / 卖出 with a
+  quantity and a unit. The first version of the change had made "Buy 100
+  shares of NVDA" an accepted goal.
+- **A strict-bench OOS split needs two IC observations on each side** (#1559).
+  A split outside the loaded prices is refused. An alpha whose IC series
+  leaves fewer than two observations on either side is skipped, with the
+  counts in the reason. The IC series ends one forward-return horizon before
+  the prices, so a split one bar from the end used to publish verdicts
+  measured on nothing.
+- **Quant inputs are checked before they are used** (#1555-#1558). HRP aligns a
+  supplied correlation matrix, and the covariance's own rows, to the
+  covariance's column labels; swapping two rows used to move the weights with
+  no error. Purged cross-validation refuses an unordered or duplicated
+  timestamp index, and a label that ends before it starts. Impact models and
+  every fixed-income entry point refuse NaN and infinities instead of
+  returning NaN prices, durations and curves.
+- **Shadow-account overtrading uses the whole trading window** (#1563). A long
+  hold that closed before later short trades no longer shrinks the span.
+- **Asset growth is year over year on the daily panel** (#1564). Derived
+  fundamentals run on a panel densified to the price calendar, where a one-row
+  lag compared yesterday with today: 0% on ordinary days and a one-day spike
+  at each filing. The lag is now 365 days, as-of.
 - **A tail-risk figure names its own field once a session holds more than one**
   (#1425, after #1444). A call- or tool-scoped ref (`ref x1`) pooled every
   tail-risk field that call returned, and an undeclared tail-risk percent pooled

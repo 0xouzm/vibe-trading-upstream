@@ -134,7 +134,13 @@ def hierarchical_risk_parity(
         std = np.sqrt(diag)
         corr_mat = cov_mat / np.outer(std, std)
     else:
+        if is_df and isinstance(corr, pd.DataFrame):
+            if set(corr.index) != set(labels) or set(corr.columns) != set(labels):
+                raise ValueError("Correlation matrix labels must match covariance labels")
+            corr = corr.loc[labels, labels]
         corr_mat = np.asarray(corr, dtype=float)
+        if corr_mat.shape != cov_mat.shape:
+            raise ValueError("Correlation matrix dimensions must match covariance matrix")
 
     dist = correlation_distance(corr_mat)
     # Scipy linkage expects condensed distance or observation matrix

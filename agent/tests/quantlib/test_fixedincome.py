@@ -546,3 +546,18 @@ def test_key_rate_duration_input_validation():
         key_rate_duration(100.0, 0.05, 0.05, 10, key_rates=[])
     with pytest.raises(ValueError, match="strictly increasing"):
         key_rate_duration(100.0, 0.05, 0.05, 10, key_rates=[5.0, 2.0, 10.0])
+
+
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_fit_yield_curve_rejects_nonfinite_observations(bad):
+    maturities = TENORS.copy()
+    yields = nelson_siegel(TENORS, 0.04, -0.01, 0.01, 2.0)
+    maturities[3] = bad
+    with pytest.raises(ValueError, match="finite"):
+        fit_yield_curve(maturities, yields, model="nelson_siegel")
+
+    maturities = TENORS.copy()
+    yields = yields.copy()
+    yields[3] = bad
+    with pytest.raises(ValueError, match="finite"):
+        fit_yield_curve(maturities, yields, model="nelson_siegel")

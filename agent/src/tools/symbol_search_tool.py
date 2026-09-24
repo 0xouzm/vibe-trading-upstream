@@ -142,13 +142,24 @@ _EASTMONEY_SUFFIX_BY_MARKET: Dict[str, str] = {
     "107": "US",  # AMEX
 }
 
-# Coarse market label for the candidate row, keyed by symbol suffix.
+# Coarse market label for the candidate row, keyed by symbol suffix. Every
+# market the data layer routes has a row, so none is labelled "global";
+# test_market_identity_parity derives that list from the backtest's table.
 _MARKET_BY_SUFFIX: Dict[str, str] = {
     "SH": "cn",
     "SZ": "cn",
     "BJ": "cn",
     "HK": "hk",
     "US": "us",
+    "NS": "in",
+    "BO": "in",
+    "KS": "kr",
+    "KQ": "kr",
+    "TO": "ca",
+    "V": "ca",
+    "BA": "ar",
+    "L": "uk",
+    "VN": "vn",
 }
 
 # Hard caps so a broad query cannot bloat the envelope.
@@ -788,10 +799,6 @@ def _from_yahoo_symbol(raw_symbol: str, quote: Dict[str, Any]) -> tuple[str, str
     if upper.endswith(".HK"):
         base = raw_symbol[: -len(".HK")].lstrip("0") or "0"
         return f"{base.zfill(5)}.HK", "hk"
-    if upper.endswith((".TO", ".V")):
-        return upper, "ca"
-    if upper.endswith(".BA"):
-        return upper, "ar"
     # Yahoo quotes Shanghai as ``.SS`` where this project (and Eastmoney) use
     # ``.SH``. Emitting both spellings published one listing as two rival
     # candidates, which the identity gate could not choose between, so every
@@ -799,8 +806,9 @@ def _from_yahoo_symbol(raw_symbol: str, quote: Dict[str, Any]) -> tuple[str, str
     # sources merge and corroborate each other via ``also_from``.
     if upper.endswith(".SS"):
         return f"{upper[: -len('.SS')]}.SH", "cn"
-    if upper.endswith((".SH", ".SZ", ".BJ")):
-        return upper, "cn"
+    suffix = upper.rsplit(".", 1)[-1] if "." in upper else ""
+    if suffix in _MARKET_BY_SUFFIX:
+        return upper, _MARKET_BY_SUFFIX[suffix]
     quote_type = str(quote.get("quoteType") or "").strip().upper()
     if quote_type == "CURRENCY":
         # FX pairs canonicalize to the ``XXXYYY=X`` form the fetch layer

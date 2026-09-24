@@ -619,3 +619,15 @@ def test_run_bench_strict_catches_planted_reversed_signal(
         f"inverted momentum should be reversed_strict, got result={result}"
     )
     assert result["reversed"] == 1  # legacy alias
+
+
+def test_run_bench_strict_rejects_oos_split_outside_loaded_sample(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_panel(monkeypatch, n_rows=80)
+    reg = _StubRegistry(panel={})
+    for split in ("2023-12-31", "2025-01-01"):
+        result = run_bench_strict(
+            zoo="alpha101", universe="csi300", period="2024-2024",
+            random_control=True, oos_split=split, registry=reg,
+        )
+        assert result["status"] == "error"
+        assert "must fall within the loaded sample" in result["error"]

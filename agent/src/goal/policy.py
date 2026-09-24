@@ -16,6 +16,16 @@ _EXECUTION_PATTERNS = (
         re.I,
     ),
     re.compile(r"(下单|市价单|限价单|马上买|立即买|现在买|马上卖|立即卖|现在卖)"),
+    # What the asset-noun list above used to catch, without its false
+    # positives: an objective that IS an order -- it opens with the verb
+    # ("Buy NVDA", "Please sell my TSLA") or names a quantity right after it
+    # ("then buy 100 shares", "short 2 ES", "买入100股"). A research goal
+    # frames the verb ("whether to buy", "should sell", "a short thesis").
+    # A leading "short" is left out: "Short interest ...", "Short-term ..."
+    # open research goals, so a bare "Short TSLA" passes.
+    re.compile(r"^\s*(?:please\s+)?(?:buy|sell)\b", re.I),
+    re.compile(r"\b(?:buy|sell|short)\s+\d", re.I),
+    re.compile(r"(?:买入|卖出|做空|买|卖)\s*\d+(?:\.\d+)?\s*(?:股|手|张|份|个)"),
 )
 
 

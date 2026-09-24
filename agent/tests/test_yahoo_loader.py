@@ -249,6 +249,24 @@ class TestFetch:
         assert kwargs["period2"] == _epoch("2024-01-31") + 86400
         assert kwargs["interval"] == "1d"
 
+    def test_fetch_preserves_provider_quote_currency(self):
+        rows = [_row("2024-01-02", 10, 11, 9, 10.5, 1000)]
+        with patch(
+            "backtest.loaders.yahoo_loader.yahoo_client.get_chart",
+            return_value=(rows, "ARS"),
+        ):
+            out = DataLoader().fetch(["GGAL.BA"], "2024-01-01", "2024-01-31")
+        assert out["GGAL.BA"].attrs["quote_currency"] == "ARS"
+
+    def test_fetch_leaves_missing_quote_currency_absent(self):
+        rows = [_row("2024-01-02", 10, 11, 9, 10.5, 1000)]
+        with patch(
+            "backtest.loaders.yahoo_loader.yahoo_client.get_chart",
+            return_value=(rows, ""),
+        ):
+            out = DataLoader().fetch(["AAPL.US"], "2024-01-01", "2024-01-31")
+        assert "quote_currency" not in out["AAPL.US"].attrs
+
     def test_fetch_india_symbol(self):
         rows = [
             _row("2024-01-02", 10, 11, 9, 10.5, 1000),

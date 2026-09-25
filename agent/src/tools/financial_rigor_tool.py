@@ -299,9 +299,13 @@ def benford_check(values: list[Any]) -> dict[str, Any]:
         v = abs(float(raw))
         if v > 0 and math.isfinite(v):
             sig = 10 ** (math.log10(v) - math.floor(math.log10(v)))
-            d = int(sig)
-            if 1 <= d <= 9:
-                digits.append(d)
+            # sig is mathematically in [1, 10), but float round-trip through
+            # log10/pow can land a hair under an integer boundary (e.g. sig
+            # == 4.999999999999999 for v == 5000), so a bare int() truncates
+            # to the digit below. Round first, then clamp the 10 -> 9 edge.
+            d = int(round(sig, 9))
+            d = min(9, max(1, d))
+            digits.append(d)
     n = len(digits)
     if n < 50:
         return {

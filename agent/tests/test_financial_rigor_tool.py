@@ -156,6 +156,17 @@ def test_benford_all_same_leading_digit_fails() -> None:
     assert out["is_conforming"] is False
 
 
+def test_benford_exact_round_values_keep_their_true_leading_digit() -> None:
+    # 5000, 50000, ... all start with 5. A log10/floor round-trip can drift a
+    # hair under the integer boundary (5.0 -> 4.999999999999999), which used
+    # to truncate these into digit 4 instead of 5.
+    values = [5 * 10**n for n in range(3, 63)]
+    out = benford_check(values)
+    counts = {row["digit"]: row["observed"] for row in out["distribution"]}
+    assert counts[5] == pytest.approx(1.0)
+    assert counts.get(4, 0.0) == pytest.approx(0.0)
+
+
 # ── exact_calc ────────────────────────────────────────────────────────────
 
 

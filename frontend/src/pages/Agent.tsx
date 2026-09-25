@@ -246,6 +246,7 @@ export function Agent() {
   const replayCheckTimerRef = useRef(0);
   const smoothScrollingRef = useRef(false);
   const smoothScrollTimerRef = useRef(0);
+  const historyScrollTimerRef = useRef(0);
   const titleBeforeCompletionRef = useRef<string | null>(null);
   const completedAttemptIdsRef = useRef<Set<string>>(new Set());
 
@@ -319,6 +320,14 @@ export function Agent() {
       }
     });
   }, [isNearBottom]);
+
+  const scheduleHistoryScroll = useCallback(() => {
+    window.clearTimeout(historyScrollTimerRef.current);
+    historyScrollTimerRef.current = window.setTimeout(() => {
+      historyScrollTimerRef.current = 0;
+      forceScrollToBottom();
+    }, 50);
+  }, [forceScrollToBottom]);
 
   const flushPendingStreamUpdate = useCallback(() => {
     window.clearTimeout(streamFlushTimerRef.current);
@@ -487,6 +496,7 @@ export function Agent() {
   const doDisconnect = useCallback(() => {
     cancelPendingStreamFlush();
     window.clearTimeout(replayCheckTimerRef.current);
+    window.clearTimeout(historyScrollTimerRef.current);
     disconnect();
     sseSessionRef.current = null;
   }, [cancelPendingStreamFlush, disconnect]);
@@ -656,13 +666,13 @@ export function Agent() {
       act().setSessionLoading(false);
       act().cacheSession(sid, agentMsgs);
       setRuntimeIdentity(latestRuntimeIdentity ?? {});
-      setTimeout(() => forceScrollToBottom(), 50);
+      scheduleHistoryScroll();
     } catch {
       if (genRef.current !== gen) return;
       setRuntimeIdentity({});
       act().setSessionLoading(false);
     }
-  }, [forceScrollToBottom]);
+  }, [scheduleHistoryScroll]);
 
   const refreshSessionMessages = useCallback(async (sid: string) => {
     const gen = genRef.current + 1;
@@ -1292,7 +1302,7 @@ export function Agent() {
       const cached = getCachedSession(urlSessionId);
       switchSession(urlSessionId, cached);
       if (cached) {
-        setTimeout(() => forceScrollToBottom(), 50);
+        scheduleHistoryScroll();
       }
       // Cached rows provide an instant shell; REST remains authoritative for a
       // turn that completed while this session was off-screen.
@@ -1336,7 +1346,7 @@ export function Agent() {
       if (curSid && curMsgs.length > 0) cacheSession(curSid, curMsgs);
       reset();
     }
-  }, [urlSessionId, doDisconnect, loadSessionMessages, setupSSE, forceScrollToBottom]);
+  }, [urlSessionId, doDisconnect, loadSessionMessages, setupSSE, scheduleHistoryScroll]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -1351,6 +1361,8 @@ export function Agent() {
   }, [sessionId, loadGoalSnapshot]);
 
   useEffect(() => () => {
+    // Invalidate pending history loads before they can schedule another scroll.
+    genRef.current += 1;
     doDisconnect();
     cancelAnimationFrame(progressRafRef.current);
     pendingProgressRef.current.clear();

@@ -482,8 +482,13 @@ def place_order(
     if type_token not in ("MARKET", "LIMIT"):
         return {"status": "error", "error": "order_type must be 'market' or 'limit'"}
 
-    if quantity is None or float(quantity) <= 0:
-        return {"status": "error", "error": "quantity must be positive"}
+    if quantity is None or float(quantity) < 1:
+        return {
+            "status": "error",
+            "error": "quantity must be a positive whole number of shares",
+        }
+    if float(quantity) != int(float(quantity)):
+        return {"status": "error", "error": "quantity must be a whole number of shares"}
 
     qty = int(float(quantity))
     sec_id = str(security_id or symbol).strip()

@@ -129,7 +129,7 @@ def test_generic_snapshot_inherits_latest_date(tmp_path: Path) -> None:
 
 
 def test_generic_latest_date_beats_as_of_but_local_date_wins(tmp_path: Path) -> None:
-    ledger = _ledger(
+    _ledger(
         tmp_path,
         {
             "source": "external",
@@ -155,4 +155,3 @@ def test_generic_latest_date_beats_as_of_but_local_date_wins(tmp_path: Path) -> 
     assert timestamp_by_field["snapshot.close"] == "2026-08-04"
     assert timestamp_by_field["rows[0].close"] == "2026-08-03"
     assert timestamp_by_field["rows[1].close"] == "2026-08-04"
-

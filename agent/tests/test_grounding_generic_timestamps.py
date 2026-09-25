@@ -74,6 +74,7 @@ def test_generic_quote_without_timestamp_stays_undated(tmp_path: Path) -> None:
     assert result.valid is False
     assert [issue["code"] for issue in result.issues] == ["numeric_claim_unavailable"]
 
+
 def test_generic_snapshot_inherits_latest_date(tmp_path: Path) -> None:
     ledger = GroundingLedger(
         run_dir=tmp_path,

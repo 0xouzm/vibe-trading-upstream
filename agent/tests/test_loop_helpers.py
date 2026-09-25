@@ -20,7 +20,6 @@ from src.agent.loop import (
     _archive_backtest_result,
     _llm_timeout_seconds,
     _stall_timeout_seconds,
-    _verification_ledger,
     _cleared_text,
 )
 

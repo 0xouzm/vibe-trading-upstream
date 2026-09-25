@@ -180,8 +180,9 @@ def portfolio_summary(envelope: Any) -> dict[str, Any]:
         reply omitted it. Values stay decimal strings.
 
     Raises:
-        RobinhoodShapeError: If ``total_value`` or ``currency`` is missing, or a
-            value that is present is not a finite number.
+        RobinhoodShapeError: If ``total_value`` or ``currency`` is missing,
+            non-null ``buying_power`` is not an object, or a value that is
+            present is not a finite number.
     """
     tool = "get_portfolio"
     data = broker_data(envelope, tool)
@@ -189,13 +190,17 @@ def portfolio_summary(envelope: Any) -> dict[str, Any]:
     if not isinstance(currency, str) or not currency.strip():
         raise RobinhoodShapeError(f"{tool} currency is missing")
     buying_power = data.get("buying_power")
-    if not isinstance(buying_power, dict):
+    if buying_power is not None and not isinstance(buying_power, dict):
         raise RobinhoodShapeError(f"{tool} buying_power is not an object")
-    raw_buying_power = buying_power.get("buying_power")
+    raw_buying_power = buying_power.get("buying_power") if isinstance(buying_power, dict) else None
     return {
         "portfolio_value": _decimal_text(data.get("total_value"), "total_value", tool),
         "cash": _decimal_text(data["cash"], "cash", tool) if data.get("cash") is not None else None,
-        "buying_power": _decimal_text(raw_buying_power, "buying_power.buying_power", tool),
+        "buying_power": (
+            _decimal_text(raw_buying_power, "buying_power.buying_power", tool)
+            if raw_buying_power is not None
+            else None
+        ),
         "currency": currency.strip().upper(),
         "non_equity_values": {
             field: _decimal_text(data[field], field, tool) if data.get(field) is not None else None

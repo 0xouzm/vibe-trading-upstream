@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from src.session.service import SessionService
 
 
@@ -52,3 +54,18 @@ def test_empty_field_values_are_skipped(tmp_path: Path) -> None:
     metrics = SessionService._load_metrics(tmp_path)
 
     assert metrics == {"total_return": 0.15}
+
+
+@pytest.mark.parametrize("contents", [b"", b"total_return,sharpe\n", b"total_return\n\xff\n"])
+def test_empty_or_unreadable_csv_returns_none(tmp_path: Path, contents: bytes) -> None:
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "metrics.csv").write_bytes(contents)
+
+    assert SessionService._load_metrics(tmp_path) is None
+
+
+def test_extra_csv_cells_do_not_discard_named_numeric_metrics(tmp_path: Path) -> None:
+    _write_metrics_csv(tmp_path, "total_return,benchmark_ticker", "0,SPY,extra")
+
+    assert SessionService._load_metrics(tmp_path) == {"total_return": 0.0}

@@ -222,6 +222,17 @@ class TestEnvConfigTypeCoercion:
         c = EnvConfig()
         assert c.agent_tuning.token_threshold == 40000
 
+    def test_invalid_optional_int_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_MAX_TOKENS", "not_a_number")
+        c = EnvConfig()
+        assert c.llm.anthropic_max_tokens is None
+
+    def test_valid_optional_int_is_coerced(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_MAX_TOKENS", "4096")
+        c = EnvConfig()
+        assert c.llm.anthropic_max_tokens == 4096
+        assert isinstance(c.llm.anthropic_max_tokens, int)
+
     def test_bool_coercion_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("VIBE_TRADING_DATA_CACHE", "true")
         c = EnvConfig()

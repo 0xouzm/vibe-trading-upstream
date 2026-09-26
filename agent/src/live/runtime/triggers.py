@@ -222,7 +222,16 @@ class Trigger:
 # already recorded the field, keeps both halves of the contract: the field
 # defaults to ``None`` and ``Trigger.market(...)`` still builds a MARKET
 # trigger.
+#
+# No in-body spelling works, so this placement is load-bearing, not stylistic:
+# reordering the two names only moves the damage (the field default becomes the
+# method, or the factory becomes ``None``), and an explicit
+# ``field(default=None)`` is overwritten the same way.
 Trigger.market = Trigger._market  # type: ignore[assignment]
+del Trigger._market
+# Docs and ``help()`` read the function's own qualname, which would otherwise
+# still say ``Trigger._market``.
+Trigger.market.__func__.__qualname__ = "Trigger.market"
 
 
 # --------------------------------------------------------------------------- #

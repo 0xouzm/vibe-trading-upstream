@@ -156,6 +156,27 @@ def test_interval_trigger_serialises_to_json() -> None:
     assert restored["market"] is None
 
 
+def test_market_field_default_and_factory_are_both_intact() -> None:
+    """Pin the mechanism, not just the observable effect.
+
+    The recorded field default is what ``@dataclass`` wrote into ``__init__``;
+    asserting on it catches a regression at the source instead of one instance
+    later. The factory is pinned by name and by introspection so the MARKET
+    constructor cannot quietly disappear or start reporting a private name.
+    """
+    import inspect
+
+    assert Trigger.__dataclass_fields__["market"].default is None
+    assert inspect.signature(Trigger).parameters["market"].default is None
+
+    assert Trigger.market("us_equity").market == "us_equity"
+    assert callable(Trigger.market)
+    assert Trigger.market.__qualname__ == "Trigger.market"
+    # The factory is bound after the class body; the private placeholder must
+    # not survive as a second public way to build a MARKET trigger.
+    assert not hasattr(Trigger, "_market")
+
+
 # --------------------------------------------------------------------------- #
 # due_now — INTERVAL                                                           #
 # --------------------------------------------------------------------------- #

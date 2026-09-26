@@ -113,3 +113,31 @@ def test_commit_mandate_rejects_proposal_id_traversal_to_external_json(live_runt
 
     mandate_path = broker_dir("robinhood") / "mandate.json"
     assert not mandate_path.exists()
+
+
+def test_commit_mandate_persists_an_explicit_zero_exposure_narrowing(live_runtime: Path) -> None:
+    """A legal narrowing to zero exposure must not be widened back on persist.
+
+    _resolve_profile allows an adjustment to narrow max_total_exposure_usd down
+    to 0 (any value <= the rendered limit is a legal narrowing). Before the
+    fix, _profile_to_hard_caps used the ``x or default`` idiom, which treated
+    that explicit 0 the same as "field missing" and silently substituted the
+    rendered max_order_usd instead, so the persisted mandate authorized more
+    exposure than the user consented to.
+    """
+    proposal_id = "mp_" + "c" * 32
+    save_proposal(_proposal(proposal_id))
+
+    result = commit_mandate(
+        proposal_id=proposal_id,
+        ordinal=1,
+        adjustments={"max_total_exposure_usd": 0.0},
+        consent_ack=True,
+        broker="robinhood",
+        account_ref="acct-zero",
+    )
+
+    assert result["resolved_profile"]["max_total_exposure_usd"] == 0.0
+    mandate_path = live_runtime / "live" / "robinhood" / "mandate.json"
+    mandate = json.loads(mandate_path.read_text(encoding="utf-8"))
+    assert mandate["hard_caps"]["max_total_exposure_usd"] == 0.0

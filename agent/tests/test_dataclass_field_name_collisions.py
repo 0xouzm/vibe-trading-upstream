@@ -1,5 +1,5 @@
-"""Repo-wide gate: a dataclass field must not share its name with a class-body
-binding that follows it.
+"""Repo-wide gate: a dataclass or ``NamedTuple`` field must not share its name
+with a class-body binding that follows it.
 
 ``dataclasses._process_class`` resolves each field's default with
 ``default = getattr(cls, name, MISSING)`` *after* the class body has run. A
@@ -35,6 +35,15 @@ listed *before* the field and quietly replaced by the field's default (the
 member stops being callable). That one is loud at the call site rather than
 silent in the constructor, and flagging it would mean failing on ordinary
 ``ClassVar``-free dataclasses, so it stays a review item.
+
+``typing.NamedTuple`` fails the same way: its metaclass reads
+``_field_defaults`` from the finished class body, so both shapes apply there
+too (it simply has no ``field(default_factory=...)`` spelling). The gate
+therefore covers both class kinds.
+
+Remediation note: the worked example binds the factory after the class body.
+For a ``slots=True`` dataclass that rebinding is blocked by ``__slots__`` on
+Python <= 3.13, so rename the member instead.
 """
 
 from __future__ import annotations
@@ -56,6 +65,15 @@ def _is_dataclass(node: ast.ClassDef) -> bool:
         if text == "dataclass" or text.startswith("dataclass("):
             return True
         if text.endswith(".dataclass") or ".dataclass(" in text:
+            return True
+    return False
+
+
+def _is_namedtuple(node: ast.ClassDef) -> bool:
+    """True for ``class X(NamedTuple)`` under its usual import spellings."""
+    for base in node.bases:
+        name = ast.unparse(base).split("[", 1)[0]
+        if name in {"NamedTuple", "typing.NamedTuple", "typing_extensions.NamedTuple"}:
             return True
     return False
 
@@ -87,10 +105,10 @@ def _is_classvar(annotation: ast.expr) -> bool:
 
 
 def _collisions(tree: ast.Module) -> list[str]:
-    """Describe every dataclass field shadowed by a class-body binding."""
+    """Describe every dataclass/NamedTuple field shadowed by a class-body binding."""
     found: list[str] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.ClassDef) or not _is_dataclass(node):
+        if not isinstance(node, ast.ClassDef) or not (_is_dataclass(node) or _is_namedtuple(node)):
             continue
 
         annotated: dict[str, int] = {}
@@ -125,8 +143,8 @@ def _collisions(tree: ast.Module) -> list[str]:
     return found
 
 
-def test_no_dataclass_field_is_shadowed_by_a_class_body_binding() -> None:
-    """No dataclass in the tree may lose a field default to a same-named member."""
+def test_no_field_is_shadowed_by_a_class_body_binding() -> None:
+    """No dataclass/NamedTuple in the tree may lose a field default to a same-named member."""
     failures: list[str] = []
     for path in sorted(SCAN_ROOT.rglob("*.py")):
         if any(path.is_relative_to(excluded) for excluded in EXCLUDED_DIRS):
@@ -140,7 +158,7 @@ def test_no_dataclass_field_is_shadowed_by_a_class_body_binding() -> None:
             failures.append(f"{path.relative_to(REPO_ROOT)}: {detail}")
 
     assert not failures, (
-        "A dataclass field shares its name with a class-body binding, so the "
+        "A dataclass/NamedTuple field shares its name with a class-body binding, so the "
         "constructor default is that object instead of the declared one. Move the "
         "factory/attribute off the class body and bind it after the class "
         "definition (see src/live/runtime/triggers.py for the worked example):\n  "
@@ -185,6 +203,58 @@ class Broken:
 
     @classmethod
     def kind(cls):
+        return "factory"
+"""
+    )
+    assert len(failures) == 1
+    assert "Broken.kind" in failures[0]
+    assert "required field silently becomes optional" in failures[0]
+
+
+def test_default_factory_field_shadowed_is_flagged() -> None:
+    """A same-named binding also silently drops a declared ``default_factory``."""
+    failures = _collisions_in(
+        """
+from dataclasses import dataclass, field
+
+@dataclass
+class Broken:
+    xs: list = field(default_factory=list)
+
+    def xs(self):
+        return "method"
+"""
+    )
+    assert len(failures) == 1
+    assert "Broken.xs" in failures[0]
+    assert "field default silently replaced" in failures[0]
+
+
+def test_namedtuple_field_shadowed_by_method_is_flagged() -> None:
+    failures = _collisions_in(
+        """
+from typing import NamedTuple
+
+class Broken(NamedTuple):
+    market: str | None = None
+
+    def market(self, market: str):
+        return market
+"""
+    )
+    assert len(failures) == 1
+    assert "Broken.market" in failures[0]
+
+
+def test_namedtuple_required_field_shadowed_is_flagged() -> None:
+    failures = _collisions_in(
+        """
+import typing
+
+class Broken(typing.NamedTuple):
+    kind: str
+
+    def kind(self):
         return "factory"
 """
     )

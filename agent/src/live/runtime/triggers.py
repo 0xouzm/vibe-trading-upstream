@@ -216,7 +216,9 @@ class Trigger:
 # INTERVAL/EVENT trigger carried the bound method in ``market``. That is
 # invisible to :func:`due_now`, which reads ``market`` only for MARKET
 # triggers, but it is wrong in ``repr`` and fatal to ``dataclasses.asdict`` and
-# JSON — the shape run cards and live audit artifacts serialise.
+# JSON. No production path serialises a ``Trigger`` today — jobs persist a
+# plain kind string, not the descriptor — so this is a latent footgun rather
+# than an active break.
 #
 # Binding the factory under its public name here, once the decorator has
 # already recorded the field, keeps both halves of the contract: the field
@@ -229,9 +231,10 @@ class Trigger:
 # ``field(default=None)`` is overwritten the same way.
 Trigger.market = Trigger._market  # type: ignore[assignment]
 del Trigger._market
-# Docs and ``help()`` read the function's own qualname, which would otherwise
-# still say ``Trigger._market``.
+# Introspection must not leak the private placeholder: ``help()`` and ``repr``
+# read ``__qualname__``, while ``str()`` and logging read ``__name__``.
 Trigger.market.__func__.__qualname__ = "Trigger.market"
+Trigger.market.__func__.__name__ = "market"
 
 
 # --------------------------------------------------------------------------- #

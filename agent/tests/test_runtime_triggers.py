@@ -145,9 +145,11 @@ def test_non_market_triggers_leave_market_unset() -> None:
 def test_interval_trigger_serialises_to_json() -> None:
     """An INTERVAL trigger must survive ``dataclasses.asdict`` + ``json.dumps``.
 
-    Run cards and live audit artifacts serialise the descriptors they carry.
-    ``market`` held a bound method before the field default was restored, which
-    made that raise ``TypeError``.
+    No production path serialises a ``Trigger`` today — jobs persist a plain
+    kind string, not the descriptor — but the first caller that does must not
+    trip over a bound method in ``market``. Before the field default was
+    restored, this raised ``TypeError``. Pinning the contract makes that latent
+    hazard explicit.
 
     EVENT triggers are deliberately out of scope: their ``predicate`` is a
     callable by design, so they are not a serialisable shape in the first place.
@@ -172,6 +174,7 @@ def test_market_field_default_and_factory_are_both_intact() -> None:
     assert Trigger.market("us_equity").market == "us_equity"
     assert callable(Trigger.market)
     assert Trigger.market.__qualname__ == "Trigger.market"
+    assert Trigger.market.__name__ == "market"
     # The factory is bound after the class body; the private placeholder must
     # not survive as a second public way to build a MARKET trigger.
     assert not hasattr(Trigger, "_market")

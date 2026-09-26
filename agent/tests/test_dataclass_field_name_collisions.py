@@ -26,6 +26,10 @@ surface into a unit test. ``src/live/runtime/triggers.py`` is the one place in
 the tree that used to trip this, which is exactly why it is pinned here rather
 than left to review.
 
+``ClassVar`` names are exempt: ``@dataclass`` ignores them entirely, so a
+same-named binding cannot corrupt a field that never exists, and flagging the
+pattern would be a false positive.
+
 Deliberately out of scope: the mirror-image shape where a class-body member is
 listed *before* the field and quietly replaced by the field's default (the
 member stops being callable). That one is loud at the call site rather than
@@ -39,7 +43,10 @@ import ast
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCAN_ROOTS = ("agent/src", "agent/backtest", "agent/cli")
+SCAN_ROOT = REPO_ROOT / "agent"
+# Test fixtures and test-local dataclasses are not part of the shipped surface;
+# scanning them would also trip the gate on deliberately broken snippets.
+EXCLUDED_DIRS = (REPO_ROOT / "agent" / "tests",)
 
 
 def _is_dataclass(node: ast.ClassDef) -> bool:
@@ -69,6 +76,16 @@ def _class_body_bindings(node: ast.ClassDef) -> list[tuple[str, int, str]]:
     return bindings
 
 
+def _is_classvar(annotation: ast.expr) -> bool:
+    """True for ``ClassVar[...]`` under any of its usual spellings.
+
+    Aliased imports (``from typing import ClassVar as CV``) are not resolved;
+    the tree does not use them, and a miss there is merely a false positive.
+    """
+    base = ast.unparse(annotation).split("[", 1)[0]
+    return base in {"ClassVar", "typing.ClassVar", "typing_extensions.ClassVar"}
+
+
 def _collisions(tree: ast.Module) -> list[str]:
     """Describe every dataclass field shadowed by a class-body binding."""
     found: list[str] = []
@@ -79,6 +96,12 @@ def _collisions(tree: ast.Module) -> list[str]:
         annotated: dict[str, int] = {}
         for stmt in node.body:
             if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                if _is_classvar(stmt.annotation):
+                    # ``@dataclass`` ignores ``ClassVar`` entirely: it never
+                    # becomes a field or a constructor parameter, so a
+                    # same-named binding cannot corrupt anything. Flagging it
+                    # would be a false positive on a legitimate pattern.
+                    continue
                 annotated[stmt.target.id] = stmt.lineno
 
         bindings = _class_body_bindings(node)
@@ -105,18 +128,16 @@ def _collisions(tree: ast.Module) -> list[str]:
 def test_no_dataclass_field_is_shadowed_by_a_class_body_binding() -> None:
     """No dataclass in the tree may lose a field default to a same-named member."""
     failures: list[str] = []
-    for scan_root in SCAN_ROOTS:
-        root = REPO_ROOT / scan_root
-        if not root.is_dir():
+    for path in sorted(SCAN_ROOT.rglob("*.py")):
+        if any(path.is_relative_to(excluded) for excluded in EXCLUDED_DIRS):
             continue
-        for path in sorted(root.rglob("*.py")):
-            try:
-                tree = ast.parse(path.read_text(encoding="utf-8"))
-            except (OSError, SyntaxError) as exc:  # pragma: no cover - unreadable file
-                failures.append(f"{path.relative_to(REPO_ROOT)}: could not be parsed ({exc})")
-                continue
-            for detail in _collisions(tree):
-                failures.append(f"{path.relative_to(REPO_ROOT)}: {detail}")
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError) as exc:  # pragma: no cover - unreadable file
+            failures.append(f"{path.relative_to(REPO_ROOT)}: could not be parsed ({exc})")
+            continue
+        for detail in _collisions(tree):
+            failures.append(f"{path.relative_to(REPO_ROOT)}: {detail}")
 
     assert not failures, (
         "A dataclass field shares its name with a class-body binding, so the "
@@ -125,3 +146,103 @@ def test_no_dataclass_field_is_shadowed_by_a_class_body_binding() -> None:
         "definition (see src/live/runtime/triggers.py for the worked example):\n  "
         + "\n  ".join(failures)
     )
+
+
+def _collisions_in(source: str) -> list[str]:
+    """Run the detector over an in-memory snippet (no repository involved)."""
+    return _collisions(ast.parse(source))
+
+
+def test_default_field_shadowed_by_method_is_flagged() -> None:
+    """Shape one: the declared default silently becomes the method."""
+    failures = _collisions_in(
+        """
+from dataclasses import dataclass
+
+@dataclass
+class Broken:
+    market: str | None = None
+
+    @classmethod
+    def market(cls, market: str):
+        return market
+"""
+    )
+    assert len(failures) == 1
+    assert "Broken.market" in failures[0]
+    assert "field default silently replaced" in failures[0]
+
+
+def test_required_field_shadowed_by_method_is_flagged() -> None:
+    """Shape two: a required argument silently becomes optional."""
+    failures = _collisions_in(
+        """
+from dataclasses import dataclass
+
+@dataclass
+class Broken:
+    kind: str
+
+    @classmethod
+    def kind(cls):
+        return "factory"
+"""
+    )
+    assert len(failures) == 1
+    assert "Broken.kind" in failures[0]
+    assert "required field silently becomes optional" in failures[0]
+
+
+def test_classvar_shadowing_is_not_flagged() -> None:
+    """A ``ClassVar`` never becomes a field, so the same name is not a collision."""
+    failures = _collisions_in(
+        """
+from dataclasses import dataclass
+from typing import ClassVar
+
+@dataclass
+class Fine:
+    registry: ClassVar[dict] = {}
+
+    @classmethod
+    def registry(cls):
+        return cls
+"""
+    )
+    assert failures == []
+
+
+def test_mirror_image_shape_stays_out_of_scope() -> None:
+    """Member first, field second: the default wins and the member breaks loudly."""
+    failures = _collisions_in(
+        """
+from dataclasses import dataclass
+
+@dataclass
+class Mirror:
+    @classmethod
+    def market(cls):
+        return None
+
+    market: str | None = None
+"""
+    )
+    assert failures == []
+
+
+def test_clean_dataclass_is_not_flagged() -> None:
+    failures = _collisions_in(
+        """
+from dataclasses import dataclass
+
+@dataclass
+class Fine:
+    kind: str
+    market: str | None = None
+
+    @classmethod
+    def interval(cls, interval_ms: int):
+        return interval_ms
+"""
+    )
+    assert failures == []

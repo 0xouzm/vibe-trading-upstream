@@ -875,6 +875,20 @@ def test_in_broker_paper_place_order_simulated_locally(mod, Config) -> None:
     assert result["paper_guard"] == "simulated_locally"
 
 
+def test_dhan_place_order_rejects_fractional_quantity() -> None:
+    """A fractional quantity must not silently truncate to a zero-share fill.
+
+    Before the fix, ``int(0.5)`` truncated to 0 after the ``> 0`` check had
+    already passed, so a fractional order came back ``status: ok`` with
+    ``quantity: 0`` — a fabricated successful fill for zero shares.
+    """
+    result = dh.place_order(
+        dh.DhanConfig(profile="paper"), symbol="RELIANCE", side="buy", quantity=0.5
+    )
+    assert result["status"] == "error"
+    assert "whole number" in result["error"]
+
+
 @pytest.mark.parametrize("mod, Config", [(dh, dh.DhanConfig), (sh, sh.ShoonyaConfig)])
 def test_in_broker_paper_cancel_order_simulated(mod, Config) -> None:
     placed = mod.place_order(Config(profile="paper"), symbol="RELIANCE", side="buy", quantity=10)

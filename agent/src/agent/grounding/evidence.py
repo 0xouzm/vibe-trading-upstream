@@ -776,7 +776,7 @@ class _EvidenceMixin:
             )
         source = str(payload.get("source") or tool_name)
         remaining = _MAX_GENERIC_EVIDENCE
-        timestamp_fields = (*_TIMESTAMP_FIELDS, "as_of")
+        timestamp_fields = (*_TIMESTAMP_FIELDS, "latest_date", "as_of")
 
         def visit(value: Any, path: str, timestamp: str | None = None) -> None:
             nonlocal remaining

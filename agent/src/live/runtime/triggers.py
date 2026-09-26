@@ -175,8 +175,13 @@ class Trigger:
         return cls(kind=TriggerKind.INTERVAL, interval_ms=interval_ms, epoch_ms=epoch_ms)
 
     @classmethod
-    def market(cls, market: str) -> "Trigger":
+    def _market(cls, market: str) -> "Trigger":
         """Build a market-session trigger for a known market key.
+
+        Declared under a private name on purpose: ``market`` is a **field**, and
+        a classmethod of that name in this body would replace the field's
+        ``None`` default before ``@dataclass`` reads it. The public
+        ``Trigger.market`` is bound after the class body — see the note there.
 
         Args:
             market: A key into :data:`MARKET_SPECS` (e.g. ``"us_equity"``).
@@ -203,6 +208,21 @@ class Trigger:
             A frozen EVENT :class:`Trigger`.
         """
         return cls(kind=TriggerKind.EVENT, predicate=predicate)
+
+
+# ``market`` is both a dataclass field (default ``None``) and the MARKET
+# constructor. A classmethod of that name declared *inside* the class body
+# replaces the field's default before ``@dataclass`` reads it, so every
+# INTERVAL/EVENT trigger carried the bound method in ``market``. That is
+# invisible to :func:`due_now`, which reads ``market`` only for MARKET
+# triggers, but it is wrong in ``repr`` and fatal to ``dataclasses.asdict`` and
+# JSON — the shape run cards and live audit artifacts serialise.
+#
+# Binding the factory under its public name here, once the decorator has
+# already recorded the field, keeps both halves of the contract: the field
+# defaults to ``None`` and ``Trigger.market(...)`` still builds a MARKET
+# trigger.
+Trigger.market = Trigger._market  # type: ignore[assignment]
 
 
 # --------------------------------------------------------------------------- #

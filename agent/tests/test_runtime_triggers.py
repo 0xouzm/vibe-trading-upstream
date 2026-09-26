@@ -7,6 +7,8 @@ epoch-millisecond instant and asserted deterministically.
 
 from __future__ import annotations
 
+import dataclasses
+import json
 from datetime import datetime, timezone
 from typing import Mapping
 
@@ -121,6 +123,37 @@ def test_market_trigger_without_market_raises() -> None:
     bad = Trigger(kind=TriggerKind.MARKET, market=None)
     with pytest.raises(ValueError):
         due_now(bad, 0)
+
+
+def test_non_market_triggers_leave_market_unset() -> None:
+    """``market`` is ``None`` on INTERVAL/EVENT triggers, not the factory.
+
+    ``Trigger.market`` is both a dataclass field and the MARKET constructor.
+    Declared inside the class body the constructor replaces the field's
+    ``None`` default before ``@dataclass`` reads it, so every INTERVAL/EVENT
+    trigger carried a bound method in ``market``. That is invisible to
+    :func:`due_now` (which only inspects ``market`` for MARKET triggers) but
+    wrong wherever the field is read or serialised on its own.
+    """
+    assert Trigger.interval(60_000).market is None
+    assert Trigger.event(lambda _state: True).market is None
+
+    # The MARKET factory keeps its public name and still fills the field.
+    assert Trigger.market("us_equity").market == "us_equity"
+
+
+def test_interval_trigger_serialises_to_json() -> None:
+    """An INTERVAL trigger must survive ``dataclasses.asdict`` + ``json.dumps``.
+
+    Run cards and live audit artifacts serialise the descriptors they carry.
+    ``market`` held a bound method before the field default was restored, which
+    made that raise ``TypeError``.
+
+    EVENT triggers are deliberately out of scope: their ``predicate`` is a
+    callable by design, so they are not a serialisable shape in the first place.
+    """
+    restored = json.loads(json.dumps(dataclasses.asdict(Trigger.interval(60_000))))
+    assert restored["market"] is None
 
 
 # --------------------------------------------------------------------------- #

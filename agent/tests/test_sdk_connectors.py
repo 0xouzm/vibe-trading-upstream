@@ -32,7 +32,6 @@ from src.trading.connectors.okx.classification import OKX_TOOL_CLASS
 from src.trading.connectors.shoonya import sdk as sh
 from src.trading.connectors.shoonya.classification import SHOONYA_TOOL_CLASS
 from src.trading.connectors.etoro import client as etoro_client
-from src.trading.connectors.etoro.classification import ETORO_TOOL_CLASS
 from src.trading.connectors.tiger import sdk as tg
 from src.trading.connectors.tiger.classification import TIGER_TOOL_CLASS
 
@@ -875,7 +874,8 @@ def test_in_broker_paper_place_order_simulated_locally(mod, Config) -> None:
     assert result["paper_guard"] == "simulated_locally"
 
 
-def test_dhan_place_order_rejects_fractional_quantity() -> None:
+@pytest.mark.parametrize("quantity", [0.5, 1.5, "1.5", "1.00000000000000001"])
+def test_dhan_place_order_rejects_fractional_quantity(quantity) -> None:
     """A fractional quantity must not silently truncate to a zero-share fill.
 
     Before the fix, ``int(0.5)`` truncated to 0 after the ``> 0`` check had
@@ -883,10 +883,32 @@ def test_dhan_place_order_rejects_fractional_quantity() -> None:
     ``quantity: 0`` — a fabricated successful fill for zero shares.
     """
     result = dh.place_order(
-        dh.DhanConfig(profile="paper"), symbol="RELIANCE", side="buy", quantity=0.5
+        dh.DhanConfig(profile="paper"), symbol="RELIANCE", side="buy", quantity=quantity
     )
     assert result["status"] == "error"
     assert "whole number" in result["error"]
+
+
+@pytest.mark.parametrize("quantity", [None, 0, -1, "invalid", "", True, [], float("nan"), float("inf"), "-Infinity"])
+def test_dhan_invalid_quantity_returns_an_error(quantity) -> None:
+    result = dh.place_order(
+        dh.DhanConfig(profile="paper"), symbol="RELIANCE", side="buy", quantity=quantity,
+    )
+
+    assert result["status"] == "error"
+    assert "quantity" in result["error"]
+    assert "order_id" not in result
+
+
+@pytest.mark.parametrize("quantity,expected", [(1, 1), (2.0, 2), ("3.0", 3), ("9007199254740993", 9007199254740993)])
+def test_dhan_whole_quantity_is_preserved_in_the_paper_fill(quantity, expected) -> None:
+    result = dh.place_order(
+        dh.DhanConfig(profile="paper"), symbol="RELIANCE", side="buy", quantity=quantity,
+    )
+
+    assert result["status"] == "ok"
+    assert result["quantity"] == expected
+    assert result["paper_guard"] == "simulated_locally"
 
 
 @pytest.mark.parametrize("mod, Config", [(dh, dh.DhanConfig), (sh, sh.ShoonyaConfig)])

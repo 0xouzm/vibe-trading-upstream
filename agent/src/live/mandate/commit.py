@@ -543,7 +543,7 @@ def commit_mandate(
 
 
 def _explicit_float(profile: Mapping[str, Any], key: str) -> float | None:
-    """Return ``profile[key]`` as a float, or ``None`` if the key is absent.
+    """Return ``profile[key]`` as a float, or ``None`` if absent or null.
 
     ``_resolve_profile`` lets a commit-time adjustment narrow a numeric limit
     down to an explicit ``0`` (any value <= the rendered limit is a legal
@@ -551,6 +551,13 @@ def _explicit_float(profile: Mapping[str, Any], key: str) -> float | None:
     ``profile.get(key, default)`` with Python's ``x or default`` idiom treats
     that explicit ``0`` the same as "key missing" and silently substitutes a
     higher fallback, which is exactly the widening a commit must never do.
+
+    Args:
+        profile: Resolved proposal profile.
+        key: Numeric limit to read.
+
+    Returns:
+        The explicit numeric value, including zero, or ``None`` if unspecified.
     """
     value = profile.get(key)
     return float(value) if value is not None else None

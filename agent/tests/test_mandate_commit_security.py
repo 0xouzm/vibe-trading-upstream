@@ -9,7 +9,10 @@ from pathlib import Path
 import pytest
 
 import src.live.paths as paths
-from src.live.mandate.commit import CommitError, commit_mandate, save_proposal
+from src.live.mandate.commit import CommitError, _profile_to_hard_caps, commit_mandate, save_proposal
+from src.live.enforcement import OrderIntent, check_mandate
+from src.live.mandate.model import InstrumentType
+from src.live.mandate.store import load_mandate
 
 pytestmark = pytest.mark.unit
 
@@ -115,7 +118,8 @@ def test_commit_mandate_rejects_proposal_id_traversal_to_external_json(live_runt
     assert not mandate_path.exists()
 
 
-def test_commit_mandate_persists_an_explicit_zero_exposure_narrowing(live_runtime: Path) -> None:
+@pytest.mark.parametrize("exposure", [0.0, 50.0])
+def test_commit_mandate_persists_an_explicit_exposure_narrowing(live_runtime: Path, exposure: float) -> None:
     """A legal narrowing to zero exposure must not be widened back on persist.
 
     _resolve_profile allows an adjustment to narrow max_total_exposure_usd down
@@ -131,13 +135,47 @@ def test_commit_mandate_persists_an_explicit_zero_exposure_narrowing(live_runtim
     result = commit_mandate(
         proposal_id=proposal_id,
         ordinal=1,
-        adjustments={"max_total_exposure_usd": 0.0},
+        adjustments={"max_total_exposure_usd": exposure},
         consent_ack=True,
         broker="robinhood",
         account_ref="acct-zero",
     )
 
-    assert result["resolved_profile"]["max_total_exposure_usd"] == 0.0
+    assert result["resolved_profile"]["max_total_exposure_usd"] == exposure
     mandate_path = live_runtime / "live" / "robinhood" / "mandate.json"
     mandate = json.loads(mandate_path.read_text(encoding="utf-8"))
-    assert mandate["hard_caps"]["max_total_exposure_usd"] == 0.0
+    assert mandate["hard_caps"]["max_total_exposure_usd"] == exposure
+
+    # Read the persisted contract through the same loader the order gates use.
+    committed = load_mandate("robinhood")
+    assert committed is not None
+    breach = check_mandate(
+        committed,
+        OrderIntent("AAPL", "buy", 25.0, None, InstrumentType.EQUITY),
+        [], {"equity": 500.0},
+        broker="robinhood", remote_tool="place_equity_order", daily_count=0,
+    )
+    if exposure == 0:
+        assert breach is not None
+        assert breach.limit == "max_total_exposure_usd"
+        assert breach.limit_value == 0.0
+    else:
+        assert breach is None
+
+
+@pytest.mark.parametrize(
+    "profile,expected",
+    [
+        ({}, (0.0, 0.0, 0.0)),
+        ({"max_order_usd": 100}, (100.0, 100.0, 100.0)),
+        ({"max_order_usd": 100, "max_total_exposure_usd": 0}, (0.0, 100.0, 0.0)),
+        ({"max_order_usd": 100, "account_funding_usd": 0}, (0.0, 100.0, 0.0)),
+        ({"max_order_usd": 0, "account_funding_usd": 500}, (500.0, 0.0, 500.0)),
+        ({"max_order_usd": 100, "account_funding_usd": 500, "max_total_exposure_usd": 0}, (500.0, 100.0, 0.0)),
+        ({"max_order_usd": 100, "account_funding_usd": 0, "max_total_exposure_usd": 50}, (0.0, 100.0, 50.0)),
+        ({"max_order_usd": None, "account_funding_usd": None, "max_total_exposure_usd": None}, (0.0, 0.0, 0.0)),
+    ],
+)
+def test_cap_mapping_distinguishes_zero_from_an_unspecified_limit(profile, expected) -> None:
+    caps = _profile_to_hard_caps(profile)
+    assert (caps["account_funding_usd"], caps["max_order_notional_usd"], caps["max_total_exposure_usd"]) == expected

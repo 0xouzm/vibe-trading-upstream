@@ -80,6 +80,12 @@ def _numeric_type(annotation: Any) -> Any:
     Handles both ``typing.Optional[int]`` and the ``int | None`` spelling,
     which produce different ``get_origin`` results (``typing.Union`` vs.
     ``types.UnionType``).
+
+    Args:
+        annotation: The field annotation resolved by Pydantic.
+
+    Returns:
+        Its numeric type, or ``None`` for annotations needing normal validation.
     """
     if annotation is int or annotation is float:
         return annotation

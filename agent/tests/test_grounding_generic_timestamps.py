@@ -155,3 +155,22 @@ def test_generic_latest_date_beats_as_of_but_local_date_wins(tmp_path: Path) -> 
     assert timestamp_by_field["snapshot.close"] == "2026-08-04"
     assert timestamp_by_field["rows[0].close"] == "2026-08-03"
     assert timestamp_by_field["rows[1].close"] == "2026-08-04"
+
+
+@pytest.mark.parametrize("timestamps, expected", [
+    ({"latest_date": None, "as_of": "2026-08-05"}, "2026-08-05"),
+    ({"latest_date": "2026-08-04", "as_of": "2026-08-05"}, "2026-08-04"),
+    ({"date": "2026-08-03", "latest_date": "2026-08-04"}, "2026-08-03"),
+    ({"latest_date": None}, None),
+    ({}, None),
+])
+def test_latest_date_preserves_timestamp_priority_and_absence(tmp_path, timestamps, expected):
+    ledger = _ledger(tmp_path, {**timestamps, "snapshot": {"close": 212.5}})
+    evidence = json.loads((tmp_path / "artifacts" / "grounding_evidence.json").read_text())
+    record = next(row for row in evidence["evidence"] if row["field"] == "snapshot.close")
+    assert record["timestamp"] == expected
+    answer = f"| Date | Close |\n|---|---|\n| {expected or '2026-08-04'} | 212.5 |"
+    assert ledger.validate_final_answer(answer).valid is (expected is not None)
+    assert not ledger.validate_final_answer(
+        "| Date | Close |\n|---|---|\n| 2020-01-01 | 212.5 |"
+    ).valid

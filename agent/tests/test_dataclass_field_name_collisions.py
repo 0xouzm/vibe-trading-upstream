@@ -42,8 +42,8 @@ too (it simply has no ``field(default_factory=...)`` spelling). The gate
 therefore covers both class kinds.
 
 Remediation note: the worked example binds the factory after the class body.
-For a ``slots=True`` dataclass that rebinding is blocked by ``__slots__`` on
-Python <= 3.13, so rename the member instead.
+For a ``slots=True`` dataclass that rebinding replaces the slot descriptor and
+breaks instance assignment, so rename the member instead.
 """
 
 from __future__ import annotations
@@ -61,10 +61,10 @@ EXCLUDED_DIRS = (REPO_ROOT / "agent" / "tests",)
 def _is_dataclass(node: ast.ClassDef) -> bool:
     """True when the class carries a ``@dataclass`` decorator (any spelling)."""
     for decorator in node.decorator_list:
-        text = ast.unparse(decorator)
-        if text == "dataclass" or text.startswith("dataclass("):
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(target, ast.Name) and target.id == "dataclass":
             return True
-        if text.endswith(".dataclass") or ".dataclass(" in text:
+        if isinstance(target, ast.Attribute) and target.attr == "dataclass":
             return True
     return False
 
@@ -78,19 +78,19 @@ def _is_namedtuple(node: ast.ClassDef) -> bool:
     return False
 
 
-def _class_body_bindings(node: ast.ClassDef) -> list[tuple[str, int, str]]:
+def _class_body_bindings(node: ast.ClassDef) -> list[tuple[str, ast.stmt, str]]:
     """Every class-body statement that binds a bare name, in body order."""
-    bindings: list[tuple[str, int, str]] = []
+    bindings: list[tuple[str, ast.stmt, str]] = []
     for stmt in node.body:
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            bindings.append((stmt.name, stmt.lineno, f"def {stmt.name}"))
+            bindings.append((stmt.name, stmt, f"def {stmt.name}"))
         elif isinstance(stmt, ast.AnnAssign):
             if isinstance(stmt.target, ast.Name) and stmt.value is not None:
-                bindings.append((stmt.target.id, stmt.lineno, f"{stmt.target.id} = <value>"))
+                bindings.append((stmt.target.id, stmt, f"{stmt.target.id} = <value>"))
         elif isinstance(stmt, ast.Assign):
             for target in stmt.targets:
                 if isinstance(target, ast.Name):
-                    bindings.append((target.id, stmt.lineno, f"{target.id} = <value>"))
+                    bindings.append((target.id, stmt, f"{target.id} = <value>"))
     return bindings
 
 
@@ -100,6 +100,11 @@ def _is_classvar(annotation: ast.expr) -> bool:
     Aliased imports (``from typing import ClassVar as CV``) are not resolved;
     the tree does not use them, and a miss there is merely a false positive.
     """
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        try:
+            annotation = ast.parse(annotation.value, mode="eval").body
+        except SyntaxError:
+            return False
     base = ast.unparse(annotation).split("[", 1)[0]
     return base in {"ClassVar", "typing.ClassVar", "typing_extensions.ClassVar"}
 
@@ -111,7 +116,7 @@ def _collisions(tree: ast.Module) -> list[str]:
         if not isinstance(node, ast.ClassDef) or not (_is_dataclass(node) or _is_namedtuple(node)):
             continue
 
-        annotated: dict[str, int] = {}
+        annotated: dict[str, ast.AnnAssign] = {}
         for stmt in node.body:
             if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
                 if _is_classvar(stmt.annotation):
@@ -120,25 +125,26 @@ def _collisions(tree: ast.Module) -> list[str]:
                     # same-named binding cannot corrupt anything. Flagging it
                     # would be a false positive on a legitimate pattern.
                     continue
-                annotated[stmt.target.id] = stmt.lineno
+                annotated[stmt.target.id] = stmt
 
         bindings = _class_body_bindings(node)
-        for field_name, field_line in annotated.items():
-            same_name = [(line, text) for name, line, text in bindings if name == field_name]
+        for field_name, field_stmt in annotated.items():
+            same_name = [(stmt, text) for name, stmt, text in bindings if name == field_name]
             if not same_name:
-                continue  # the annotation's own assignment is the only binding
-            last_line, last_text = same_name[-1]
-            owns_last_binding = last_line == field_line and last_text.startswith(f"{field_name} = ")
-            if owns_last_binding:
+                continue  # the field has no default and no same-named binding
+            last_stmt, last_text = same_name[-1]
+            # Two assignments can occupy one source line; only the actual
+            # annotated statement owns the declared field default.
+            if last_stmt is field_stmt:
                 continue
             shape = (
                 "required field silently becomes optional"
-                if not any(line == field_line for line, _ in same_name)
+                if field_stmt.value is None
                 else "field default silently replaced"
             )
             found.append(
-                f"{node.name}.{field_name} (field line {field_line}) is shadowed by "
-                f"`{last_text}` on line {last_line}: {shape}"
+                f"{node.name}.{field_name} (field line {field_stmt.lineno}) is shadowed by "
+                f"`{last_text}` on line {last_stmt.lineno}: {shape}"
             )
     return found
 
@@ -282,6 +288,39 @@ class Fine:
     assert failures == []
 
 
+def test_quoted_classvar_shadowing_is_not_flagged() -> None:
+    failures = _collisions_in(
+        '''
+from dataclasses import dataclass
+from typing import ClassVar
+import typing
+
+@dataclass
+class Fine:
+    registry: "ClassVar[dict]" = {}
+    other: "typing.ClassVar[dict]" = {}
+
+    def registry(self):
+        return None
+
+    def other(self):
+        return None
+'''
+    )
+    assert failures == []
+
+
+def test_same_line_overwrite_is_flagged() -> None:
+    for declaration, shape in (
+        ("value: int = 1; value = 2", "field default silently replaced"),
+        ("value: int; value = 2", "required field silently becomes optional"),
+    ):
+        failures = _collisions_in(f"@dataclass\nclass Broken:\n    {declaration}\n")
+        assert len(failures) == 1
+        assert "Broken.value" in failures[0]
+        assert shape in failures[0]
+
+
 def test_mirror_image_shape_stays_out_of_scope() -> None:
     """Member first, field second: the default wins and the member breaks loudly."""
     failures = _collisions_in(
@@ -316,3 +355,13 @@ class Fine:
 """
     )
     assert failures == []
+
+
+def test_unrelated_decorator_argument_is_not_a_dataclass_decorator() -> None:
+    assert _collisions_in("""
+@identity(dataclasses.dataclass())
+class Ordinary:
+    field: int = 1
+    def field(self):
+        return 2
+""") == []

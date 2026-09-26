@@ -180,6 +180,26 @@ def test_market_field_default_and_factory_are_both_intact() -> None:
     assert not hasattr(Trigger, "_market")
 
 
+@pytest.mark.parametrize("decorate", [False, True])
+def test_market_factory_binds_to_subclass(decorate: bool) -> None:
+    """The deferred factory must retain normal classmethod inheritance."""
+    class DerivedTrigger(Trigger):
+        pass
+
+    if decorate:
+        DerivedTrigger = dataclasses.dataclass(frozen=True)(DerivedTrigger)
+
+    trigger = DerivedTrigger.market("crypto")
+    assert type(trigger) is DerivedTrigger
+    assert DerivedTrigger.market.__self__ is DerivedTrigger
+    assert trigger.kind is TriggerKind.MARKET
+    assert trigger.market == "crypto"
+    assert DerivedTrigger.interval(1).market is None
+    assert DerivedTrigger.event(lambda _state: True).market is None
+    assert dataclasses.replace(trigger).market == "crypto"
+    assert json.loads(json.dumps(dataclasses.asdict(trigger)))["market"] == "crypto"
+
+
 # --------------------------------------------------------------------------- #
 # due_now — INTERVAL                                                           #
 # --------------------------------------------------------------------------- #

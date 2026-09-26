@@ -229,7 +229,9 @@ class Trigger:
 # reordering the two names only moves the damage (the field default becomes the
 # method, or the factory becomes ``None``), and an explicit
 # ``field(default=None)`` is overwritten the same way.
-Trigger.market = Trigger._market  # type: ignore[assignment]
+# Keep the descriptor, not a method already bound to Trigger: subclasses must
+# receive their own ``cls`` just as they do through ``interval`` and ``event``.
+Trigger.market = classmethod(Trigger._market.__func__)  # type: ignore[assignment]
 del Trigger._market
 # Introspection must not leak the private placeholder: ``help()`` and ``repr``
 # read ``__qualname__``, while ``str()`` and logging read ``__name__``.

@@ -21,6 +21,7 @@ the per-leg vol every pricing site must agree on.
 import json
 import math
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -209,6 +210,7 @@ def run_options_backtest(
     Raises:
         SystemExit: When no data is fetched.
     """
+    trace_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     codes = config.get("codes", [])
     start_date = config.get("start_date", "")
     end_date = config.get("end_date", "")
@@ -628,6 +630,16 @@ def run_options_backtest(
         data_sources=[str(getattr(loader, "name", config.get("source", "")))],
         strategy_path=run_dir / "code" / "signal_engine.py",
         warnings=config.get("content_filter_warnings") or None,
+        tool_traces=[
+            {
+                "tool": "backtest",
+                "args": config,
+                "started_at": trace_started_at,
+                "ended_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "status": "ok",
+                "result": metrics,
+            }
+        ],
     )
 
     print(json.dumps(metrics, indent=2, allow_nan=False))

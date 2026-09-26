@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
-SCHEMA_VERSION = "0.1"
+SCHEMA_VERSION = "1.0"
 # Largest single structured metric the card will carry, counted in BYTES of the
 # JSON the card actually writes (indented, sorted, non-ASCII kept literal). The
 # card is an at-a-glance artefact read on every run, so a structured metric that
@@ -50,6 +50,7 @@ def write_run_card(
     strategy_path: Path | None = None,
     warnings: Sequence[str] | None = None,
     artifact_refs: Sequence[Mapping[str, Any]] | None = None,
+    tool_traces: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Write JSON and Markdown run cards for a backtest run.
 
@@ -63,6 +64,8 @@ def write_run_card(
         strategy_path: Optional strategy source file to hash for reproducibility.
         warnings: Optional warnings to include in the card.
         artifact_refs: Optional IRR-AGL artifact references.
+        tool_traces: Optional tool events. Arguments and results are hashed
+            before serialization.
 
     Returns:
         The run card payload written to ``run_card.json``.
@@ -93,6 +96,12 @@ def write_run_card(
     normalized_refs = _normalize_artifact_refs(artifact_refs)
     if normalized_refs:
         card["artifact_refs"] = normalized_refs
+    normalized_traces = _normalize_tool_traces(tool_traces)
+    if normalized_traces:
+        card["tool_traces"] = normalized_traces
+    citations = _metric_citations(metrics, card["artifacts"])
+    if citations:
+        card["citations"] = citations
     structured = _structured_metrics(metrics)
     if structured:
         card["structured_metrics"] = structured
@@ -270,6 +279,53 @@ def _normalize_artifact_refs(artifact_refs: Sequence[Mapping[str, Any]] | None) 
             value = dict(ref)
         refs.append(_json_safe(value))
     return refs
+
+
+def _normalize_tool_traces(tool_traces: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
+    traces = []
+    for trace in tool_traces or []:
+        args = trace["args"]
+        result = trace["result"]
+        if not isinstance(args, Mapping) or not isinstance(result, Mapping):
+            raise TypeError("tool trace args and result must be mappings")
+        traces.append(
+            {
+                "tool": str(trace["tool"]),
+                "args_hash": _tool_payload_hash(args),
+                "started_at": str(trace["started_at"]),
+                "ended_at": str(trace["ended_at"]),
+                "status": str(trace["status"]),
+                "result_hash": _tool_payload_hash(result),
+            }
+        )
+    return traces
+
+
+def _tool_payload_hash(value: Mapping[str, Any]) -> str:
+    payload = json.dumps(
+        value,
+        sort_keys=True,
+        default=str,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _metric_citations(
+    metrics: Mapping[str, Any], artifacts: Sequence[Mapping[str, Any]]
+) -> list[dict[str, str]]:
+    metrics_artifact = next(
+        (artifact for artifact in artifacts if artifact.get("path") == "artifacts/metrics.csv"),
+        None,
+    )
+    if metrics_artifact is None:
+        return []
+    return [
+        {"metric": key, "artifact_id": "artifacts/metrics.csv"}
+        for key, value in metrics.items()
+        if key != "validation" and _is_scalar(value)
+    ]
 
 
 def _render_markdown(card: Mapping[str, Any]) -> str:

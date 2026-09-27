@@ -20,9 +20,9 @@ from src.providers.capabilities import (
 
 @pytest.fixture(autouse=True)
 def _clear_token_cache():
-    caps_mod._gh_cli_token.cache_clear()
+    caps_mod._gh_cli_token_cache = None
     yield
-    caps_mod._gh_cli_token.cache_clear()
+    caps_mod._gh_cli_token_cache = None
 
 
 @pytest.fixture
@@ -104,6 +104,31 @@ def test_resolution_falls_back_to_gh_cli(no_ambient_credentials, monkeypatch) ->
 
 def test_no_credential_is_left_for_sdk_resolution(no_ambient_credentials) -> None:
     assert copilot_auth.resolve_copilot_token() == ("", "")
+
+
+def test_gh_cli_token_cache_expires_after_sixty_seconds(
+    no_ambient_credentials, monkeypatch
+) -> None:
+    now = [0.0]
+    resolutions = []
+    tokens = iter(("token-A", "token-B-rotated"))
+
+    def resolve_token():
+        resolutions.append(None)
+        return next(tokens), "gh auth token"
+
+    monkeypatch.setattr(caps_mod, "monotonic", lambda: now[0], raising=False)
+    monkeypatch.setattr(copilot_auth, "resolve_copilot_token", resolve_token)
+
+    first = get_llm_credentials("copilot", "claude-sonnet-5")["api_key"]
+    now[0] = 30.0
+    within_ttl = get_llm_credentials("copilot", "claude-sonnet-5")["api_key"]
+    now[0] = 61.0
+    after_expiry = get_llm_credentials("copilot", "claude-sonnet-5")["api_key"]
+
+    assert first == within_ttl == "token-A"
+    assert after_expiry == "token-B-rotated"
+    assert len(resolutions) == 2
 
 
 def test_sdk_client_options_keep_stored_cli_credentials_enabled(

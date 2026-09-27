@@ -1268,6 +1268,24 @@ export function fetchRunSectorMap(runId: string, refresh?: boolean): Promise<Sec
   return request<SectorMapResponse>(`/runs/${encodeURIComponent(runId)}/positions/sectors${qs}`);
 }
 
+export interface RunCardToolTrace {
+  tool: "backtest" | "load_data" | "generate_signals";
+  started_at: string;
+  ended_at: string;
+  status: "ok" | "error" | "cancelled";
+  args_hash: string;
+  result_hash: string;
+}
+
+export interface RunCardCitation {
+  metric: string;
+  artifact_id: string;
+  column: string;
+  /** One-based data row, excluding the CSV header. */
+  row: number;
+  sha256: string;
+}
+
 export interface RunCard {
   schema_version?: string;
   generated_at?: string;
@@ -1282,6 +1300,8 @@ export interface RunCard {
   validation?: unknown;
   warnings?: string[];
   artifacts?: RunCardArtifact[];
+  tool_traces?: RunCardToolTrace[];
+  citations?: RunCardCitation[];
   [key: string]: unknown;
 }
 

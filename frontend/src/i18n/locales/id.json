@@ -1014,6 +1014,33 @@
     "reproducibility": "Reprodusibilitas",
     "metrics": "Metrik",
     "validationPayload": "Validasi",
+    "trust": {
+      "executionRecords": "Catatan eksekusi",
+      "executionDescription": "Tahap eksekusi yang dicatat beserta hash masukan dan hasilnya.",
+      "noExecutionRecords": "Catatan eksekusi tidak disimpan untuk proses ini.",
+      "startedAt": "Mulai (UTC)",
+      "endedAt": "Selesai (UTC)",
+      "argsHash": "SHA-256 argumen",
+      "resultHash": "SHA-256 hasil",
+      "metricEvidence": "Bukti metrik",
+      "evidenceDescription": "Referensi ke data metrik tersimpan. Checksum mengidentifikasi berkas yang dicatat; tampilan ini tidak memverifikasinya secara independen.",
+      "noMetricEvidence": "Bukti metrik tidak dicatat untuk proses ini.",
+      "metric": "Metrik",
+      "artifact": "Artefak",
+      "column": "Kolom",
+      "row": "Baris data (mulai dari 1, tanpa header)",
+      "artifactHash": "SHA-256 artefak",
+      "tools": {
+        "backtest": "Backtest",
+        "load_data": "Muat data",
+        "generate_signals": "Buat sinyal"
+      },
+      "status": {
+        "ok": "Selesai",
+        "error": "Gagal",
+        "cancelled": "Dibatalkan"
+      }
+    },
     "artifactChecksums": "Checksum Artefak",
     "path": "Path",
     "size": "Ukuran",

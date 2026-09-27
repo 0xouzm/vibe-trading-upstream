@@ -1009,6 +1009,33 @@
     "reproducibility": "قابلية إعادة الإنتاج",
     "metrics": "المقاييس",
     "validationPayload": "التحقّق",
+    "trust": {
+      "executionRecords": "سجلات التنفيذ",
+      "executionDescription": "مراحل التنفيذ المسجلة وبصمات مدخلاتها ونتائجها.",
+      "noExecutionRecords": "لم تُسجَّل سجلات تنفيذ لهذا التشغيل.",
+      "startedAt": "البدء (UTC)",
+      "endedAt": "الانتهاء (UTC)",
+      "argsHash": "بصمة المعاملات SHA-256",
+      "resultHash": "بصمة النتيجة SHA-256",
+      "metricEvidence": "أدلة المقاييس",
+      "evidenceDescription": "مراجع لبيانات المقاييس المحفوظة. تحدد بصمات التحقق الملفات المسجلة؛ لا تتحقق هذه الواجهة منها بشكل مستقل.",
+      "noMetricEvidence": "لم تُسجَّل أدلة مقاييس لهذا التشغيل.",
+      "metric": "المقياس",
+      "artifact": "الملف الناتج",
+      "column": "العمود",
+      "row": "صف البيانات (يبدأ من 1، دون الترويسة)",
+      "artifactHash": "بصمة الملف SHA-256",
+      "tools": {
+        "backtest": "الاختبار التاريخي",
+        "load_data": "تحميل البيانات",
+        "generate_signals": "توليد الإشارات"
+      },
+      "status": {
+        "ok": "مكتمل",
+        "error": "فشل",
+        "cancelled": "ملغى"
+      }
+    },
     "artifactChecksums": "مجاميع التحقق للمنتجات",
     "path": "المسار",
     "size": "الحجم",

@@ -1009,6 +1009,33 @@
     "reproducibility": "再現性",
     "metrics": "メトリクス",
     "validationPayload": "検証",
+    "trust": {
+      "executionRecords": "実行記録",
+      "executionDescription": "記録された実行段階と、入力および結果のハッシュ。",
+      "noExecutionRecords": "この実行の実行記録は保存されていません。",
+      "startedAt": "開始（UTC）",
+      "endedAt": "終了（UTC）",
+      "argsHash": "引数の SHA-256",
+      "resultHash": "結果の SHA-256",
+      "metricEvidence": "指標の根拠",
+      "evidenceDescription": "保存された指標データへの参照です。チェックサムは記録されたファイルを識別します。この画面では独立した検証は行いません。",
+      "noMetricEvidence": "この実行の指標の根拠は記録されていません。",
+      "metric": "指標",
+      "artifact": "成果物",
+      "column": "列",
+      "row": "データ行（1 始まり、ヘッダーを除く）",
+      "artifactHash": "成果物の SHA-256",
+      "tools": {
+        "backtest": "バックテスト",
+        "load_data": "データ読み込み",
+        "generate_signals": "シグナル生成"
+      },
+      "status": {
+        "ok": "完了",
+        "error": "失敗",
+        "cancelled": "キャンセル済み"
+      }
+    },
     "artifactChecksums": "成果物チェックサム",
     "path": "パス",
     "size": "サイズ",

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import re
+from decimal import Decimal, InvalidOperation
 import json
 import math
 from datetime import datetime, timezone
@@ -99,7 +102,7 @@ def write_run_card(
     normalized_traces = _normalize_tool_traces(tool_traces)
     if normalized_traces:
         card["tool_traces"] = normalized_traces
-    citations = _metric_citations(metrics, card["artifacts"])
+    citations = _metric_citations(run_dir, metrics, card["artifacts"])
     if citations:
         card["citations"] = citations
     structured = _structured_metrics(metrics)
@@ -284,6 +287,21 @@ def _normalize_artifact_refs(artifact_refs: Sequence[Mapping[str, Any]] | None) 
 def _normalize_tool_traces(tool_traces: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
     traces = []
     for trace in tool_traces or []:
+        # Metadata is not a free-text channel for arguments or exception text.
+        tool = str(trace["tool"])
+        status = str(trace["status"])
+        if tool not in {"backtest", "load_data", "generate_signals"}:
+            raise ValueError("unsupported run-card trace operation")
+        if status not in {"ok", "error", "cancelled"}:
+            raise ValueError("unsupported run-card trace status")
+        times = []
+        for key in ("started_at", "ended_at"):
+            stamp = str(trace[key])
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", stamp):
+                raise ValueError("trace timestamps must be UTC ISO timestamps")
+            times.append(datetime.fromisoformat(stamp.replace("Z", "+00:00")))
+        if times[1] < times[0]:
+            raise ValueError("trace ends before it starts")
         args = trace["args"]
         result = trace["result"]
         if not isinstance(args, Mapping) or not isinstance(result, Mapping):
@@ -313,19 +331,55 @@ def _tool_payload_hash(value: Mapping[str, Any]) -> str:
 
 
 def _metric_citations(
-    metrics: Mapping[str, Any], artifacts: Sequence[Mapping[str, Any]]
-) -> list[dict[str, str]]:
-    metrics_artifact = next(
-        (artifact for artifact in artifacts if artifact.get("path") == "artifacts/metrics.csv"),
-        None,
-    )
-    if metrics_artifact is None:
+    run_dir: Path, metrics: Mapping[str, Any], artifacts: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Cite only scalar values actually present in the single metrics CSV row.
+
+    Args:
+        run_dir: Run artifact root.
+        metrics: Values displayed on the card.
+        artifacts: Artifact manifest with checksums.
+
+    Returns:
+        Verified column references, or no references for missing/malformed CSV.
+    """
+    artifact_id = "artifacts/metrics.csv"
+    artifact = next((a for a in artifacts if a.get("path") == artifact_id), None)
+    if artifact is None:
         return []
-    return [
-        {"metric": key, "artifact_id": "artifacts/metrics.csv"}
-        for key, value in metrics.items()
-        if key != "validation" and _is_scalar(value)
-    ]
+    path = run_dir / artifact_id
+    if path.is_symlink() or not path.resolve().is_relative_to(run_dir.resolve()):
+        return []
+    try:
+        with path.open(encoding="utf-8", newline="") as stream:
+            reader = csv.DictReader(stream)
+            columns = reader.fieldnames or []
+            row = next(reader, None)
+            if row is None or next(reader, None) is not None or len(set(columns)) != len(columns):
+                return []
+        if _file_hash(path) != artifact["sha256"]:
+            return []
+    except (OSError, UnicodeError, csv.Error):
+        return []
+    citations = []
+    for key, value in _scalar_metrics(metrics).items():
+        if key not in row or value is None or row[key] is None:
+            continue
+        cell = row[key]
+        if isinstance(value, bool):
+            matches = cell == str(value)
+        elif isinstance(value, (int, float)):
+            try:
+                number = Decimal(cell)
+                matches = number.is_finite() and number == Decimal(str(value))
+            except InvalidOperation:
+                matches = False
+        else:
+            matches = cell == str(value)
+        if matches:
+            citations.append({"metric": key, "artifact_id": artifact_id,
+                              "column": key, "row": 1, "sha256": artifact["sha256"]})
+    return citations
 
 
 def _render_markdown(card: Mapping[str, Any]) -> str:
@@ -387,6 +441,22 @@ def _render_markdown(card: Mapping[str, Any]) -> str:
     if warnings:
         lines.extend(["", "## Warnings"])
         lines.extend(f"- {warning}" for warning in warnings)
+
+    lines.extend(["", "## Execution records"])
+    traces = card.get("tool_traces", [])
+    if not traces:
+        lines.append("- No execution records available for this run.")
+    for trace in traces:
+        lines.append(f"- {trace['tool']} ({trace['status']}): {trace['started_at']} → {trace['ended_at']}; "
+                     f"args sha256 `{trace['args_hash']}`, result sha256 `{trace['result_hash']}`")
+    lines.extend(["", "## Metric evidence"])
+    citations = card.get("citations", [])
+    if not citations:
+        lines.append("- No verified metric references available.")
+    for citation in citations:
+        lines.append(f"- {citation['metric']}: `{citation['artifact_id']}`, "
+                     f"column `{citation['column']}`, data row {citation['row']}, "
+                     f"sha256 `{citation['sha256']}`")
 
     lines.extend(["", "## Artifacts"])
     artifacts = card.get("artifacts", [])

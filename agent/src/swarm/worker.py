@@ -35,7 +35,7 @@ from src.swarm.models import (
 )
 from src.tools import build_swarm_registry
 from src.tools.mcp import MCPRemoteTool
-from src.tools.redaction import is_sensitive_arg, redact_payload, redact_tool_result
+from src.tools.redaction import redact_payload, redact_tool_result
 
 logger = logging.getLogger(__name__)
 
@@ -1156,13 +1156,10 @@ def _tool_arguments(
 def _preview_tool_arguments(arguments: dict) -> dict[str, str]:
     """Return a short, redacted argument preview for streamed events."""
     preview: dict[str, str] = {}
-    for key, value in arguments.items():
+    for key, value in redact_payload(arguments).items():
         if key == "run_dir":
             continue
-        if is_sensitive_arg(key):
-            preview[key] = "[redacted]"
-            continue
-        preview[key] = _truncate_preview(redact_payload(value))
+        preview[key] = _truncate_preview(value)
     return preview
 
 

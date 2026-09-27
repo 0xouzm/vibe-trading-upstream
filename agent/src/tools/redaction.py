@@ -53,6 +53,7 @@ _REDACTED = "[redacted]"
 #: degrades to the strict behaviour (fail closed).
 ARGUMENTS_SINK = "arguments"
 RESULT_SINK = "result"
+_VALUE_UNAVAILABLE = object()
 
 #: Curated EXACT-MATCH PII / account-identifier field names (SPEC Consent §5 /
 #: §8 #2). These are scrubbed in addition to the credential-marker keys below.
@@ -113,16 +114,11 @@ _SENSITIVE_ARG_MARKERS = ("api_key", "authorization", "password", "secret", "tok
 #: (an env dump in a result leaks exactly what an env argument would).
 _RESULT_SAFE_KEYS = {"content"}
 
-#: Curated EXACT-MATCH fields that legitimately contain the substring
-#: "token" without holding a credential (token counts/budgets, and
-#: Polymarket's public CLOB outcome-token id). The "token" marker below has
-#: to stay a substring match to catch arbitrary credential-key spellings
-#: (``access_token``, ``refresh_token``, ``bearer_token`` …), so — mirroring
-#: how :data:`_PII_EXACT_KEYS` keeps ``account_ref`` from being caught by an
-#: ``"account"`` substring — these known-benign fields are exempted by exact
-#: name instead of being carved out of the marker itself. Unlike
-#: :data:`_RESULT_SAFE_KEYS`, this exemption is not sink-dependent: none of
-#: these hold a secret in the arguments sink or the live audit ledger either.
+#: Exact token-metadata names eligible for a VALUE-SHAPED exemption in every
+#: sink. A familiar name alone is never permission to release its value:
+#: counts must be nonnegative integers (or absent), usage may be a mapping of
+#: counts, and CLOB ids must have the public decimal uint256 shape. Unknown
+#: shapes fail closed, including unprefixed secrets no text regex can detect.
 _BENIGN_TOKEN_FIELD_KEYS = {
     "token_budget",
     "token_usage",
@@ -266,7 +262,9 @@ def redact_internal_paths(text: object) -> str:
     return s
 
 
-def is_sensitive_arg(name: str, *, sink: str = ARGUMENTS_SINK) -> bool:
+def is_sensitive_arg(
+    name: str, *, sink: str = ARGUMENTS_SINK, value: Any = _VALUE_UNAVAILABLE
+) -> bool:
     """Return whether a tool-argument / payload key name should be redacted.
 
     A key is sensitive when its normalized (stripped, lower-cased) form either
@@ -281,13 +279,15 @@ def is_sensitive_arg(name: str, *, sink: str = ARGUMENTS_SINK) -> bool:
     ``"account"`` substring — so benign fields are not over-redacted and the
     audit record's opaque ``account_ref`` provenance field (the
     mandate→consent accountability chain, SPEC §5) is preserved. The same
-    reasoning exempts :data:`_BENIGN_TOKEN_FIELD_KEYS` (``token_budget``,
-    ``token_usage`` totals, ``clob_token_id`` …) from the ``"token"``
-    credential marker, which otherwise over-redacts any key merely
-    containing that substring.
+    reasoning permits :data:`_BENIGN_TOKEN_FIELD_KEYS` only when ``value``
+    has the expected metadata shape. Without a value these names remain
+    sensitive. Usage mappings still require recursive redaction by
+    :func:`redact_payload`; this predicate never approves an entire subtree.
 
     Args:
         name: Argument or payload key name to classify.
+        value: Candidate value for the token-metadata exception. Omission
+            fails closed for token-like names.
         sink: Where the value is headed. :data:`ARGUMENTS_SINK` (the default)
             is the strict set used for tool-call arguments and the live audit
             ledger; :data:`RESULT_SINK` additionally releases the
@@ -302,7 +302,17 @@ def is_sensitive_arg(name: str, *, sink: str = ARGUMENTS_SINK) -> bool:
     normalized = name.strip().lower()
     folded = _fold_key(name)
     if folded in _BENIGN_TOKEN_FIELD_KEYS_FOLDED:
-        return False
+        if folded == "clobtokenid":
+            return not (
+                isinstance(value, str)
+                and value.isascii()
+                and value.isdecimal()
+                and len(value) <= 78
+                and int(value) < 2**256
+            )
+        if folded == "tokenusage" and isinstance(value, dict):
+            return False
+        return not (value is None or (type(value) is int and value >= 0))
     if sink == RESULT_SINK and folded in _RESULT_SAFE_KEYS_FOLDED:
         return False
     if normalized in _SENSITIVE_ARG_KEYS or any(
@@ -321,9 +331,11 @@ def redact_payload(obj: Any, *, sink: str = ARGUMENTS_SINK) -> Any:
     """Recursively redact sensitive keys in a structured payload.
 
     Walks dicts and lists; any dict value whose key :func:`is_sensitive_arg`
-    is replaced with the ``'[redacted]'`` sentinel. Non-container values pass
-    through unchanged. Used before event-preview stringification and before
-    writing broker request/response payloads to the live audit ledger.
+    marks sensitive is replaced with the ``'[redacted]'`` sentinel. Token
+    metadata exceptions additionally validate value shape, and usage mappings
+    retain only numeric leaves after sensitive-key scrubbing. String leaves
+    are pattern-scrubbed in every sink. Used before event-preview stringification
+    and before writing broker payloads to the live audit ledger.
 
     Scrubs two key classes (see :func:`is_sensitive_arg`): credential keys
     (OAuth tokens, ``api_key``, ``authorization``, ``password``/``secret``,
@@ -335,11 +347,10 @@ def redact_payload(obj: Any, *, sink: str = ARGUMENTS_SINK) -> Any:
     Args:
         obj: Arbitrary payload (dict / list / scalar) to scrub.
         sink: Where the payload is headed; forwarded to
-            :func:`is_sensitive_arg`. In :data:`RESULT_SINK` the surviving
-            string leaves are additionally pattern-scrubbed with
-            :func:`redact_text`, because a JSON tool result routinely carries
-            free text (shell ``stdout``, error bodies) under a benign key that
-            no key-based rule can classify.
+            :func:`is_sensitive_arg`. In every sink surviving string leaves
+            are additionally pattern-scrubbed with :func:`redact_text`, since
+            shell commands, output and error bodies can carry credentials
+            under a benign key that no key-based rule can classify.
 
     Returns:
         A new structure of the same shape with sensitive values replaced. The
@@ -348,7 +359,9 @@ def redact_payload(obj: Any, *, sink: str = ARGUMENTS_SINK) -> Any:
     if isinstance(obj, dict):
         return {
             key: _REDACTED
-            if is_sensitive_arg(str(key), sink=sink)
+            if is_sensitive_arg(str(key), sink=sink, value=item)
+            else _redact_token_usage(item, sink=sink)
+            if _fold_key(str(key)) == "tokenusage"
             else redact_payload(item, sink=sink)
             for key, item in obj.items()
         }
@@ -360,6 +373,26 @@ def redact_payload(obj: Any, *, sink: str = ARGUMENTS_SINK) -> Any:
         # command argument or in a broker error string bound for the ledger.
         return redact_text(obj)
     return obj
+
+
+def _redact_token_usage(value: Any, *, sink: str) -> Any:
+    """Keep usage counts without admitting credentials through a usage map.
+
+    Args:
+        value: Usage count or nested mapping to scrub.
+        sink: Sink policy for nested sensitive keys.
+
+    Returns:
+        A fresh mapping containing only counts, nulls, and redaction sentinels.
+    """
+    if isinstance(value, dict):
+        return {
+            key: _REDACTED
+            if is_sensitive_arg(str(key), sink=sink, value=item)
+            else _redact_token_usage(item, sink=sink)
+            for key, item in value.items()
+        }
+    return value if value is None or (type(value) is int and value >= 0) else _REDACTED
 
 
 #: Credential-shaped key names recognized in FREE TEXT. Longer alternatives

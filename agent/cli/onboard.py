@@ -73,7 +73,7 @@ PROVIDERS: Final[tuple[Provider, ...]] = (
              "cheapest tier — good for batch backtest research",
              "deepseek-v4-pro", "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL",
              "https://api.deepseek.com/v1", "sk-",
-             ("deepseek-v4-pro", "deepseek-v4-flash")),
+             ("deepseek-v4-pro", "deepseek-flash")),
     Provider("opencode", "OpenCode", "Go / Zen relay — DeepSeek, GLM, Kimi, Qwen under one key",
              "deepseek-v4.1-flash", "OPENCODE_API_KEY", "OPENCODE_BASE_URL",
              "https://opencode.ai/zen/go/v1", "sk-",

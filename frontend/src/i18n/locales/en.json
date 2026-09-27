@@ -1014,6 +1014,33 @@
     "reproducibility": "Reproducibility",
     "metrics": "Metrics",
     "validationPayload": "Validation",
+    "trust": {
+      "executionRecords": "Execution records",
+      "executionDescription": "Recorded execution stages and the hashes of their inputs and results.",
+      "noExecutionRecords": "Execution records were not recorded for this run.",
+      "startedAt": "Started (UTC)",
+      "endedAt": "Ended (UTC)",
+      "argsHash": "Arguments SHA-256",
+      "resultHash": "Result SHA-256",
+      "metricEvidence": "Metric evidence",
+      "evidenceDescription": "References to saved metric data. Checksums identify the recorded files; this view does not independently verify them.",
+      "noMetricEvidence": "Metric evidence was not recorded for this run.",
+      "metric": "Metric",
+      "artifact": "Artifact",
+      "column": "Column",
+      "row": "Data row (1-based, excluding header)",
+      "artifactHash": "Artifact SHA-256",
+      "tools": {
+        "backtest": "Backtest",
+        "load_data": "Load data",
+        "generate_signals": "Generate signals"
+      },
+      "status": {
+        "ok": "Completed",
+        "error": "Failed",
+        "cancelled": "Cancelled"
+      }
+    },
     "artifactChecksums": "Artifact Checksums",
     "path": "Path",
     "size": "Size",

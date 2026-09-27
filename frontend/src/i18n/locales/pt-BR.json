@@ -1014,6 +1014,33 @@
     "reproducibility": "Reprodutibilidade",
     "metrics": "Métricas",
     "validationPayload": "Validação",
+    "trust": {
+      "executionRecords": "Registros de execução",
+      "executionDescription": "Etapas de execução registradas e hashes de suas entradas e resultados.",
+      "noExecutionRecords": "Não foram salvos registros de execução para esta execução.",
+      "startedAt": "Início (UTC)",
+      "endedAt": "Fim (UTC)",
+      "argsHash": "SHA-256 dos argumentos",
+      "resultHash": "SHA-256 do resultado",
+      "metricEvidence": "Evidências das métricas",
+      "evidenceDescription": "Referências aos dados de métricas salvos. As somas de verificação identificam os arquivos registrados; esta tela não os verifica de forma independente.",
+      "noMetricEvidence": "Não foram registradas evidências de métricas para esta execução.",
+      "metric": "Métrica",
+      "artifact": "Artefato",
+      "column": "Coluna",
+      "row": "Linha de dados (a partir de 1, sem cabeçalho)",
+      "artifactHash": "SHA-256 do artefato",
+      "tools": {
+        "backtest": "Backtest",
+        "load_data": "Carregar dados",
+        "generate_signals": "Gerar sinais"
+      },
+      "status": {
+        "ok": "Concluído",
+        "error": "Falhou",
+        "cancelled": "Cancelado"
+      }
+    },
     "artifactChecksums": "Somas de verificação de artefato",
     "path": "Caminho",
     "size": "Tamanho",

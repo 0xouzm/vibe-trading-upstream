@@ -1014,6 +1014,33 @@
     "reproducibility": "Reproduzierbarkeit",
     "metrics": "Metriken",
     "validationPayload": "Validierung",
+    "trust": {
+      "executionRecords": "Ausführungsprotokolle",
+      "executionDescription": "Aufgezeichnete Ausführungsschritte und Hashes ihrer Eingaben und Ergebnisse.",
+      "noExecutionRecords": "Für diesen Lauf wurden keine Ausführungsprotokolle gespeichert.",
+      "startedAt": "Beginn (UTC)",
+      "endedAt": "Ende (UTC)",
+      "argsHash": "SHA-256 der Argumente",
+      "resultHash": "SHA-256 des Ergebnisses",
+      "metricEvidence": "Kennzahlennachweise",
+      "evidenceDescription": "Verweise auf gespeicherte Kennzahlendaten. Prüfsummen identifizieren die aufgezeichneten Dateien; diese Ansicht prüft sie nicht unabhängig.",
+      "noMetricEvidence": "Für diesen Lauf wurden keine Kennzahlennachweise gespeichert.",
+      "metric": "Kennzahl",
+      "artifact": "Artefakt",
+      "column": "Spalte",
+      "row": "Datenzeile (ab 1, ohne Kopfzeile)",
+      "artifactHash": "SHA-256 des Artefakts",
+      "tools": {
+        "backtest": "Backtest",
+        "load_data": "Daten laden",
+        "generate_signals": "Signale erzeugen"
+      },
+      "status": {
+        "ok": "Abgeschlossen",
+        "error": "Fehlgeschlagen",
+        "cancelled": "Abgebrochen"
+      }
+    },
     "artifactChecksums": "Artefakt-Prüfsummen",
     "path": "Pfad",
     "size": "Größe",

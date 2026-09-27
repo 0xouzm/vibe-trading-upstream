@@ -1009,6 +1009,33 @@
     "reproducibility": "可复现性",
     "metrics": "指标",
     "validationPayload": "验证",
+    "trust": {
+      "executionRecords": "执行记录",
+      "executionDescription": "已记录的执行阶段及其输入和结果的哈希值。",
+      "noExecutionRecords": "此次运行未记录执行记录。",
+      "startedAt": "开始时间（UTC）",
+      "endedAt": "结束时间（UTC）",
+      "argsHash": "参数 SHA-256",
+      "resultHash": "结果 SHA-256",
+      "metricEvidence": "指标证据",
+      "evidenceDescription": "指向已保存指标数据的引用。校验和标识记录中的文件；此视图不会独立验证文件。",
+      "noMetricEvidence": "此次运行未记录指标证据。",
+      "metric": "指标",
+      "artifact": "产物",
+      "column": "列",
+      "row": "数据行（从 1 开始，不含表头）",
+      "artifactHash": "产物 SHA-256",
+      "tools": {
+        "backtest": "回测",
+        "load_data": "加载数据",
+        "generate_signals": "生成信号"
+      },
+      "status": {
+        "ok": "已完成",
+        "error": "失败",
+        "cancelled": "已取消"
+      }
+    },
     "artifactChecksums": "制品校验和",
     "path": "路径",
     "size": "大小",

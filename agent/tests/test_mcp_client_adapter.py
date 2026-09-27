@@ -876,3 +876,22 @@ class TestHttpErrorBodyIsReported:
 
         assert "Status failed 500" in str(caught.value)
         assert caught.value.response.status_code == 400
+
+
+@pytest.mark.parametrize("bad", [None, [], "oops", 42, False])
+def test_malformed_properties_normalization_is_idempotent(bad):
+    original = {"type": "object", "properties": bad, "required": ["symbol"]}
+    normalized = normalize_mcp_tool_schema(original)
+    assert normalized["properties"] == {}
+    assert normalized["required"] == ["symbol"]
+    assert normalize_mcp_tool_schema(normalized) == normalized
+    assert original["properties"] == bad
+
+
+@pytest.mark.parametrize("composition", ["anyOf", "oneOf", "allOf"])
+def test_malformed_properties_does_not_override_composed_schema(composition):
+    branch = {"type": "object", "properties": {"symbol": {"type": "string"}}}
+    result = normalize_mcp_tool_schema({"type": "object", "properties": "oops", composition: [branch, {"type": "object", "properties": {"code": {"type": "integer"}}}]})
+    assert result[composition][0] == branch
+    assert len(result[composition]) == 2
+    assert "properties" not in result

@@ -52,6 +52,8 @@
 
 > ⚠️ **Security warning:** The X account `VibeTrading_HKU`, Virtuals project `101845`, and token contract `0x640BDBF77b6447E8b7DB7894cED84BD1c40571f4` are not official Vibe-Trading assets. We have never launched or endorsed any token or memecoin. Do not buy, connect a wallet, or sign anything. [Details](SECURITY.md#official-channels--impersonation).
 
+- **2026-09-27** 🛠️ **Verifiable run cards and safer research**: Run cards now show hashed backtest execution records and verified metric-to-CSV references in JSON, Markdown and Run Detail ([#1612](https://github.com/HKUDS/Vibe-Trading/pull/1612)). GTJA high/low recency factors use the correct day count and consistent tie handling ([#1604](https://github.com/HKUDS/Vibe-Trading/pull/1604)); India short covers check the buy-side circuit band ([#1608](https://github.com/HKUDS/Vibe-Trading/pull/1608)). Token usage remains readable without exempting arbitrary credential strings ([#1606](https://github.com/HKUDS/Vibe-Trading/pull/1606)), malformed MCP schemas retain their object properties ([#1607](https://github.com/HKUDS/Vibe-Trading/pull/1607)), and immediate-order goal checks preserve research questions ([#1605](https://github.com/HKUDS/Vibe-Trading/pull/1605)). Setup documentation now correctly identifies OpenRouter as the shipped default ([#1609](https://github.com/HKUDS/Vibe-Trading/issues/1609)).
+
 - **2026-09-26** 🛠️ **More reliable indicators and trading limits**: Technical indicators retain their observation date and can reuse results lost during conversation compaction ([#1590](https://github.com/HKUDS/Vibe-Trading/pull/1590), [#1601](https://github.com/HKUDS/Vibe-Trading/pull/1601)). All five Qlib158 WVMA windows now use absolute returns in the numerator ([#1594](https://github.com/HKUDS/Vibe-Trading/pull/1594)); Benford checks preserve the correct leading digit at numeric boundaries ([#1591](https://github.com/HKUDS/Vibe-Trading/pull/1591)). An explicitly zero exposure limit stays zero ([#1593](https://github.com/HKUDS/Vibe-Trading/pull/1593)), and Dhan paper orders reject fractional or invalid quantities without rounding away input precision ([#1595](https://github.com/HKUDS/Vibe-Trading/pull/1595)). Invalid optional numeric environment variables fall back to defaults while explicit configuration constraints remain enforced ([#1592](https://github.com/HKUDS/Vibe-Trading/pull/1592)). Runtime triggers keep the correct field defaults and subclass factory behavior ([#1599](https://github.com/HKUDS/Vibe-Trading/pull/1599)).
 
 - **2026-09-25** 🛠️ **More reliable research sessions and channel diagnostics**: A text column in a backtest CSV no longer discards the numeric metrics ([#1579](https://github.com/HKUDS/Vibe-Trading/pull/1579)), and conversation compaction now counts reasoning content in its retained-message budget ([#1582](https://github.com/HKUDS/Vibe-Trading/pull/1582)). Failed channel loads now log the actual exception ([#1580](https://github.com/HKUDS/Vibe-Trading/pull/1580)); the Telegram guide clarifies that CLI and Web controls share the same API runtime ([#1583](https://github.com/HKUDS/Vibe-Trading/pull/1583)). Robinhood portfolio reads reject malformed buying-power objects while keeping omitted or null values unknown ([#1526](https://github.com/HKUDS/Vibe-Trading/pull/1526)). Leaving a chat also cancels pending history-scroll timers. Thanks [@Shizoqua](https://github.com/Shizoqua) and [@lorenzozanee](https://github.com/lorenzozanee)!
@@ -1021,7 +1023,7 @@ Vibe-Trading is a tool-heavy agent — skills, backtests, memory, and swarms all
 | **Sweet spot** (default) | `deepseek-v4-pro`, `deepseek/deepseek-v4-pro`, `x-ai/grok-4.20`, `z-ai/glm-5.1`, `moonshotai/kimi-k2.6`, `qwen/qwen3-max-thinking` | Daily driver — reliable tool-calling at ~1/10 the cost |
 | **Avoid for agent use** | `*-nano`, `*-flash-lite`, `*-coder-next`, small / distilled variants | Tool-calling is unreliable — the agent will appear to "answer from memory" instead of loading skills or running backtests |
 
-The default `agent/.env.example` ships with DeepSeek official API + `deepseek-v4-pro`; OpenRouter users can use `deepseek/deepseek-v4-pro`.
+The default `agent/.env.example` uses OpenRouter + `deepseek/deepseek-v4-pro`; for the DeepSeek official API, select `LANGCHAIN_PROVIDER=deepseek` and `deepseek-v4-pro`.
 
 ---
 
@@ -1978,7 +1980,7 @@ Vibe-Trading is part of the **[HKUDS](https://github.com/HKUDS)** agent ecosyste
 
 | Phase | Feature | Status |
 |-------|---------|--------|
-| **Trust Layer** | Reproducible run cards are emitted and shown in Run Detail; v1 adds tool traces and citations | v0 Shipped |
+| **Trust Layer** | Run cards display hashed backtest execution records and verified CSV metric references in Run Detail and Markdown; existing cards remain readable | Backtest trace + citation display shipped |
 | **Hypothesis Registry** | Durable research hypotheses with lifecycle status, data sources, skills, run-card links, and invalidation notes | Backend MVP Shipped |
 | **Research Autopilot** | Manual-first research loop: hypothesis → deterministic backtest → evidence report | Phase 1–3 Shipped |
 | **Data Bridge** | Bring-your-own data: local CSV/Parquet/SQL connectors with schema mapping | Local loader Shipped |

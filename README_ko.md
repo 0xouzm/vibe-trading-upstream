@@ -52,6 +52,8 @@
 
 > ⚠️ **보안 경고:** X 계정 `VibeTrading_HKU`, Virtuals 프로젝트 `101845`, 토큰 컨트랙트 `0x640BDBF77b6447E8b7DB7894cED84BD1c40571f4`는 모두 Vibe-Trading 공식과 무관합니다. Vibe-Trading은 어떠한 토큰이나 밈코인도 발행하거나 공식적으로 지지한 적이 없습니다. 해당 토큰을 구매하거나 지갑을 연결하거나 어떠한 서명도 하지 마세요. [자세히 보기](SECURITY.md#official-channels--impersonation).
 
+- **2026-09-27** 🛠️ **검증 가능한 실행 카드와 연구 흐름 개선**: JSON, Markdown, 실행 상세 화면에 해시 기반 백테스트 실행 기록과 검증된 지표 CSV 참조를 표시합니다([#1612](https://github.com/HKUDS/Vibe-Trading/pull/1612)). GTJA 고점·저점 경과 일수와 동률 처리를 수정하고([#1604](https://github.com/HKUDS/Vibe-Trading/pull/1604)), 인도 시장 숏 청산은 매수 방향의 가격 제한을 확인합니다([#1608](https://github.com/HKUDS/Vibe-Trading/pull/1608)). 자격 증명 문자열을 노출하지 않고 토큰 사용량을 유지하며([#1606](https://github.com/HKUDS/Vibe-Trading/pull/1606)), 잘못된 MCP 스키마의 객체 속성을 복구합니다([#1607](https://github.com/HKUDS/Vibe-Trading/pull/1607)). 즉시 주문 목표 검사는 연구 질문을 허용하고([#1605](https://github.com/HKUDS/Vibe-Trading/pull/1605)), 설정 문서에 기본 경로가 OpenRouter임을 명시했습니다([#1609](https://github.com/HKUDS/Vibe-Trading/issues/1609)).
+
 - **2026-09-26** 🛠️ **지표 계산과 거래 한도 개선**: 기술적 지표는 관측 날짜를 유지하고 대화 압축으로 사라진 결과를 재사용할 수 있습니다([#1590](https://github.com/HKUDS/Vibe-Trading/pull/1590), [#1601](https://github.com/HKUDS/Vibe-Trading/pull/1601)). Qlib158의 다섯 WVMA 기간 모두 분자에 절대 수익률을 사용하며([#1594](https://github.com/HKUDS/Vibe-Trading/pull/1594)), Benford 검사는 수치 경계에서도 올바른 첫 자릿수를 유지합니다([#1591](https://github.com/HKUDS/Vibe-Trading/pull/1591)). 명시적으로 0으로 설정한 익스포저 한도는 그대로 유지되고([#1593](https://github.com/HKUDS/Vibe-Trading/pull/1593)), Dhan 모의 주문은 입력 정밀도를 반올림으로 잃지 않으면서 소수 및 잘못된 수량을 거부합니다([#1595](https://github.com/HKUDS/Vibe-Trading/pull/1595)). 잘못된 선택적 숫자 환경 변수는 기본값으로 돌아가며 명시적 설정의 제약은 계속 적용됩니다([#1592](https://github.com/HKUDS/Vibe-Trading/pull/1592)). 런타임 트리거의 필드 기본값과 하위 클래스 팩터리 동작도 수정했습니다([#1599](https://github.com/HKUDS/Vibe-Trading/pull/1599)).
 
 - **2026-09-25** 🛠️ **리서치 세션과 채널 진단 개선**: 백테스트 CSV에 텍스트 열이 있어도 숫자 지표가 통째로 사라지지 않으며([#1579](https://github.com/HKUDS/Vibe-Trading/pull/1579)), 대화 압축 시 보존할 메시지의 용량 계산에 추론 내용도 포함합니다([#1582](https://github.com/HKUDS/Vibe-Trading/pull/1582)). 채널 로드 실패 시 실제 예외를 기록하고([#1580](https://github.com/HKUDS/Vibe-Trading/pull/1580)), Telegram 가이드에 CLI와 Web 제어가 같은 API 런타임을 공유한다는 점을 명시했습니다([#1583](https://github.com/HKUDS/Vibe-Trading/pull/1583)). Robinhood 포트폴리오 조회는 잘못된 형식의 구매력 객체를 거부하되, 누락되거나 null인 값은 알 수 없는 값으로 유지합니다([#1526](https://github.com/HKUDS/Vibe-Trading/pull/1526)). 채팅 화면을 떠나면 대기 중인 기록 스크롤 타이머도 취소합니다. [@Shizoqua](https://github.com/Shizoqua), [@lorenzozanee](https://github.com/lorenzozanee) 감사합니다!
@@ -929,7 +931,7 @@ Vibe-Trading은 tool-heavy agent입니다. skills, backtests, memory, swarms가 
 | **Sweet spot**(기본값) | `deepseek-v4-pro`, `deepseek/deepseek-v4-pro`, `x-ai/grok-4.20`, `z-ai/glm-5.1`, `moonshotai/kimi-k2.6`, `qwen/qwen3-max-thinking` | Daily driver — 약 1/10 비용으로 안정적인 tool-calling |
 | **Agent 사용 시 피할 것** | `*-nano`, `*-flash-lite`, `*-coder-next`, small / distilled variants | tool-calling이 불안정합니다. agent가 skills를 로드하거나 backtest를 실행하는 대신 "기억에서 답하는" 것처럼 보일 수 있습니다. |
 
-기본 `agent/.env.example`은 DeepSeek official API + `deepseek-v4-pro`를 포함합니다. OpenRouter 사용자는 `deepseek/deepseek-v4-pro`를 사용할 수 있습니다.
+기본 `agent/.env.example`은 OpenRouter + `deepseek/deepseek-v4-pro`를 사용합니다. DeepSeek 공식 API를 사용하려면 `LANGCHAIN_PROVIDER=deepseek`와 `deepseek-v4-pro`를 선택하세요.
 
 ---
 
@@ -1770,7 +1772,7 @@ Vibe-Trading은 **[HKUDS](https://github.com/HKUDS)** agent ecosystem의 일부�
 
 | Phase | Feature | Status |
 |-------|---------|--------|
-| **Trust Layer** | 재현 가능한 run cards는 생성 및 Run Detail 표시까지 완료. v1은 tool traces와 citations 추가 | v0 출시 |
+| **Trust Layer** | 실행 상세와 Markdown에 백테스트 실행 해시 및 검증된 CSV 지표 참조 표시, 기존 카드 호환 | 백테스트 기록·참조 표시 구현 |
 | **Hypothesis Registry** | lifecycle status, data sources, skills, run-card links, invalidation notes를 가진 durable research hypotheses | Backend MVP 출시 |
 | **Research Autopilot** | 수동 실행 우선 research loop: hypothesis → deterministic backtest → evidence report | 1–3단계 출시 |
 | **Data Bridge** | Bring-your-own data: local CSV/Parquet/SQL connectors with schema mapping | 로컬 로더 출시 |

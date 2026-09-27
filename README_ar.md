@@ -52,6 +52,8 @@
 
 > ⚠️ **تحذير أمني:** حساب X باسم `VibeTrading_HKU`، ومشروع Virtuals رقم `101845`، وعقد التوكن `0x640BDBF77b6447E8b7DB7894cED84BD1c40571f4` كلّها غير رسمية ولا تتبع Vibe-Trading. لم نُطلق أو نؤيد مطلقًا أي توكن أو عملة ميم. لا تشترِ هذا التوكن، ولا تربط محفظتك، ولا توقّع أي شيء. [التفاصيل](SECURITY.md#official-channels--impersonation).
 
+- **2026-09-27** 🛠️ **بطاقات تشغيل قابلة للتحقق وتحسينات للبحث**: تعرض JSON وMarkdown وصفحة تفاصيل التشغيل سجلات تنفيذ الاختبار التاريخي بصماتٍ مشفّرة ومراجع موثقة لمقاييس CSV ([#1612](https://github.com/HKUDS/Vibe-Trading/pull/1612)). صُحّح حساب الأيام وحالات التعادل في عوامل GTJA ([#1604](https://github.com/HKUDS/Vibe-Trading/pull/1604))، ويُفحص إغلاق المراكز القصيرة في الهند وفق حد السعر لجهة الشراء ([#1608](https://github.com/HKUDS/Vibe-Trading/pull/1608)). تبقى أعداد استخدام الرموز مقروءة دون السماح بسلاسل اعتماد عشوائية ([#1606](https://github.com/HKUDS/Vibe-Trading/pull/1606))، وتُستعاد خصائص مخططات MCP غير الصالحة ([#1607](https://github.com/HKUDS/Vibe-Trading/pull/1607)). يسمح فحص أهداف الأوامر الفورية بأسئلة البحث ([#1605](https://github.com/HKUDS/Vibe-Trading/pull/1605))، وتوضح الوثائق أن OpenRouter هو الإعداد الافتراضي ([#1609](https://github.com/HKUDS/Vibe-Trading/issues/1609)).
+
 - **2026-09-26** 🛠️ **مؤشرات وحدود تداول أكثر موثوقية**: تحتفظ المؤشرات الفنية بتاريخ الرصد ويمكنها إعادة استخدام النتائج التي أزيلت أثناء ضغط المحادثة ([#1590](https://github.com/HKUDS/Vibe-Trading/pull/1590)، [#1601](https://github.com/HKUDS/Vibe-Trading/pull/1601)). تستخدم نوافذ WVMA الخمس في Qlib158 العوائد المطلقة في البسط ([#1594](https://github.com/HKUDS/Vibe-Trading/pull/1594))، ويحافظ فحص Benford على الرقم الأول الصحيح عند الحدود العددية ([#1591](https://github.com/HKUDS/Vibe-Trading/pull/1591)). يبقى حد التعرض المحدد صراحةً بصفر صفراً ([#1593](https://github.com/HKUDS/Vibe-Trading/pull/1593))، وترفض أوامر Dhan التجريبية الكميات الكسرية أو غير الصالحة دون فقدان دقة المدخلات بسبب التقريب ([#1595](https://github.com/HKUDS/Vibe-Trading/pull/1595)). تعود متغيرات البيئة العددية الاختيارية غير الصالحة إلى القيم الافتراضية مع استمرار تطبيق قيود الإعدادات الصريحة ([#1592](https://github.com/HKUDS/Vibe-Trading/pull/1592)). كما أُصلحت القيم الافتراضية لحقول مشغلات وقت التشغيل وسلوك إنشاء مثيلاتها في الأصناف الفرعية ([#1599](https://github.com/HKUDS/Vibe-Trading/pull/1599)).
 
 - **2026-09-25** 🛠️ **جلسات بحث وتشخيص قنوات أكثر موثوقية**: لم يعد وجود عمود نصي في ملف CSV للاختبار التاريخي يؤدي إلى فقدان المقاييس الرقمية ([#1579](https://github.com/HKUDS/Vibe-Trading/pull/1579))، وأصبح ضغط المحادثة يحتسب محتوى الاستدلال ضمن ميزانية الرسائل المحتفظ بها ([#1582](https://github.com/HKUDS/Vibe-Trading/pull/1582)). تُسجَّل الآن الاستثناءات الفعلية عند فشل تحميل القنوات ([#1580](https://github.com/HKUDS/Vibe-Trading/pull/1580))، ويوضح دليل Telegram أن أوامر CLI وعناصر تحكم الويب تشترك في بيئة تشغيل API نفسها ([#1583](https://github.com/HKUDS/Vibe-Trading/pull/1583)). ترفض قراءة محفظة Robinhood كائنات القوة الشرائية ذات البنية غير الصحيحة، مع إبقاء القيم المحذوفة أو null غير معروفة ([#1526](https://github.com/HKUDS/Vibe-Trading/pull/1526)). كما تُلغى مؤقتات تمرير السجل المعلقة عند مغادرة المحادثة. شكرًا [@Shizoqua](https://github.com/Shizoqua) و[@lorenzozanee](https://github.com/lorenzozanee)!
@@ -926,7 +928,7 @@ Vibe-Trading وكيل كثيف الأدوات؛ المهارات والاختب�
 | **النقطة المثلى** (افتراضي) | `deepseek-v4-pro`, `deepseek/deepseek-v4-pro`, `x-ai/grok-4.20`, `z-ai/glm-5.1`, `moonshotai/kimi-k2.6`, `qwen/qwen3-max-thinking` | الاستخدام اليومي، tool-calling موثوق بنحو عُشر التكلفة |
 | **تجنبها لاستخدام الوكيل** | `*-nano`, `*-flash-lite`, `*-coder-next`, small / distilled variants | tool-calling غير موثوق؛ سيبدو الوكيل وكأنه "يجيب من الذاكرة" بدلاً من تحميل المهارات أو تشغيل الاختبارات الرجعية |
 
-يأتي `agent/.env.example` افتراضياً مع DeepSeek official API + `deepseek-v4-pro`; ويمكن لمستخدمي OpenRouter استخدام `deepseek/deepseek-v4-pro`.
+يستخدم `agent/.env.example` افتراضياً OpenRouter + `deepseek/deepseek-v4-pro`؛ لاستخدام واجهة DeepSeek الرسمية، اختر `LANGCHAIN_PROVIDER=deepseek` و`deepseek-v4-pro`.
 
 ---
 
@@ -1765,7 +1767,7 @@ Vibe-Trading جزء من نظام وكلاء **[HKUDS](https://github.com/HKUDS)
 
 | المرحلة | الميزة | الحالة |
 |-------|---------|--------|
-| **Trust Layer** | بطاقات تشغيل قابلة لإعادة الإنتاج تُنتج وتظهر في Run Detail؛ يضيف v1 آثار الأدوات والاستشهادات | v0 شُحن |
+| **Trust Layer** | سجلات بصمات تنفيذ الاختبار التاريخي ومراجع مقاييس CSV الموثقة في تفاصيل التشغيل وMarkdown، مع دعم البطاقات السابقة | عرض السجلات والمراجع متاح |
 | **Hypothesis Registry** | فرضيات بحثية دائمة مع حالة lifecycle ومصادر بيانات ومهارات وروابط run-card وملاحظات إبطال | Backend MVP شُحن |
 | **Research Autopilot** | حلقة بحث يدوية أولاً: فرضية → اختبار رجعي حتمي → تقرير أدلة | المراحل 1–3 شُحنت |
 | **Data Bridge** | أحضر بياناتك: موصلات CSV/Parquet/SQL محلية مع schema mapping | المُحمِّل المحلي شُحن |

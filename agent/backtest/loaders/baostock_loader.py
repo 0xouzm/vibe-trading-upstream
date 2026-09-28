@@ -10,6 +10,10 @@ Covers: A-shares (SH/SZ), does NOT cover HK/US/crypto.
 from __future__ import annotations
 
 import logging
+import os
+import socket
+import zlib
+from contextlib import contextmanager
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -19,13 +23,115 @@ from backtest.loaders.registry import register
 
 logger = logging.getLogger(__name__)
 
+# Per-read inactivity deadline for baostock socket IO (#1492). baostock 0.9.3
+# reads with no timeout and spins at 100% CPU when the peer closes the
+# connection, so every loader call goes through the guard below.
+_READ_TIMEOUT_ENV = "VIBE_TRADING_BAOSTOCK_TIMEOUT"
+_DEFAULT_READ_TIMEOUT = 30.0
+
+
+def _read_timeout() -> float:
+    raw = os.getenv(_READ_TIMEOUT_ENV)  # noqa: env-gate — generic env var helper
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+        logger.warning("ignoring invalid %s=%r", _READ_TIMEOUT_ENV, raw)
+    return _DEFAULT_READ_TIMEOUT
+
+
+def _bounded_send_msg(msg: str, timeout: float) -> Optional[str]:
+    """baostock's send_msg with a read deadline and EOF detection.
+
+    Byte-compatible with baostock 0.9.3 on a healthy server. Returns None on
+    timeout, closed connection, or a malformed reply; every baostock caller
+    maps None to BSERR_RECVSOCK_FAIL, so a dead server becomes an ordinary
+    fetch failure instead of a hang or a 100% CPU spin.
+    """
+    import baostock.common.contants as cons
+    import baostock.common.context as context
+
+    default_socket = getattr(context, "default_socket", None)
+    if default_socket is None:
+        logger.warning("baostock send before login or after a failed connect")
+        return None
+    try:
+        previous_timeout = default_socket.gettimeout()
+        default_socket.settimeout(timeout)
+        try:
+            default_socket.send(bytes(msg + "\n", encoding="utf-8"))
+            receive = b""
+            while True:
+                chunk = default_socket.recv(8192)
+                if not chunk:
+                    logger.warning("baostock server closed the connection mid-reply")
+                    return None
+                receive += chunk
+                if receive[-13:] == b"<![CDATA[]]>\n":
+                    break
+        finally:
+            default_socket.settimeout(previous_timeout)
+        head_bytes = receive[0 : cons.MESSAGE_HEADER_LENGTH]
+        head_str = bytes.decode(head_bytes)
+        head_arr = head_str.split(cons.MESSAGE_SPLIT)
+        if head_arr[1] in cons.COMPRESSED_MESSAGE_TYPE_TUPLE:
+            body_length = int(head_arr[2])
+            body_str = bytes.decode(
+                zlib.decompress(
+                    receive[
+                        cons.MESSAGE_HEADER_LENGTH : cons.MESSAGE_HEADER_LENGTH
+                        + body_length
+                    ]
+                )
+            )
+            return head_str + body_str
+        return bytes.decode(receive)
+    except Exception as exc:
+        logger.warning("baostock read failed: %s", exc)
+        return None
+
+
+def _connect_with_timeout(self, timeout: float) -> None:
+    """SocketUtil.connect with a deadline and no unbound-socket NameError."""
+    import baostock.common.contants as cons
+    import baostock.common.context as context
+
+    try:
+        sock = socket.create_connection(
+            (cons.BAOSTOCK_SERVER_IP, cons.BAOSTOCK_SERVER_PORT), timeout=timeout
+        )
+    except OSError as exc:
+        logger.warning("baostock connect failed: %s", exc)
+        sock = None
+    setattr(context, "default_socket", sock)
+
+
+@contextmanager
+def _baostock_socket_guard(timeout: float):
+    """Bound all baostock socket IO for the lifetime of one fetch."""
+    import baostock
+
+    # Attribute chain, not a submodule import, so sys.modules mocks still work.
+    socketutil = baostock.util.socketutil
+    original_send_msg = socketutil.send_msg
+    original_connect = socketutil.SocketUtil.connect
+    socketutil.send_msg = lambda msg: _bounded_send_msg(msg, timeout)
+    socketutil.SocketUtil.connect = lambda util: _connect_with_timeout(util, timeout)
+    try:
+        yield
+    finally:
+        socketutil.send_msg = original_send_msg
+        socketutil.SocketUtil.connect = original_connect
+
 
 def _is_a_share(code: str) -> bool:
     # Support both baostock native format (sh.601398) and tushare-style suffix (601398.SH)
     code_lower = code.lower()
-    return (
-        code_lower.startswith(("sh.", "sz."))
-        or code.upper().endswith((".SZ", ".SH"))
+    return code_lower.startswith(("sh.", "sz.")) or code.upper().endswith(
+        (".SZ", ".SH")
     )
 
 
@@ -45,6 +151,7 @@ class DataLoader:
         """Available if baostock is installed."""
         try:
             import baostock  # noqa: F401
+
             return True
         except ImportError:
             return False
@@ -84,35 +191,43 @@ class DataLoader:
             return {}
 
         import baostock as bs
-        lg = bs.login()
-        if lg.error_code != "0":
-            logger.error("baostock login failed: %s", lg.error_msg)
-            return {}
 
-        result: Dict[str, pd.DataFrame] = {}
-        try:
-            for code in codes:
-                try:
-                    df = cached_loader_fetch(
-                        source=self.name,
-                        symbol=code,
-                        timeframe=interval,
-                        start_date=start_date,
-                        end_date=end_date,
-                        fields=None,
-                        fetch=lambda code=code: self._fetch_one(bs, code, start_date, end_date),
-                    )
-                    if df is not None and not df.empty:
-                        result[code] = df
-                except Exception as exc:
-                    logger.warning("baostock failed for %s: %s", code, exc)
-        finally:
-            bs.logout()
+        with _baostock_socket_guard(_read_timeout()):
+            lg = bs.login()
+            if lg.error_code != "0":
+                logger.error("baostock login failed: %s", lg.error_msg)
+                return {}
+
+            result: Dict[str, pd.DataFrame] = {}
+            try:
+                for code in codes:
+                    try:
+                        df = cached_loader_fetch(
+                            source=self.name,
+                            symbol=code,
+                            timeframe=interval,
+                            start_date=start_date,
+                            end_date=end_date,
+                            fields=None,
+                            fetch=lambda code=code: self._fetch_one(
+                                bs, code, start_date, end_date
+                            ),
+                        )
+                        if df is not None and not df.empty:
+                            result[code] = df
+                    except Exception as exc:
+                        logger.warning("baostock failed for %s: %s", code, exc)
+            finally:
+                bs.logout()
 
         return result
 
     def _fetch_one(
-        self, bs, code: str, start_date: str, end_date: str,
+        self,
+        bs,
+        code: str,
+        start_date: str,
+        end_date: str,
     ) -> Optional[pd.DataFrame]:
         """Fetch a single A-share symbol."""
         if not _is_a_share(code):
@@ -154,7 +269,9 @@ class DataLoader:
         if not rows:
             return None
 
-        df = pd.DataFrame(rows, columns=["date", "open", "high", "low", "close", "volume", "amount"])
+        df = pd.DataFrame(
+            rows, columns=["date", "open", "high", "low", "close", "volume", "amount"]
+        )
         df["date"] = pd.to_datetime(df["date"])
         for col in ["open", "high", "low", "close", "volume", "amount"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")

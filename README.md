@@ -416,7 +416,7 @@ Every position row must provide a symbol and quantity. Unsupported currencies fa
 
 ### AI-friendly connector onboarding
 
-Built-in SDK connectors publish one machine-readable onboarding contract: authentication type, required credential fields, optional dependency, install command, and the read-only operation used for verification. `trading_connections` exposes the same contract to MCP clients, while the Portfolio connection center renders it as a generic form. The contract contains field names only — never credential values.
+Built-in SDK connectors publish one machine-readable onboarding contract: authentication type, required credential fields, optional dependency, install command, and the read-only operation used for verification. `trading_connections` exposes the same contract to MCP clients, while the Portfolio connection center renders it as a generic form. The contract contains field names only — never credential values. What each profile can actually call (read tools, quote paths, order kinds) is generated from the profile registry into [docs/broker-capabilities.md](docs/broker-capabilities.md) and drift-checked in CI.
 
 For a terminal-first setup, let the CLI collect secrets locally instead of putting them in a prompt or shell arguments:
 

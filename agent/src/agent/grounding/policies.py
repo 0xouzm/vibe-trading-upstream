@@ -734,7 +734,7 @@ class _PolicyMixin:
                 ]
                 metrics = [
                     float(entry["value"])
-                    for entry in self._analysis_metrics
+                    for entry in self._analysis_entries(symbol)
                     if key in (entry.get("call_id"), entry.get("tool"))
                     and entry.get("value") is not None
                 ]
@@ -763,6 +763,25 @@ class _PolicyMixin:
             metrics = []
         return records, metrics
 
+    def _analysis_entries(self, symbol: str | None) -> list[dict[str, Any]]:
+        """Scope metrics by explicit observed symbols recorded on their call.
+
+        Symbol-less aggregate calls remain eligible. A multi-symbol call cannot
+        attribute its otherwise unlabelled metric to one particular instrument.
+        Symbol-labelled EvidenceRecords remain available through their own path.
+        """
+        if not symbol:
+            return list(self._analysis_metrics)
+        call_symbols: dict[str, set[str]] = {}
+        for record in self._evidence:
+            if record.symbol and record.status == "observed":
+                call_symbols.setdefault(record.call_id, set()).add(record.symbol)
+        return [
+            entry for entry in self._analysis_metrics
+            if not call_symbols.get(entry.get("call_id"))
+            or call_symbols[entry.get("call_id")] == {symbol}
+        ]
+
     def _field_sources(
         self, field: str, symbol: str | None
     ) -> tuple[list[EvidenceRecord], list[dict[str, Any]]]:
@@ -788,7 +807,7 @@ class _PolicyMixin:
         ]
         entries = [
             entry
-            for entry in self._analysis_metrics
+            for entry in self._analysis_entries(symbol)
             if named(entry.get("field")) and entry.get("value") is not None
         ]
         return records, entries
@@ -1066,7 +1085,7 @@ class _PolicyMixin:
         """Metric values from completed analysis results and metric-named leaves."""
         values = [
             float(entry["value"])
-            for entry in self._analysis_metrics
+            for entry in self._analysis_entries(symbol)
             if entry.get("value") is not None
         ]
         values.extend(
@@ -1129,10 +1148,10 @@ class _PolicyMixin:
         """Whether a figure is ``target`` correctly rounded to the digits it was written with.
 
         Raw evidence uses the relative :data:`_TOLERANCE` band. A figure written
-        with decimals uses the slightly wider presentation-rounding
-        :data:`figures.ROUNDED_BAND`, then is narrowed to half a unit of its last
-        written decimal. This lets a correct two-decimal rendering such as
-        0.82467 -> 0.82 survive without admitting materially coarse renderings.
+        with decimals uses :data:`figures.ROUNDED_BAND` (the same 0.5% cap),
+        narrowed to half a unit of its last written decimal. A sufficiently
+        precise rendering such as
+        0.82467 -> 0.825 survive; 0.82 exceeds the 0.5% relative policy.
         A figure written without decimals keeps the raw relative band alone: an
         integer's precision is not known ("6,700" may be rounded to hundreds).
 
@@ -1193,7 +1212,7 @@ class _PolicyMixin:
             # so it cannot choose between the tail-risk identities in it (#1425).
             scoped_entries = [
                 entry
-                for entry in self._analysis_metrics
+                for entry in self._analysis_entries(symbol)
                 if declaration.ref in (entry.get("call_id"), entry.get("tool"))
             ]
             tail_risk = self._tail_risk_ref_required(
@@ -1281,12 +1300,12 @@ class _PolicyMixin:
             if not symbol or not record.symbol or record.symbol == symbol
         ]
         tail_risk = self._tail_risk_ref_required(
-            figure, session_records, self._analysis_metrics
+            figure, session_records, self._analysis_entries(symbol)
         )
         session_identities: list[str] = []
         if tail_risk:
             session_sources = self._tail_risk_sources(
-                session_records, self._analysis_metrics
+                session_records, self._analysis_entries(symbol)
             )
             session_identities = sorted({identity for identity, _ in session_sources})
             blocked = {
@@ -1323,7 +1342,7 @@ class _PolicyMixin:
                     "the field it quotes",
                     ambiguous_sources=session_identities,
                     field_ref_candidates=self._tail_risk_field_refs(
-                        session_records, self._analysis_metrics
+                        session_records, self._analysis_entries(symbol)
                     ),
                 )
             ]

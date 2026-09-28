@@ -1357,6 +1357,7 @@ class AgentLoop:
         # turn. Explicit grounding recovery (identity / missing price evidence)
         # keeps tools available; ordinary correction turns do not.
         grounding_correction_text_only = False
+        pending_grounding_draft = ""
         llm_usage_summary = _new_llm_usage_summary(self.llm)
         last_response_model: str | None = None
         goal_continuations = 0
@@ -1732,31 +1733,46 @@ class AgentLoop:
                 # Not filtered — reset the consecutive-skip counter.
                 consecutive_content_filter_count = 0
 
+                forced_grounding_release = False
                 if correction_text_only and response.has_tool_calls:
-                    # Tools were deliberately not offered on this correction turn.
-                    # Defensive handling keeps a provider/model that nevertheless
-                    # emits a tool call from escaping the bounded revision path.
+                    # An unoffered call consumes the same bounded correction
+                    # budget as an invalid revised draft, but is never executed
+                    # or inserted into the transcript as an unanswered tool call.
+                    grounding_revisions += 1
                     trace.write(
                         {
                             "type": "grounding_correction_tool_call_blocked",
                             "iter": current_iter,
+                            "round": grounding_revisions,
                         }
                     )
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                "[SYSTEM] This is a grounding correction turn. "
-                                "Do not call tools. Revise the previous draft using "
-                                "the evidence already gathered, or remove claims "
-                                "that cannot be supported."
-                            ),
-                        }
+                    if streamed_chars:
+                        self._emit(
+                            "stream_reset",
+                            {"iter": current_iter, "reason": "grounding_tool_call_blocked"},
+                        )
+                    forced_grounding_release = (
+                        grounding_revisions >= MAX_GROUNDING_REVISIONS
+                        or iteration == self.max_iterations
                     )
-                    continue
+                    if not forced_grounding_release:
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "<system>This is a grounding correction turn. "
+                                    "Do not call tools. Revise the previous draft using "
+                                    "the evidence already gathered, or remove claims "
+                                    "that cannot be supported.</system>"
+                                ),
+                            }
+                        )
+                        continue
 
-                if not response.has_tool_calls:
-                    final_content = response.content or ""
+                if forced_grounding_release or not response.has_tool_calls:
+                    # At the cap, release the last actual draft through the
+                    # existing gate. The forbidden call's text is not an answer.
+                    final_content = pending_grounding_draft if forced_grounding_release else response.content or ""
                     syntax_fallback_emitted = False
                     if not final_content:
                         empty_model_response_iter = iteration
@@ -1836,7 +1852,11 @@ class AgentLoop:
                         )
                         syntax_fallback_emitted = True
                     if self._grounding is not None:
-                        validation = self._grounding.validate_final_answer(final_content)
+                        validation = (
+                            self._grounding.revalidate(final_content)
+                            if forced_grounding_release
+                            else self._grounding.validate_final_answer(final_content)
+                        )
                         if not validation.valid:
                             # A draft whose only defect is a missing provenance
                             # word (source / currency / symbol suffix) gets the
@@ -1867,34 +1887,35 @@ class AgentLoop:
                             # the gate, not answer text.
                             final_content = validation.released_text
                         if not validation.valid:
-                            trace.write_text_entry(
-                                {
-                                    "type": "answer_rejected",
-                                    "iter": current_iter,
-                                    "issues": validation.issues,
-                                },
-                                field="content",
-                                value=final_content,
-                                offload_kind=f"answer-rejected-{current_iter}",
-                            )
-                            if not buffer_text_output and streamed_chars:
-                                # The stream showed this draft up to its first unchecked
-                                # number; the next draft or the released answer replaces it.
-                                self._emit(
-                                    "stream_reset",
-                                    {"iter": current_iter, "reason": "grounding_rejected"},
+                            if not forced_grounding_release:
+                                trace.write_text_entry(
+                                    {
+                                        "type": "answer_rejected",
+                                        "iter": current_iter,
+                                        "issues": validation.issues,
+                                    },
+                                    field="content",
+                                    value=final_content,
+                                    offload_kind=f"answer-rejected-{current_iter}",
                                 )
-                            react_trace.append(
-                                {
-                                    "type": "answer_rejected",
-                                    "issues": validation.issues,
-                                }
-                            )
-                            messages.append(
-                                {"role": "assistant", "content": final_content}
-                            )
+                                if not buffer_text_output and streamed_chars:
+                                    # The stream showed this draft up to its first unchecked
+                                    # number; the next draft or the released answer replaces it.
+                                    self._emit(
+                                        "stream_reset",
+                                        {"iter": current_iter, "reason": "grounding_rejected"},
+                                    )
+                                react_trace.append(
+                                    {
+                                        "type": "answer_rejected",
+                                        "issues": validation.issues,
+                                    }
+                                )
+                                messages.append(
+                                    {"role": "assistant", "content": final_content}
+                                )
                             recovery = self._grounding.recovery_action(validation)
-                            if recovery is not None and iteration < self.max_iterations:
+                            if not forced_grounding_release and recovery is not None and iteration < self.max_iterations:
                                 # Explicit bounded recovery is the one case where
                                 # the next turn is allowed to research again.
                                 grounding_correction_text_only = False
@@ -1925,13 +1946,15 @@ class AgentLoop:
                                 )
                                 final_content = ""
                                 continue
-                            messages.append(
-                                {
-                                    "role": "user",
-                                    "content": f"<system>{self._grounding.correction_prompt(validation)}</system>",
-                                }
-                            )
+                            if not forced_grounding_release:
+                                messages.append(
+                                    {
+                                        "role": "user",
+                                        "content": f"<system>{self._grounding.correction_prompt(validation)}</system>",
+                                    }
+                                )
                             rejected_draft = final_content
+                            pending_grounding_draft = rejected_draft
                             final_content = ""
                             # The budget counts drafts rejected on this
                             # correction path; the last one is released with
@@ -1940,9 +1963,11 @@ class AgentLoop:
                             # rather than rewording), so a run that had to
                             # resolve its symbol first still gets a corrected
                             # draft.
-                            grounding_revisions += 1
+                            if not forced_grounding_release:
+                                grounding_revisions += 1
                             if (
-                                iteration < self.max_iterations
+                                not forced_grounding_release
+                                and iteration < self.max_iterations
                                 and grounding_revisions < MAX_GROUNDING_REVISIONS
                             ):
                                 grounding_correction_text_only = True
@@ -2028,10 +2053,14 @@ class AgentLoop:
                                     "text_delta",
                                     {"delta": final_content[len(shown):], "iter": current_iter},
                                 )
+                    # The correction has ended. A goal continuation is a new
+                    # research turn and must regain its normal tool access.
+                    grounding_correction_text_only = False
+                    pending_grounding_draft = ""
                     should_continue_goal = False
                     continuation_snapshot = None
                     _max_cont = _goal_max_continuations()
-                    if active_goal_id and session_id and _max_cont > 0:
+                    if not forced_grounding_release and active_goal_id and session_id and _max_cont > 0:
                         try:
                             if goal_store is None:
                                 from src.goal import GoalStore

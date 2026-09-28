@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -162,7 +163,13 @@ def _reexpose_mt5_config(src_root: Path, dst_root: Path) -> None:
         return
     if not isinstance(config, dict):
         return
-    subset = {key: config[key] for key in ("terminal_path", "timeout") if key in config}
+    subset: dict[str, Any] = {}
+    terminal_path = config.get("terminal_path")
+    if isinstance(terminal_path, str) and terminal_path.strip() and "\x00" not in terminal_path:
+        subset["terminal_path"] = terminal_path
+    timeout = config.get("timeout")
+    if type(timeout) in (int, float) and math.isfinite(timeout) and timeout > 0:
+        subset["timeout"] = timeout
     if not subset:
         return
     try:

@@ -488,3 +488,14 @@ def test_execute_applies_address_space_rlimit(monkeypatch, tmp_path: Path) -> No
 
     assert result.success, result.stderr
     assert result.stdout.strip().splitlines()[-1] == str(expected)
+
+
+@pytest.mark.parametrize("value", [{"password": "must-not-copy"}, ["must-not-copy"], True, float("inf")])
+def test_mt5_sandbox_allowlist_rejects_nonprimitive_settings(tmp_path, value):
+    from src.core.runner import _reexpose_mt5_config
+    source, target = tmp_path / "source", tmp_path / "target"
+    source.mkdir()
+    target.mkdir()
+    (source / "mt5.json").write_text(json.dumps({"terminal_path": value, "timeout": value, "login": "private"}))
+    _reexpose_mt5_config(source, target)
+    assert not (target / "mt5.json").exists()

@@ -982,3 +982,52 @@ class TestProfilesAndRegistration:
         result = service.place_order("EURUSD", "mt5-live-trade", side="buy", quantity=0.05)
         assert result["status"] == "blocked"
         assert fake_mt5.order_send_requests == []  # gate blocks before any SDK call
+
+
+def test_catalog_ambiguity_is_not_silently_selected(fake_mt5):
+    from src.trading.connectors.mt5 import sdk
+    fake_mt5.symbols["XAUUSDz"] = SimpleNamespace(name="XAUUSDz")
+    result = sdk.search_instruments("XAUUSD", config=_paper_config(terminal_path="C:/mt5/terminal64.exe", symbol_suffix=""))
+    assert result["status"] == "error"
+    assert "ambiguous" in result["error"]
+    assert result["instruments"] == []
+    assert fake_mt5.order_send_requests == []
+
+
+def test_catalog_exact_native_case_preserved(fake_mt5):
+    from src.trading.connectors.mt5 import sdk
+    fake_mt5.symbols["XAUUSDz"] = SimpleNamespace(name="XAUUSDz")
+    result = sdk.search_instruments("XAUUSDz", config=_paper_config(terminal_path="C:/mt5/terminal64.exe"))
+    assert result["instruments"][0]["native_symbol"] == "XAUUSDz"
+    assert "paper_guard" not in result
+    assert "is_demo" not in result
+
+
+def test_catalog_failure_is_redacted_and_detached(fake_mt5):
+    from src.trading.connectors.mt5 import sdk
+    def failing(*args, **kwargs):
+        raise RuntimeError("private broker credential")
+    fake_mt5.symbol_info = failing
+    result = sdk.search_instruments("XAUUSD", config=_paper_config(terminal_path="C:/mt5/terminal64.exe"))
+    assert result["status"] == "error"
+    assert "private broker credential" not in str(result)
+    assert fake_mt5.shutdown_calls == 1
+
+
+def test_catalog_shutdown_does_not_hide_success(fake_mt5):
+    from src.trading.connectors.mt5 import sdk
+    def failing():
+        raise RuntimeError("detach failed")
+    fake_mt5.shutdown = failing
+    result = sdk.search_instruments("XAUUSD", config=_paper_config(terminal_path="C:/mt5/terminal64.exe"))
+    assert result["status"] == "ok"
+
+
+@pytest.mark.parametrize("timeout", [float("nan"), float("inf"), -1.0, 0.0])
+def test_catalog_invalid_timeout_does_not_attach(fake_mt5, timeout):
+    from src.trading.connectors.mt5 import sdk
+    from dataclasses import replace
+    cfg = replace(_paper_config(terminal_path="C:/mt5/terminal64.exe"), timeout=timeout)
+    result = sdk.search_instruments("XAUUSD", config=cfg)
+    assert result["status"] == "error"
+    assert fake_mt5.initialize_calls == []

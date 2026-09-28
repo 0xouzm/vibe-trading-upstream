@@ -57,7 +57,7 @@ class _FakeMT5Module:
     def __init__(self) -> None:
         self.initialize_result = True
         self.initialize_calls: list[dict[str, Any]] = []
-        self.symbol_names = ["EURUSDm", "EURUSDz", "XAUUSDm", "USDJPYm"]
+        self.symbol_names = ["EURUSDm", "XAUUSDm", "USDJPYm"]
         self.rates: dict[str, np.ndarray | None] = {}
         self.rates_calls: list[tuple[str, int, Any, Any]] = []
 
@@ -95,7 +95,6 @@ def fake_mod(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _FakeMT5Module:
     monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
     monkeypatch.setattr(mt5_loader, "_MT5_CONFIG_PATH", tmp_path / "mt5.json")
     monkeypatch.setattr(mt5_loader, "_init_state", None)
-    monkeypatch.setattr(mt5_loader, "_symbol_cache", {})
     return fake
 
 
@@ -120,12 +119,11 @@ class TestQueryBase:
 
 
 class TestResolution:
-    def test_suffix_discovery_prefers_shortest_then_alpha(self, fake_mod: _FakeMT5Module) -> None:
-        loader = DataLoader()
-        frames = loader.fetch(["EUR/USD"], "2026-06-01", "2026-06-10")
-        # EURUSDm and EURUSDz both match EURUSD*; deterministic pick is EURUSDm.
-        assert fake_mod.rates_calls[0][0] == "EURUSDm"
-        assert "EUR/USD" in frames
+    def test_ambiguous_suffix_discovery_fails_closed(self, fake_mod: _FakeMT5Module) -> None:
+        fake_mod.symbol_names.append("EURUSDz")
+        frames = DataLoader().fetch(["EUR/USD"], "2026-06-01", "2026-06-10")
+        assert frames == {}
+        assert fake_mod.rates_calls == []
 
     def test_exact_symbol_wins_over_suffix(self, fake_mod: _FakeMT5Module) -> None:
         fake_mod.symbol_names.append("EURUSD")
@@ -300,3 +298,17 @@ class TestRegistryWiring:
         from src.market_data import detect_source
 
         assert detect_source(code) == expected
+
+
+def test_resolution_rechecks_catalog_ambiguity(fake_mod):
+    assert mt5_loader._resolve_broker_symbol(fake_mod, "EUR/USD") == "EURUSDm"
+    fake_mod.symbol_names.append("EURUSDz")
+    assert mt5_loader._resolve_broker_symbol(fake_mod, "EUR/USD") is None
+    assert mt5_loader._resolve_broker_symbol(fake_mod, "EURUSDz") == "EURUSDz"
+
+
+@pytest.mark.parametrize("config", [{"timeout": "nan"}, {"timeout": "bad"}, {"timeout": -1}, {"terminal_path": {"password": "private"}}, {"login": "bad"}])
+def test_loader_invalid_config_degrades_without_attach(fake_mod, monkeypatch, config):
+    monkeypatch.setattr(mt5_loader, "_read_mt5_config", lambda: config)
+    assert DataLoader().is_available() is False
+    assert fake_mod.initialize_calls == []

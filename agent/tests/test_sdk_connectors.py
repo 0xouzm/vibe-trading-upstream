@@ -1003,3 +1003,12 @@ def test_shoonya_service_unconfigured(monkeypatch, tmp_path) -> None:
     assert result["status"] == "error"
     assert result["connector"] == "shoonya"
     assert result["transport"] == "broker_sdk"
+
+
+def test_mt5_instrument_search_refuses_executable_override(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("must not attach to an overridden executable")
+    monkeypatch.setattr(mt5, "search_instruments", forbidden)
+    result = service.search_instruments("XAUUSD", "mt5-paper-sdk", terminal_path="C:/arbitrary.exe")
+    assert result["status"] == "error"
+    assert result["instruments"] == []

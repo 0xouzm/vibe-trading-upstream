@@ -1151,3 +1151,64 @@ class TestSpotGoldCandidateFilter:
         symbols = [c["symbol"] for c in data["candidates"]]
         assert "BTC-USD" in symbols
         assert "AAPL.US" in symbols
+
+
+@pytest.mark.parametrize("query", ["XAUUSDm", "EURUSDm", "US500.cash"])
+def test_selected_mt5_native_symbol_uses_only_terminal(monkeypatch, query):
+    monkeypatch.setattr(trading_profiles, "load_selected_profile_id", lambda: "mt5-paper-sdk")
+    monkeypatch.setattr(trading_service, "search_instruments", lambda *args, **kwargs: {
+        "status": "ok", "instruments": [{"symbol": query, "native_symbol": query, "market": "mt5", "type": "cfd"}]
+    })
+    def forbidden(*args, **kwargs):
+        raise AssertionError("MT5 identity must not use web search")
+    monkeypatch.setattr(ss, "_search_eastmoney", forbidden)
+    monkeypatch.setattr(ss, "_search_yahoo", forbidden)
+    data = json.loads(ss.SymbolSearchTool().execute(query=query))["data"]
+    assert data["count"] == 1
+    assert data["candidates"][0]["symbol"] == query
+    assert data["candidates"][0]["market"] == "mt5"
+
+
+def test_mt5_ambiguous_native_rows_are_not_deduplicated_into_identity(monkeypatch):
+    monkeypatch.setattr(trading_profiles, "load_selected_profile_id", lambda: "mt5-paper-sdk")
+    monkeypatch.setattr(trading_service, "search_instruments", lambda *args, **kwargs: {
+        "status": "ok", "instruments": [{"native_symbol": name} for name in ("XAUUSDm", "XAUUSDz")]
+    })
+    data = json.loads(ss.SymbolSearchTool().execute(query="XAUUSD"))["data"]
+    assert data["candidates"] == []
+    assert "ambiguous" in data["sources"]["mt5"]
+
+
+@pytest.mark.parametrize("query,native,market,kind", [
+    ("XAUUSDm", "XAUUSDm", "mt5", "cfd"),
+    ("EURUSDm", "EURUSDm", "fx", "forex"),
+    ("XAUUSD.FX", "XAUUSDm", "mt5", "cfd"),
+    ("EURUSD.FX", "EURUSDm", "fx", "forex"),
+])
+def test_mt5_selected_identity_reaches_grounding_without_substitution(monkeypatch, tmp_path, query, native, market, kind):
+    monkeypatch.setattr(trading_profiles, "load_selected_profile_id", lambda: "mt5-paper-sdk")
+    monkeypatch.setattr(trading_service, "search_instruments", lambda *args, **kwargs: {
+        "status": "ok", "instruments": [{"symbol": native, "native_symbol": native, "market": market, "type": kind, "venue": "MT5"}]
+    })
+    result = ss.SymbolSearchTool().execute(query=query)
+    ledger = GroundingLedger(run_dir=tmp_path, user_message=f"Quote {query}")
+    ledger.ingest_tool_result(tool_name="search_symbol", arguments={"query": query}, result=result, call_id="mt5-identity", success=True)
+    assert json.loads(result)["data"]["candidates"][0]["native_symbol"] == native
+    assert ledger.identity_status == "locked"
+    records = [record for record in ledger.identity_summary()["records"]
+               if record["source_tool_call_id"] == "mt5-identity"]
+    assert len(records) == 1
+    assert records[0]["instrument_type"] == kind
+    assert records[0]["symbol"] == query.upper()
+
+
+def test_mt5_ambiguous_catalog_leaves_grounding_unresolved(monkeypatch, tmp_path):
+    monkeypatch.setattr(trading_profiles, "load_selected_profile_id", lambda: "mt5-paper-sdk")
+    monkeypatch.setattr(trading_service, "search_instruments", lambda *args, **kwargs: {
+        "status": "ok", "instruments": [{"native_symbol": name} for name in ("XAUUSDm", "XAUUSDz")]
+    })
+    result = ss.SymbolSearchTool().execute(query="XAUUSD")
+    ledger = GroundingLedger(run_dir=tmp_path, user_message="Quote XAUUSD")
+    ledger.ingest_tool_result(tool_name="search_symbol", arguments={"query": "XAUUSD"}, result=result, call_id="ambiguous-mt5", success=True)
+    assert ledger.identity_status != "locked"
+    assert ledger.identity_summary()["authorized_symbols"] == []

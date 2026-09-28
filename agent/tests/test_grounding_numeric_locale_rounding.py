@@ -138,7 +138,7 @@ def test_zero_decimal_comma_sets_document_locale() -> None:
 def test_live_shape_links_localized_prose_to_precise_declarations() -> None:
     content = (
         "PAMP.BA (Yahoo, ARS): cierre AR$5.165; volumen 502.408; "
-        "ratio de volumen 0,82."
+        "ratio de volumen 0,825."
         + _figures(
             "5165.0 | observed | latest_close | technical_indicators",
             "502408.0 | observed | indicators.volume.latest | technical_indicators",
@@ -149,16 +149,16 @@ def test_live_shape_links_localized_prose_to_precise_declarations() -> None:
     claims = {
         figure.text: figure
         for figure in scan_figures(content, block)
-        if figure.text in {"5.165", "502.408", "0,82"}
+        if figure.text in {"5.165", "502.408", "0,825"}
     }
 
-    assert set(claims) == {"5.165", "502.408", "0,82"}
+    assert set(claims) == {"5.165", "502.408", "0,825"}
     assert claims["5.165"].value == 5165.0
     assert claims["502.408"].value == 502408.0
-    assert claims["0,82"].value == 0.82
+    assert claims["0,825"].value == 0.825
     assert block.match(5165.0, False, claims["5.165"].digits) is not None
     assert block.match(502408.0, False, claims["502.408"].digits) is not None
-    assert block.match(0.82, False, claims["0,82"].digits) is not None
+    assert block.match(0.825, False, claims["0,825"].digits) is not None
 
 
 def test_spanish_grouped_tool_values_survive_the_grounding_gate(tmp_path: Path) -> None:
@@ -187,7 +187,7 @@ def test_spanish_grouped_tool_values_survive_the_grounding_gate(tmp_path: Path) 
     )
     result = ledger.validate_final_answer(
         "PAMP.BA (Yahoo, ARS): cierre AR$5.165; volumen 502.408; "
-        "ratio de volumen 0,82."
+        "ratio de volumen 0,825."
         + _figures(
             "5165.0 | observed | latest_close | technical_indicators",
             "502408.0 | observed | indicators.volume.latest | technical_indicators",
@@ -332,10 +332,10 @@ def test_an_undeclared_figure_is_grounded_only_within_its_own_rounding(
         (38.68005857871268, False, 38.50, "38.50", False, False),
         (38.68005857871268, False, 39.0, "39", False, False),
         (2.63949965, False, 2.64, "2.64", False, True),
-        # A mathematically correct two-decimal rendering below 1 may move by
-        # slightly more than the raw 0.5% evidence tolerance.
-        (0.8246699017713774, False, 0.82, "0.82", False, True),
-        # The widened presentation band remains bounded: this coarse rendering
+        # Keep the existing 0.5% safety band: write more digits when needed.
+        (0.8246699017713774, False, 0.82, "0.82", False, False),
+        (0.8246699017713774, False, 0.825, "0.825", False, True),
+        # The presentation band remains bounded: this coarse rendering
         # loses 28% of the value and must not borrow the declaration.
         (0.014, False, 0.01, "0.01", False, False),
         (2.6395, False, 2.50, "2.50", False, False),

@@ -345,6 +345,8 @@ def _infer_currency(symbol: str) -> str | None:
 def _infer_instrument_type(symbol: str, candidate_type: Any = None) -> str:
     """Normalize provider types into the identity contract."""
     raw = str(candidate_type or "").strip().casefold()
+    if raw == "cfd":
+        return "cfd"
     if "fund" in raw or "etf" in raw or "trust" in raw:
         return "fund"
     if "crypto" in raw:

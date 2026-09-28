@@ -248,12 +248,6 @@ def search_instruments(
 ) -> dict[str, Any]:
     """Resolve one explicit symbol against the configured terminal catalog."""
     cfg = config or _client.load_config()
-    raw = str(query or "").strip().upper()
-    base = raw[:-2] if raw.endswith("=X") else raw
-    base = _client.normalize_base(base)
-    if not base or not base.isalnum():
-        return _error(cfg, "symbol search requires an explicit symbol", instruments=[])
-
     try:
         bounded_limit = max(1, min(int(limit), 50))
     except (TypeError, ValueError, OverflowError):
@@ -261,30 +255,10 @@ def search_instruments(
 
     try:
         with _client._catalog_session(cfg) as mt5:
-            candidates = []
-            if cfg.symbol_suffix:
-                candidates.append(base + cfg.symbol_suffix)
-            candidates.append(base)
-            info = None
-            for name in candidates:
-                info = mt5.symbol_info(name)
-                if info is not None:
-                    break
-            if info is None:
-                matches = sorted(
-                    (
-                        item
-                        for item in (mt5.symbols_get(group=f"{base}*") or ())
-                        if str(getattr(item, "name", "")).upper().startswith(base)
-                    ),
-                    key=lambda item: (
-                        len(str(getattr(item, "name", ""))),
-                        str(getattr(item, "name", "")),
-                    ),
-                )
-                info = matches[0] if matches else None
+            name = _client._catalog_symbol(mt5, cfg, str(query or ""))
+            info = mt5.symbol_info(name)
     except _MT5_ERRORS as exc:
-        return _error(cfg, str(exc), instruments=[])
+        return {"status": "error", "error": str(exc), "instruments": [], "catalog_only": True}
 
     instruments = []
     if info is not None:
@@ -301,7 +275,7 @@ def search_instruments(
                     "venue": cfg.server or "MT5",
                 }
             )
-    return _envelope(cfg, query=query, instruments=instruments[:bounded_limit])
+    return {"status": "ok", "query": query, "instruments": instruments[:bounded_limit], "catalog_only": True}
 
 
 def get_historical_bars(

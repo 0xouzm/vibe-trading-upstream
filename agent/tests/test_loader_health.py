@@ -1,129 +1,199 @@
-"""Weekly live-source health canary (#1623).
+"""Offline contracts for the separately scheduled public-source canary."""
 
-For every registered loader that needs no credentials, fetch one known-liquid
-symbol over a recent window and assert the normalized frame comes back
-non-empty, in the expected columnar shape, with a last bar no older than two
-weeks. The point is that a dead or drifted third-party endpoint fails here
-before a user files it.
-
-Off the default CI lane: this module only runs when VIBE_TRADING_LOADER_HEALTH=1
-(the weekly loader-health workflow sets it). A loader that cannot be reached
-from the runner at all (geo-blocked or network-filtered) is reported as
-unreachable rather than failed when the fetch raises a network error; an empty,
-malformed, or stale answer is a hard failure, because that is what drift
-actually looks like. Note loaders swallow request failures into an empty
-result, so an empty frame can mean runner connectivity or endpoint drift —
-either way it deserves eyes, and the retry plus weekly cadence keep transient
-flaps from crying wolf.
-"""
-
-from __future__ import annotations
-
-import os
-import socket
 from datetime import date, timedelta
+import json
+import subprocess
 
+import pandas as pd
 import pytest
 import requests
 
-from backtest.loaders.registry import LOADER_REGISTRY, _ensure_registered
+from backtest import loader_health as health
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        os.environ.get("VIBE_TRADING_LOADER_HEALTH") != "1",
-        reason="weekly loader-health lane only (VIBE_TRADING_LOADER_HEALTH=1)",
-    ),
-]
+TODAY = date(2026, 9, 28)
 
-# One known-liquid symbol per no-auth loader, in that loader's own format.
-CANARY_SYMBOLS: dict[str, str] = {
-    "akshare": "601398",
-    "baostock": "sh.601398",
-    "binance": "BTC/USDT",
-    "ccxt": "BTC/USDT",
-    "eastmoney": "601398.SH",
-    "mootdx": "601398",
-    "nobitex": "BTC-IRT",
-    "okx": "BTC-USDT",
-    "pykrx": "005930.KS",
-    "sina": "AAPL.US",
-    "stooq": "AAPL.US",
-    "tencent": "601398.SH",
-    "wallex": "BTC-TMN",
-    "yahoo": "AAPL",
-    "yfinance": "AAPL",
-}
 
-_FRESHNESS_DAYS = 14  # equities close on weekends and holidays
-_WINDOW_DAYS = 21  # fetch window comfortably covers the freshness window
+def frame(age=0):
+    return pd.DataFrame(
+        {"open": [10.0], "high": [12.0], "low": [9.0], "close": [11.0], "volume": [100.0]},
+        index=pd.DatetimeIndex([TODAY - timedelta(days=age)]),
+    )
 
-# Exceptions that mean "the runner cannot reach this source", not "the source
-# is broken". Those are reported, not failed.
-_UNREACHABLE = (
-    ConnectionError,
-    TimeoutError,
-    socket.timeout,
-    requests.exceptions.ConnectionError,
-    requests.exceptions.ConnectTimeout,
-    requests.exceptions.ReadTimeout,
+
+def test_catalog_covers_every_public_network_loader():
+    assert health.coverage_errors() == []
+
+
+def test_new_loader_cannot_silently_disappear(monkeypatch):
+    from backtest.loaders.registry import LOADER_REGISTRY
+
+    monkeypatch.setitem(LOADER_REGISTRY, "new_public_source", type("Loader", (), {"requires_auth": False}))
+    assert "unmapped:new_public_source" in health.coverage_errors()
+
+
+@pytest.mark.parametrize("age,status", [(0, "healthy"), (14, "healthy"), (15, "stale"), (-1, "invalid")])
+def test_freshness_bounds(age, status):
+    assert health.check_frame(frame(age), TODAY)["status"] == status
+
+
+@pytest.mark.parametrize(
+    "change,reason",
+    [
+        (lambda f: f.iloc[:0], "empty_frame"),
+        (lambda f: f.drop(columns="close"), "schema"),
+        (lambda f: f.assign(close="11"), "numeric_columns"),
+        (lambda f: f.assign(close=float("nan")), "nonfinite_values"),
+        (lambda f: f.assign(high=5), "ohlc_order"),
+        (lambda f: f.assign(volume=-1), "invalid_prices_or_volume"),
+        (lambda f: f.reset_index(drop=True), "datetime_index"),
+        (lambda f: pd.concat([f, f]), "index_order"),
+    ],
 )
+def test_normalized_contract(change, reason):
+    assert health.check_frame(change(frame()), TODAY)["reason"] == reason
 
 
-def _canary_loaders() -> list[tuple[str, type, str]]:
-    _ensure_registered()
-    out = []
-    for name, cls in sorted(LOADER_REGISTRY.items()):
-        if name not in CANARY_SYMBOLS or getattr(cls, "requires_auth", True):
-            continue
-        out.append((name, cls, CANARY_SYMBOLS[name]))
-    return out
+def test_no_keys_operator_home_or_cache_in_child(monkeypatch, tmp_path):
+    monkeypatch.setenv("GITHUB_TOKEN", "private-test-value")
+    monkeypatch.setenv("OPENAI_API_KEY", "private-test-value")
+    monkeypatch.setenv("VIBE_TRADING_DATA_CACHE", "1")
+    monkeypatch.setenv("PYTHONPATH", "/operator/overrides")
+    env = health.child_environment(str(tmp_path))
+    assert "GITHUB_TOKEN" not in env and "OPENAI_API_KEY" not in env
+    assert env["HOME"] == env["VIBE_TRADING_HOME"] == str(tmp_path)
+    assert env["VIBE_TRADING_DATA_CACHE"] == "0"
+    assert env["PYTHONPATH"] != "/operator/overrides"
 
 
-def _collect() -> list[str]:
-    return [name for name, _, _ in _canary_loaders()]
+def test_unavailable_endpoint_is_not_skipped(monkeypatch):
+    from backtest.loaders.registry import LOADER_REGISTRY
+
+    monkeypatch.setitem(
+        LOADER_REGISTRY,
+        "tencent",
+        type(
+            "Loader",
+            (),
+            {
+                "requires_auth": False,
+                "is_available": lambda self: False,
+            },
+        ),
+    )
+    assert health.probe("tencent", TODAY) == {
+        "status": "unavailable",
+        "reason": "availability_probe_failed",
+        "attempts": 2,
+    }
 
 
-@pytest.mark.parametrize("loader_name", _collect(), ids=_collect())
-def test_loader_canary(loader_name: str) -> None:
-    _, cls, symbol = next((n, c, s) for n, c, s in _canary_loaders() if n == loader_name)
-    loader = cls()
-    if not loader.is_available():
-        pytest.skip(f"{loader_name} package not installed in this environment")
+def test_network_error_is_sanitized_and_retried(monkeypatch):
+    from backtest.loaders.registry import LOADER_REGISTRY
 
-    end = date.today()
-    start = end - timedelta(days=_WINDOW_DAYS)
+    calls = []
 
-    last_exc: Exception | None = None
-    result = None
-    for attempt in (1, 2):  # one retry rides out a flaky first connection
-        try:
-            result = loader.fetch(
-                [symbol],
-                start.strftime("%Y-%m-%d"),
-                end.strftime("%Y-%m-%d"),
-                interval="1D",
-            )
-            last_exc = None
-            break
-        except _UNREACHABLE as exc:
-            last_exc = exc
-        except Exception as exc:  # noqa: BLE001 - reported by class below
-            last_exc = exc
-            break
+    def fetch(self, *args, **kwargs):
+        calls.append(args)
+        raise requests.exceptions.ConnectionError("https://secret:token@internal.example")
 
-    if last_exc is not None:
-        if isinstance(last_exc, _UNREACHABLE):
-            pytest.skip(f"{loader_name} unreachable from this runner: {last_exc}")
-        pytest.fail(f"{loader_name} raised {type(last_exc).__name__}: {last_exc}")
+    monkeypatch.setitem(
+        LOADER_REGISTRY,
+        "tencent",
+        type(
+            "Loader",
+            (),
+            {
+                "requires_auth": False,
+                "is_available": lambda self: True,
+                "fetch": fetch,
+            },
+        ),
+    )
+    result = health.probe("tencent", TODAY)
+    assert result["status"] == "unreachable" and len(calls) == 2
+    assert "secret" not in json.dumps(result)
 
-    assert result is not None and symbol in result, f"{loader_name} returned no frame for {symbol}: {result!r}"
-    frame = result[symbol]
-    assert not frame.empty, f"{loader_name} returned an empty frame for {symbol}"
-    for col in ("open", "high", "low", "close", "volume"):
-        assert col in frame.columns, f"{loader_name} frame missing {col}"
 
-    last_bar = frame.index[-1]
-    last_date = last_bar.date() if hasattr(last_bar, "date") else last_bar
-    age = (date.today() - last_date).days
-    assert age <= _FRESHNESS_DAYS, f"{loader_name} last bar for {symbol} is {last_date} ({age}d old)"
+def test_child_deadline_is_failure(monkeypatch):
+    def timeout(*args, **kwargs):
+        assert kwargs["timeout"] == 0.1
+        raise subprocess.TimeoutExpired(args[0], 0.1)
+
+    monkeypatch.setattr(health.subprocess, "run", timeout)
+    assert health.run_source("tencent", TODAY, 0.1)["status"] == "timeout"
+
+
+def test_real_child_is_killed_at_deadline():
+    assert health.run_source("tencent", TODAY, 0.001)["status"] == "timeout"
+
+
+@pytest.mark.parametrize(
+    "status,coverage,exit_code",
+    [
+        ("healthy", [], 0),
+        ("unavailable", [], 1),
+        ("missing_dependency", [], 1),
+        ("healthy", ["unmapped:new"], 1),
+    ],
+)
+def test_lane_exit_and_report(monkeypatch, tmp_path, status, coverage, exit_code):
+    output = tmp_path / "report.json"
+    monkeypatch.setattr(health.sys, "argv", ["health", "--output", str(output)])
+    monkeypatch.setattr(health, "CANARY_SYMBOLS", {"test": "TEST"})
+    monkeypatch.setattr(health, "coverage_errors", lambda: coverage)
+    monkeypatch.setattr(health, "run_source", lambda *args: {"source": "test", "status": status})
+    assert health.main() == exit_code
+    report = json.loads(output.read_text())
+    assert report["coverage_errors"] == coverage
+    assert report["sources"] == [{"source": "test", "status": status}]
+
+
+@pytest.mark.parametrize(
+    "payload,status",
+    [
+        ('{"status":"healthy","rows":2}', "healthy"),
+        ("not json", "error"),
+        ("[]", "error"),
+        ('{"status":"skip"}', "error"),
+        (None, "error"),
+    ],
+)
+def test_child_report_handling(monkeypatch, payload, status):
+    from pathlib import Path
+
+    def child(command, **kwargs):
+        if payload is not None:
+            Path(command[-1]).write_text(payload)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(health.subprocess, "run", child)
+    assert health.run_source("tencent", TODAY, 1)["status"] == status
+
+
+def test_second_attempt_recovers_without_fallback(monkeypatch):
+    from backtest.loaders.registry import LOADER_REGISTRY
+
+    calls = []
+
+    def fetch(self, codes, start, end, *, interval):
+        calls.append(codes)
+        if len(calls) == 1:
+            return {}
+        return {"601398.SH": frame()}
+
+    monkeypatch.setitem(
+        LOADER_REGISTRY,
+        "tencent",
+        type(
+            "Loader",
+            (),
+            {
+                "requires_auth": False,
+                "is_available": lambda self: True,
+                "fetch": fetch,
+            },
+        ),
+    )
+    result = health.probe("tencent", TODAY)
+    assert result["status"] == "healthy" and result["attempts"] == 2
+    assert calls == [["601398.SH"], ["601398.SH"]]

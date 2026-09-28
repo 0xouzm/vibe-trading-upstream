@@ -52,6 +52,8 @@
 
 > ⚠️ **Security warning:** The X account `VibeTrading_HKU`, Virtuals project `101845`, and token contract `0x640BDBF77b6447E8b7DB7894cED84BD1c40571f4` are not official Vibe-Trading assets. We have never launched or endorsed any token or memecoin. Do not buy, connect a wallet, or sign anything. [Details](SECURITY.md#official-channels--impersonation).
 
+- **2026-09-28** 🛠️ **Source health and connector transparency**: scheduled public-source canaries report outages and data drift with bounded, credential-free probes ([#1627](https://github.com/HKUDS/Vibe-Trading/pull/1627)); BaoStock socket requests now have deadlines and serialize concurrent sessions ([#1615](https://github.com/HKUDS/Vibe-Trading/pull/1615)). Copilot credential lookups refresh after a short cache TTL ([#1619](https://github.com/HKUDS/Vibe-Trading/pull/1619)). A generated broker matrix preserves each profile’s paper/live permissions and labels declared capabilities separately from runtime verification ([#1629](https://github.com/HKUDS/Vibe-Trading/pull/1629)).
+
 - **2026-09-27** 🛠️ **Verifiable run cards and safer research**: Run cards now show hashed backtest execution records and verified metric-to-CSV references in JSON, Markdown and Run Detail ([#1612](https://github.com/HKUDS/Vibe-Trading/pull/1612)). GTJA high/low recency factors use the correct day count and consistent tie handling ([#1604](https://github.com/HKUDS/Vibe-Trading/pull/1604)); India short covers check the buy-side circuit band ([#1608](https://github.com/HKUDS/Vibe-Trading/pull/1608)). Token usage remains readable without exempting arbitrary credential strings ([#1606](https://github.com/HKUDS/Vibe-Trading/pull/1606)), malformed MCP schemas retain their object properties ([#1607](https://github.com/HKUDS/Vibe-Trading/pull/1607)), and immediate-order goal checks preserve research questions ([#1605](https://github.com/HKUDS/Vibe-Trading/pull/1605)). Setup documentation now correctly identifies OpenRouter as the shipped default ([#1609](https://github.com/HKUDS/Vibe-Trading/issues/1609)).
 
 - **2026-09-26** 🛠️ **More reliable indicators and trading limits**: Technical indicators retain their observation date and can reuse results lost during conversation compaction ([#1590](https://github.com/HKUDS/Vibe-Trading/pull/1590), [#1601](https://github.com/HKUDS/Vibe-Trading/pull/1601)). All five Qlib158 WVMA windows now use absolute returns in the numerator ([#1594](https://github.com/HKUDS/Vibe-Trading/pull/1594)); Benford checks preserve the correct leading digit at numeric boundaries ([#1591](https://github.com/HKUDS/Vibe-Trading/pull/1591)). An explicitly zero exposure limit stays zero ([#1593](https://github.com/HKUDS/Vibe-Trading/pull/1593)), and Dhan paper orders reject fractional or invalid quantities without rounding away input precision ([#1595](https://github.com/HKUDS/Vibe-Trading/pull/1595)). Invalid optional numeric environment variables fall back to defaults while explicit configuration constraints remain enforced ([#1592](https://github.com/HKUDS/Vibe-Trading/pull/1592)). Runtime triggers keep the correct field defaults and subclass factory behavior ([#1599](https://github.com/HKUDS/Vibe-Trading/pull/1599)).
@@ -420,32 +422,77 @@ Built-in SDK connectors publish one machine-readable onboarding contract: authen
 
 <!-- BEGIN GENERATED broker-capability-matrix -->
 
-Which read and write paths each built-in connector actually exposes,
-generated from the profile registry (`agent/src/trading/profiles.py`). An
-order-capable profile still goes through the mandate gate: placement on live
-funds is authorized only with a mandate in place.
+Declared built-in profiles, generated from `agent/src/trading/profiles.py`.
+Each row keeps its own environment and permissions; a paper order capability
+never grants live trading. These are declarations, not successful runtime or
+broker verification. Local plugins and user connection settings are excluded.
 
-| Connector | Environments | Modes | Read paths | Order paths |
-| --- | --- | --- | --- | --- |
+The quote column shows the declared transport, not a verified endpoint or
+pricing coverage. Order kinds (market, limit, etc.) are not declared in the
+registry and are therefore not inferred here. The placement column reports
+the declared mandate requirement only; it does not attest to cancellation,
+flattening, copy-trading, or other runtime guard coverage. Paper placement can
+use a broker sandbox or local simulation. See each profile's notes and the
+[broker bring-up checklist](CONTRIBUTING.md#broker-bring-up-checklist).
 
-| alpaca | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.place.requires_mandate`, `orders.read` |
-| binance | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.place.requires_mandate`, `orders.read` |
-| dhan | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.read` |
-| etoro | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `copy.close`, `copy.poll`, `copy.precheck`, `copy.start`, `orders.cancel`, `orders.cancel_close`, `orders.place`, `orders.place.requires_mandate`, `orders.read` |
-| futu | live/paper | read + order-capable | `acc_cash_flow.read`, `account.read`, `capital_distribution.read`, `capital_flow.read`, `earnings_calendar.read`, `financials.read`, `history.read`, `history_deals.read`, `orders.read`, `positions.read`, `quotes.read`, `rehab.read` | `orders.place`, `orders.place.requires_mandate`, `orders.read` |
-| ibkr | live/paper | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.read` |
-| kis | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.read` |
-| longbridge | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.read` |
-| mt5 | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.place.requires_mandate`, `orders.read` |
-| okx | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.place.requires_mandate`, `orders.read` |
-| robinhood | live | read + order-capable | `account.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place.requires_mandate`, `orders.read` |
-| scalable | live | read-only | `quotes.read` | none |
-| shoonya | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.read` |
-| tiger | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.place.requires_mandate`, `orders.read` |
-| toss | live | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.read` |
-| trading212 | live/paper | read-only | `account.read`, `instruments.read`, `order_history.read`, `orders.read`, `positions.read` | `orders.read` |
-| upbit | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.read` |
-| zerodha | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.read` |
+| Profile | Connector | Environment | Transport | Mode | Read capabilities | Quote path (declared) | Other capabilities | Placement requirement (declared) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+
+| `alpaca-live-sdk-readonly` | alpaca | live | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `alpaca-live-trade` | alpaca | live | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place.requires_mandate` | mandate required |
+| `alpaca-paper-sdk` | alpaca | paper | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `alpaca-paper-trade` | alpaca | paper | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place` | no mandate declared |
+| `binance-live-sdk-readonly` | binance | live | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `binance-live-trade` | binance | live | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place.requires_mandate` | mandate required |
+| `binance-paper-sdk` | binance | paper | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `binance-paper-trade` | binance | paper | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place` | no mandate declared |
+| `dhan-live-sdk-readonly` | dhan | live | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `dhan-paper-sdk` | dhan | paper | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `dhan-paper-trade` | dhan | paper | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place` | no mandate declared |
+| `etoro-live-sdk-readonly` | etoro | live | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `etoro-live-trade` | etoro | live | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `copy.close`, `copy.poll`, `copy.precheck`, `copy.start`, `orders.cancel`, `orders.cancel_close`, `orders.place.requires_mandate`, `positions.close`, `positions.edit` | mandate required |
+| `etoro-paper-sdk` | etoro | paper | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `etoro-paper-trade` | etoro | paper | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.cancel`, `orders.cancel_close`, `orders.place`, `positions.close`, `positions.edit` | no mandate declared |
+| `futu-live-sdk-readonly` | futu | live | broker_sdk | read-only | `acc_cash_flow.read`, `account.read`, `capital_distribution.read`, `capital_flow.read`, `earnings_calendar.read`, `financials.read`, `history.read`, `history_deals.read`, `orders.read`, `positions.read`, `quotes.read`, `rehab.read` | broker_sdk | none declared | disabled (read-only) |
+| `futu-live-trade` | futu | live | broker_sdk | write-enabled | `acc_cash_flow.read`, `account.read`, `capital_distribution.read`, `capital_flow.read`, `earnings_calendar.read`, `financials.read`, `history.read`, `history_deals.read`, `orders.read`, `positions.read`, `quotes.read`, `rehab.read` | broker_sdk | `orders.place.requires_mandate` | mandate required |
+| `futu-paper-sdk` | futu | paper | broker_sdk | read-only | `acc_cash_flow.read`, `account.read`, `capital_distribution.read`, `capital_flow.read`, `earnings_calendar.read`, `financials.read`, `history.read`, `history_deals.read`, `orders.read`, `positions.read`, `quotes.read`, `rehab.read` | broker_sdk | none declared | disabled (read-only) |
+| `futu-paper-trade` | futu | paper | broker_sdk | write-enabled | `acc_cash_flow.read`, `account.read`, `capital_distribution.read`, `capital_flow.read`, `earnings_calendar.read`, `financials.read`, `history.read`, `history_deals.read`, `orders.read`, `positions.read`, `quotes.read`, `rehab.read` | broker_sdk | `orders.place` | no mandate declared |
+| `ibkr-live-local-readonly` | ibkr | live | local_tws | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | local_tws | none declared | disabled (read-only) |
+| `ibkr-live-official-mcp-readonly` | ibkr | live | remote_mcp | read-only | `account.read`, `positions.read` | none declared | none declared | disabled (read-only) |
+| `ibkr-paper-local` | ibkr | paper | local_tws | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | local_tws | none declared | disabled (read-only) |
+| `kis-live-sdk-readonly` | kis | live | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `kis-paper-sdk` | kis | paper | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `kis-paper-trade` | kis | paper | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place` | no mandate declared |
+| `longbridge-live-sdk-readonly` | longbridge | live | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `longbridge-paper-sdk` | longbridge | paper | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `longbridge-paper-trade` | longbridge | paper | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place` | no mandate declared |
+| `mt5-live-sdk-readonly` | mt5 | live | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `mt5-live-trade` | mt5 | live | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place.requires_mandate` | mandate required |
+| `mt5-paper-sdk` | mt5 | paper | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `mt5-paper-trade` | mt5 | paper | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place` | no mandate declared |
+| `okx-live-sdk-readonly` | okx | live | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `okx-live-trade` | okx | live | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place.requires_mandate` | mandate required |
+| `okx-paper-sdk` | okx | paper | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `okx-paper-trade` | okx | paper | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place` | no mandate declared |
+| `robinhood-live-mcp` | robinhood | live | remote_mcp | write-enabled | `account.read`, `orders.read`, `positions.read`, `quotes.read` | remote_mcp | `orders.place.requires_mandate`, `runner.manage.requires_mandate` | mandate required |
+| `robinhood-live-mcp-readonly` | robinhood | live | remote_mcp | read-only | `account.read`, `positions.read` | none declared | none declared | disabled (read-only) |
+| `scalable-live-mcp-readonly` | scalable | live | remote_mcp | read-only | `quotes.read` | remote_mcp | none declared | disabled (read-only) |
+| `shoonya-live-sdk-readonly` | shoonya | live | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `shoonya-paper-sdk` | shoonya | paper | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `shoonya-paper-trade` | shoonya | paper | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place` | no mandate declared |
+| `tiger-live-sdk-readonly` | tiger | live | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `tiger-live-trade` | tiger | live | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place.requires_mandate` | mandate required |
+| `tiger-paper-sdk` | tiger | paper | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `tiger-paper-trade` | tiger | paper | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place` | no mandate declared |
+| `toss-live-sdk-readonly` | toss | live | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `trading212-live-sdk-readonly` | trading212 | live | broker_sdk | read-only | `account.read`, `instruments.read`, `order_history.read`, `orders.read`, `positions.read` | none declared | none declared | disabled (read-only) |
+| `trading212-paper-sdk` | trading212 | paper | broker_sdk | read-only | `account.read`, `instruments.read`, `order_history.read`, `orders.read`, `positions.read` | none declared | none declared | disabled (read-only) |
+| `upbit-live-sdk-readonly` | upbit | live | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `upbit-paper-sdk` | upbit | paper | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `upbit-paper-trade` | upbit | paper | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place` | no mandate declared |
+| `zerodha-live-sdk-readonly` | zerodha | live | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `zerodha-paper-sdk` | zerodha | paper | broker_sdk | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | none declared | disabled (read-only) |
+| `zerodha-paper-trade` | zerodha | paper | broker_sdk | write-enabled | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | broker_sdk | `orders.place` | no mandate declared |
 
 <!-- END GENERATED broker-capability-matrix -->
 

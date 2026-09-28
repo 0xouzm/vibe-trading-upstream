@@ -10,8 +10,11 @@ Covers: A-shares (SH/SZ), does NOT cover HK/US/crypto.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import socket
+import threading
+import time
 import zlib
 from contextlib import contextmanager
 from typing import Dict, List, Optional
@@ -23,11 +26,13 @@ from backtest.loaders.registry import register
 
 logger = logging.getLogger(__name__)
 
-# Per-read inactivity deadline for baostock socket IO (#1492). baostock 0.9.3
+# Per-message deadline for baostock socket IO (#1492). baostock 0.9.3
 # reads with no timeout and spins at 100% CPU when the peer closes the
 # connection, so every loader call goes through the guard below.
 _READ_TIMEOUT_ENV = "VIBE_TRADING_BAOSTOCK_TIMEOUT"
 _DEFAULT_READ_TIMEOUT = 30.0
+# BaoStock owns one process-global socket and user context, even across instances.
+_BAOSTOCK_LOCK = threading.Lock()
 
 
 def _read_timeout() -> float:
@@ -35,7 +40,7 @@ def _read_timeout() -> float:
     if raw:
         try:
             value = float(raw)
-            if value > 0:
+            if math.isfinite(value) and value > 0:
                 return value
         except ValueError:
             pass
@@ -44,7 +49,7 @@ def _read_timeout() -> float:
 
 
 def _bounded_send_msg(msg: str, timeout: float) -> Optional[str]:
-    """baostock's send_msg with a read deadline and EOF detection.
+    """baostock's send_msg with a whole-message deadline and EOF detection.
 
     Byte-compatible with baostock 0.9.3 on a healthy server. Returns None on
     timeout, closed connection, or a malformed reply; every baostock caller
@@ -60,37 +65,41 @@ def _bounded_send_msg(msg: str, timeout: float) -> Optional[str]:
         return None
     try:
         previous_timeout = default_socket.gettimeout()
+        deadline = time.monotonic() + timeout
         default_socket.settimeout(timeout)
         try:
-            default_socket.send(bytes(msg + "\n", encoding="utf-8"))
-            receive = b""
+            default_socket.sendall(bytes(msg + "\n", encoding="utf-8"))
+            receive = bytearray()
             while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("baostock message deadline exceeded")
+                default_socket.settimeout(remaining)
                 chunk = default_socket.recv(8192)
                 if not chunk:
-                    logger.warning("baostock server closed the connection mid-reply")
-                    return None
+                    raise ConnectionError("baostock server closed the connection mid-reply")
                 receive += chunk
                 if receive[-13:] == b"<![CDATA[]]>\n":
                     break
         finally:
             default_socket.settimeout(previous_timeout)
+        receive = bytes(receive)
         head_bytes = receive[0 : cons.MESSAGE_HEADER_LENGTH]
         head_str = bytes.decode(head_bytes)
         head_arr = head_str.split(cons.MESSAGE_SPLIT)
         if head_arr[1] in cons.COMPRESSED_MESSAGE_TYPE_TUPLE:
             body_length = int(head_arr[2])
             body_str = bytes.decode(
-                zlib.decompress(
-                    receive[
-                        cons.MESSAGE_HEADER_LENGTH : cons.MESSAGE_HEADER_LENGTH
-                        + body_length
-                    ]
-                )
+                zlib.decompress(receive[cons.MESSAGE_HEADER_LENGTH : cons.MESSAGE_HEADER_LENGTH + body_length])
             )
             return head_str + body_str
         return bytes.decode(receive)
     except Exception as exc:
         logger.warning("baostock read failed: %s", exc)
+        # A late or partial reply must never be consumed by a subsequent query.
+        default_socket.close()
+        if getattr(context, "default_socket", None) is default_socket:
+            context.default_socket = None
         return None
 
 
@@ -100,9 +109,7 @@ def _connect_with_timeout(self, timeout: float) -> None:
     import baostock.common.context as context
 
     try:
-        sock = socket.create_connection(
-            (cons.BAOSTOCK_SERVER_IP, cons.BAOSTOCK_SERVER_PORT), timeout=timeout
-        )
+        sock = socket.create_connection((cons.BAOSTOCK_SERVER_IP, cons.BAOSTOCK_SERVER_PORT), timeout=timeout)
     except OSError as exc:
         logger.warning("baostock connect failed: %s", exc)
         sock = None
@@ -114,25 +121,38 @@ def _baostock_socket_guard(timeout: float):
     """Bound all baostock socket IO for the lifetime of one fetch."""
     import baostock
 
-    # Attribute chain, not a submodule import, so sys.modules mocks still work.
+    if not _BAOSTOCK_LOCK.acquire(timeout=timeout):
+        logger.warning("baostock session busy; falling back")
+        yield False
+        return
+    # Serialize the entire login/query/logout session, not just the patch itself.
+    # Attribute chains also keep the existing sys.modules test doubles usable.
     socketutil = baostock.util.socketutil
+    context = baostock.common.context
     original_send_msg = socketutil.send_msg
     original_connect = socketutil.SocketUtil.connect
+    previous_socket = getattr(context, "default_socket", None)
+    context.default_socket = None
     socketutil.send_msg = lambda msg: _bounded_send_msg(msg, timeout)
     socketutil.SocketUtil.connect = lambda util: _connect_with_timeout(util, timeout)
     try:
-        yield
+        yield True
     finally:
-        socketutil.send_msg = original_send_msg
-        socketutil.SocketUtil.connect = original_connect
+        try:
+            current_socket = getattr(context, "default_socket", None)
+            if current_socket is not None:
+                current_socket.close()
+        finally:
+            context.default_socket = previous_socket
+            socketutil.send_msg = original_send_msg
+            socketutil.SocketUtil.connect = original_connect
+            _BAOSTOCK_LOCK.release()
 
 
 def _is_a_share(code: str) -> bool:
     # Support both baostock native format (sh.601398) and tushare-style suffix (601398.SH)
     code_lower = code.lower()
-    return code_lower.startswith(("sh.", "sz.")) or code.upper().endswith(
-        (".SZ", ".SH")
-    )
+    return code_lower.startswith(("sh.", "sz.")) or code.upper().endswith((".SZ", ".SH"))
 
 
 @register
@@ -192,7 +212,9 @@ class DataLoader:
 
         import baostock as bs
 
-        with _baostock_socket_guard(_read_timeout()):
+        with _baostock_socket_guard(_read_timeout()) as acquired:
+            if not acquired:
+                return {}
             lg = bs.login()
             if lg.error_code != "0":
                 logger.error("baostock login failed: %s", lg.error_msg)
@@ -209,9 +231,7 @@ class DataLoader:
                             start_date=start_date,
                             end_date=end_date,
                             fields=None,
-                            fetch=lambda code=code: self._fetch_one(
-                                bs, code, start_date, end_date
-                            ),
+                            fetch=lambda code=code: self._fetch_one(bs, code, start_date, end_date),
                         )
                         if df is not None and not df.empty:
                             result[code] = df
@@ -269,9 +289,7 @@ class DataLoader:
         if not rows:
             return None
 
-        df = pd.DataFrame(
-            rows, columns=["date", "open", "high", "low", "close", "volume", "amount"]
-        )
+        df = pd.DataFrame(rows, columns=["date", "open", "high", "low", "close", "volume", "amount"])
         df["date"] = pd.to_datetime(df["date"])
         for col in ["open", "high", "low", "close", "volume", "amount"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -284,7 +302,5 @@ class DataLoader:
 
         df = df.rename(columns={"date": "trade_date"})
         df = df.set_index("trade_date").sort_index()
-        df = df[["open", "high", "low", "close", "volume"]].dropna(
-            subset=["open", "high", "low", "close"]
-        )
+        df = df[["open", "high", "low", "close", "volume"]].dropna(subset=["open", "high", "low", "close"])
         return df

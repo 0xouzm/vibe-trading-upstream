@@ -1,14 +1,13 @@
 """Generate the broker capability matrix from the profile registry (#1626).
 
-Which read tools, quote paths and order kinds each connector actually has
-lived in per-connector code and tribal knowledge. The profiles already
-declare it, so render them into the marked block in README.md and let a test
-fail CI the moment the block and the registry disagree, so the table cannot
-go stale.
+Render declared capabilities per profile into the marked README block.
+The registry does not attest to successful runtime verification or enumerate
+order kinds; the generated text explicitly preserves those limits. A CI drift
+guard keeps the published declarations aligned with the registry.
 
 Regenerate after touching connector profiles:
 
-    python -m src.trading.capability_matrix
+    PYTHONPATH=agent python -m src.trading.capability_matrix
 """
 
 from __future__ import annotations
@@ -22,32 +21,49 @@ README_PATH = Path(__file__).resolve().parents[3] / "README.md"
 _BEGIN = "<!-- BEGIN GENERATED broker-capability-matrix -->"
 _END = "<!-- END GENERATED broker-capability-matrix -->"
 
-_HEADER = """Which read and write paths each built-in connector actually exposes,
-generated from the profile registry (`agent/src/trading/profiles.py`). An
-order-capable profile still goes through the mandate gate: placement on live
-funds is authorized only with a mandate in place.
+_HEADER = """Declared built-in profiles, generated from `agent/src/trading/profiles.py`.
+Each row keeps its own environment and permissions; a paper order capability
+never grants live trading. These are declarations, not successful runtime or
+broker verification. Local plugins and user connection settings are excluded.
 
-| Connector | Environments | Modes | Read paths | Order paths |
-| --- | --- | --- | --- | --- |
+The quote column shows the declared transport, not a verified endpoint or
+pricing coverage. Order kinds (market, limit, etc.) are not declared in the
+registry and are therefore not inferred here. The placement column reports
+the declared mandate requirement only; it does not attest to cancellation,
+flattening, copy-trading, or other runtime guard coverage. Paper placement can
+use a broker sandbox or local simulation. See each profile's notes and the
+[broker bring-up checklist](CONTRIBUTING.md#broker-bring-up-checklist).
+
+| Profile | Connector | Environment | Transport | Mode | Read capabilities | Quote path (declared) | Other capabilities | Placement requirement (declared) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
 """
 
 
+def _cell(values: list[str]) -> str:
+    return ", ".join(f"`{value}`" for value in sorted(values)) or "none declared"
+
+
 def render() -> str:
-    """One row per connector: envs, modes, and the union of read/order caps."""
+    """Render each built-in profile without merging its permissions with others."""
     lines = [_HEADER]
-    by_connector: dict[str, list] = {}
-    for profile in BUILTIN_PROFILES:
-        by_connector.setdefault(profile.connector, []).append(profile)
-    for connector in sorted(by_connector):
-        profiles = by_connector[connector]
-        envs = "/".join(sorted({p.environment for p in profiles}))
-        modes = "read-only" if all(p.readonly for p in profiles) else "read + order-capable"
-        caps = {c for p in profiles for c in p.capabilities}
-        reads = sorted(c for c in caps if c.endswith(".read"))
-        orders = sorted(c for c in caps if c.startswith(("orders.", "copy.")))
-        read_cell = ", ".join(f"`{c}`" for c in reads) or "none"
-        order_cell = ", ".join(f"`{c}`" for c in orders) or "none"
-        lines.append(f"| {connector} | {envs} | {modes} | {read_cell} | {order_cell} |")
+    for profile in sorted(BUILTIN_PROFILES, key=lambda p: (p.connector, p.id)):
+        reads = [cap for cap in profile.capabilities if cap.endswith(".read")]
+        other = [cap for cap in profile.capabilities if not cap.endswith(".read")]
+        quote = profile.transport if "quotes.read" in profile.capabilities else "none declared"
+        if profile.readonly:
+            placement = "disabled (read-only)"
+        elif "orders.place.requires_mandate" in profile.capabilities:
+            placement = "mandate required"
+        elif "orders.place" in profile.capabilities:
+            placement = "no mandate declared"
+        else:
+            placement = "no placement declared"
+        mode = "read-only" if profile.readonly else "write-enabled"
+        lines.append(
+            f"| `{profile.id}` | {profile.connector} | {profile.environment} | "
+            f"{profile.transport} | {mode} | {_cell(reads)} | {quote} | "
+            f"{_cell(other)} | {placement} |"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -58,8 +74,8 @@ def render_block() -> str:
 def sync_readme(readme: str) -> str:
     block = render_block()
     pattern = re.compile(re.escape(_BEGIN) + r".*?" + re.escape(_END), re.DOTALL)
-    if not pattern.search(readme):
-        raise ValueError(f"README is missing the {_BEGIN} marker block")
+    if readme.count(_BEGIN) != 1 or readme.count(_END) != 1 or not pattern.search(readme):
+        raise ValueError(f"README must contain exactly one ordered {_BEGIN} marker block")
     return pattern.sub(lambda _: block, readme)
 
 

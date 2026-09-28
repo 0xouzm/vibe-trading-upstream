@@ -1728,8 +1728,10 @@ def _fetch_auto(codes: List[str], config: dict, interval: str = "1D") -> dict:
                 )
 
         if missing:
+            served = sorted(set(merged) - set(missing))
             raise NoAvailableSourceError(
-                f"incomplete data for {market}; missing symbols: {missing}"
+                f"incomplete data for {market}; missing symbols: {missing}; "
+                f"served symbols: {served}"
             )
         merged.update(market_result)
 
@@ -1848,51 +1850,56 @@ def fetch_data_map(config: dict) -> DataFetchResult:
         # lines as a trace. Callers want snapshot provenance, not a padded row
         # count.
         if missing and not is_no_network_fallback_source(primary_source):
-            market = _detect_market(codes[0])
-            for fallback_source in FALLBACK_CHAINS.get(market, []):
-                if not missing:
-                    break
-                if (
-                    fallback_source == primary_source
-                    or fallback_source not in LOADER_REGISTRY
-                ):
-                    continue
-                fallback_loader = LOADER_REGISTRY[fallback_source]()
-                if not fallback_loader.is_available():
-                    continue
-                fallback_codes = _normalize_codes(missing, fallback_source)
-                fallback_result = fallback_loader.fetch(
-                    fallback_codes,
-                    config.get("start_date", ""),
-                    config.get("end_date", ""),
-                    interval=interval,
-                )
-                mapped = _restore_original_codes(
-                    fallback_result, missing, fallback_codes
-                )
-                if mapped:
-                    data_map.update(mapped)
-                    missing = [code for code in missing if code not in mapped]
-                    fb_served_by = str(
-                        getattr(fallback_loader, "name", fallback_source)
-                        or fallback_source
+            missing_by_market: dict[str, list[str]] = {}
+            for code in missing:
+                missing_by_market.setdefault(_detect_market(code), []).append(code)
+            for market, market_missing in missing_by_market.items():
+                for fallback_source in FALLBACK_CHAINS.get(market, []):
+                    if not market_missing:
+                        break
+                    if (
+                        fallback_source == primary_source
+                        or fallback_source not in LOADER_REGISTRY
+                    ):
+                        continue
+                    fallback_loader = LOADER_REGISTRY[fallback_source]()
+                    if not fallback_loader.is_available():
+                        continue
+                    fallback_codes = _normalize_codes(market_missing, fallback_source)
+                    fallback_result = fallback_loader.fetch(
+                        fallback_codes,
+                        config.get("start_date", ""),
+                        config.get("end_date", ""),
+                        interval=interval,
                     )
-                    for code in mapped:
-                        caliber_stamps[code] = (
-                            fb_served_by,
-                            price_caliber(fb_served_by, _detect_market(code), code),
+                    mapped = _restore_original_codes(
+                        fallback_result, market_missing, fallback_codes
+                    )
+                    if mapped:
+                        data_map.update(mapped)
+                        market_missing = [code for code in market_missing if code not in mapped]
+                        fb_served_by = str(
+                            getattr(fallback_loader, "name", fallback_source)
+                            or fallback_source
                         )
-                    if not used_sources:
-                        source = fb_served_by
-                        loader = fallback_loader
-                    used_sources.append(fb_served_by)
-                    logger.info(
-                        "Runtime fallback: %s -> %s", primary_source, fb_served_by
-                    )
+                        for code in mapped:
+                            caliber_stamps[code] = (
+                                fb_served_by,
+                                price_caliber(fb_served_by, market, code),
+                            )
+                        if not used_sources:
+                            source = fb_served_by
+                            loader = fallback_loader
+                        used_sources.append(fb_served_by)
+                        logger.info(
+                            "Runtime fallback: %s -> %s", primary_source, fb_served_by
+                        )
+                missing = [code for code in missing if code not in data_map]
 
         if missing:
             raise NoAvailableSourceError(
-                f"incomplete data for source={primary_source}; missing symbols: {missing}"
+                f"incomplete data for source={primary_source}; missing symbols: {missing}; "
+                f"served symbols: {sorted(data_map)}"
             )
 
     data_map = {

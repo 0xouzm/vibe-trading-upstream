@@ -33,8 +33,11 @@ CANARY_SYMBOLS = {
     "stooq": "AAPL.US",
     "tencent": "601398.SH",
     "wallex": "BTC-TMN",
-    "yahoo": "AAPL",
-    "yfinance": "AAPL",
+    # These loaders require the project's explicit US suffix; using bare
+    # ``AAPL`` here made the canary report empty data while real ``AAPL.US``
+    # requests were healthy.
+    "yahoo": "AAPL.US",
+    "yfinance": "AAPL.US",
 }
 EXCLUDED_PUBLIC_SOURCES = {"local": "operator files, not a public endpoint"}
 DEPENDENCIES = {

@@ -191,6 +191,18 @@ class MarketDataTool(BaseTool):
         source = kwargs.get("source", "auto")
         if source not in _SOURCE_ENUM:
             return _error(f"source must be one of {_SOURCE_ENUM}")
+        if source == "auto":
+            bare_us = [
+                code for code in codes
+                if re.fullmatch(r"[A-Za-z][A-Za-z0-9.\-]*", code)
+                and "." not in code
+                and "-" not in code
+            ]
+            if bare_us:
+                return _error(
+                    "US equity symbols must include the .US suffix, "
+                    f"for example AAPL.US; received {bare_us}"
+                )
 
         interval = kwargs.get("interval", "1D")
         if not isinstance(interval, str):

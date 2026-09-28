@@ -5,13 +5,57 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from backtest.loaders.registry import VALID_SOURCES
 from src.agent.progress import emit_progress
 from src.agent.tools import BaseTool
+from src.config.accessor import get_env_config
 from src.core.runner import Runner
 from src.core.state import RunStateStore
 from src.tools.path_utils import safe_run_dir
+
+
+def _backtest_timeout_seconds() -> float | None:
+    """Return the configured backtest subprocess timeout.
+
+    The backtest is a write-style tool, so the agent-loop timeout does not
+    cancel it.  The subprocess still needs its own bound, which follows the
+    same ``VIBE_TRADING_TOOL_TIMEOUT_SECONDS`` setting used by the loop.  A
+    non-positive value keeps the historical "disabled" semantics.
+
+    Returns:
+        Positive timeout in seconds, or ``None`` to disable the bound.
+    """
+    configured = float(get_env_config().agent_tuning.vibe_trading_tool_timeout_seconds)
+    return configured if configured > 0 else None
+
+
+def _timeout_output(value: Any) -> str:
+    """Normalize ``TimeoutExpired`` output for persistence and JSON."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _persist_timeout_output(run_path: Path, exc: subprocess.TimeoutExpired) -> dict[str, str]:
+    """Persist partial subprocess output after a timeout.
+
+    ``subprocess.run`` exposes captured output on ``TimeoutExpired`` when pipes
+    are used.  Preserve it before returning so a timed-out run remains
+    diagnosable instead of appearing to have produced nothing.
+    """
+    output = {
+        "stdout": _timeout_output(getattr(exc, "stdout", None)),
+        "stderr": _timeout_output(getattr(exc, "stderr", None)),
+    }
+    log_dir = run_path / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / "runner_stdout.txt").write_text(output["stdout"], encoding="utf-8")
+    (log_dir / "runner_stderr.txt").write_text(output["stderr"], encoding="utf-8")
+    return output
 
 
 def run_backtest(run_dir: str) -> str:
@@ -70,7 +114,7 @@ def run_backtest(run_dir: str) -> str:
         "simulate",
         message=f"running backtest engine (source={source})",
     )
-    runner = Runner(timeout=300)
+    runner = Runner(timeout=_backtest_timeout_seconds())
     try:
         result = runner.execute(
             entry_script,
@@ -78,17 +122,24 @@ def run_backtest(run_dir: str) -> str:
             cwd=agent_root,
             cli_args=[str(run_path)],
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         # The lifecycle block below is unreachable on a timeout, so record the
         # failure here — otherwise the run is indistinguishable from never-run
         # (the evidence gate fail-closes either way, but the reason is lost).
-        reason = f"backtest engine timed out after {runner.timeout}s"
+        timeout_output = _persist_timeout_output(run_path, exc)
+        timeout_label = f"{runner.timeout}s" if runner.timeout is not None else "the configured limit"
+        reason = f"backtest engine timed out after {timeout_label}"
         RunStateStore().mark_failure(run_path, reason)
-        return json.dumps({
+        response = {
             "status": "error",
             "error": reason,
             "run_dir": run_dir,
-        }, ensure_ascii=False)
+        }
+        if timeout_output["stdout"]:
+            response["stdout"] = timeout_output["stdout"][-2000:]
+        if timeout_output["stderr"]:
+            response["stderr"] = timeout_output["stderr"][-2000:]
+        return json.dumps(response, ensure_ascii=False)
 
     # Record lifecycle status so tool-driven runs are ingestible by the
     # evidence pipeline: refresh_strategy_evidence fail-closes without

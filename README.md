@@ -416,7 +416,38 @@ Every position row must provide a symbol and quantity. Unsupported currencies fa
 
 ### AI-friendly connector onboarding
 
-Built-in SDK connectors publish one machine-readable onboarding contract: authentication type, required credential fields, optional dependency, install command, and the read-only operation used for verification. `trading_connections` exposes the same contract to MCP clients, while the Portfolio connection center renders it as a generic form. The contract contains field names only — never credential values. What each profile can actually call (read tools, quote paths, order kinds) is generated from the profile registry into [docs/broker-capabilities.md](docs/broker-capabilities.md) and drift-checked in CI.
+Built-in SDK connectors publish one machine-readable onboarding contract: authentication type, required credential fields, optional dependency, install command, and the read-only operation used for verification. `trading_connections` exposes the same contract to MCP clients, while the Portfolio connection center renders it as a generic form. The contract contains field names only — never credential values.
+
+<!-- BEGIN GENERATED broker-capability-matrix -->
+
+Which read and write paths each built-in connector actually exposes,
+generated from the profile registry (`agent/src/trading/profiles.py`). An
+order-capable profile still goes through the mandate gate: placement on live
+funds is authorized only with a mandate in place.
+
+| Connector | Environments | Modes | Read paths | Order paths |
+| --- | --- | --- | --- | --- |
+
+| alpaca | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.place.requires_mandate`, `orders.read` |
+| binance | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.place.requires_mandate`, `orders.read` |
+| dhan | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.read` |
+| etoro | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `copy.close`, `copy.poll`, `copy.precheck`, `copy.start`, `orders.cancel`, `orders.cancel_close`, `orders.place`, `orders.place.requires_mandate`, `orders.read` |
+| futu | live/paper | read + order-capable | `acc_cash_flow.read`, `account.read`, `capital_distribution.read`, `capital_flow.read`, `earnings_calendar.read`, `financials.read`, `history.read`, `history_deals.read`, `orders.read`, `positions.read`, `quotes.read`, `rehab.read` | `orders.place`, `orders.place.requires_mandate`, `orders.read` |
+| ibkr | live/paper | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.read` |
+| kis | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.read` |
+| longbridge | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.read` |
+| mt5 | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.place.requires_mandate`, `orders.read` |
+| okx | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.place.requires_mandate`, `orders.read` |
+| robinhood | live | read + order-capable | `account.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place.requires_mandate`, `orders.read` |
+| scalable | live | read-only | `quotes.read` | none |
+| shoonya | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.read` |
+| tiger | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.place.requires_mandate`, `orders.read` |
+| toss | live | read-only | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.read` |
+| trading212 | live/paper | read-only | `account.read`, `instruments.read`, `order_history.read`, `orders.read`, `positions.read` | `orders.read` |
+| upbit | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.read` |
+| zerodha | live/paper | read + order-capable | `account.read`, `history.read`, `orders.read`, `positions.read`, `quotes.read` | `orders.place`, `orders.read` |
+
+<!-- END GENERATED broker-capability-matrix -->
 
 For a terminal-first setup, let the CLI collect secrets locally instead of putting them in a prompt or shell arguments:
 

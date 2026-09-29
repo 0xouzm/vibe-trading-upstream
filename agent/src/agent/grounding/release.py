@@ -125,8 +125,15 @@ def _correction_line(issue: dict[str, Any]) -> str:
     declared_as = issue.get("declared_as")
     if declared_as:
         evidence += (
-            f"; the figures block declares {declared_as}, which is not how the answer "
-            f"writes it — declare it exactly as written ({issue.get('value')})"
+            f"; the figures block declares {declared_as}"
+            + (", with the opposite sign," if issue.get("declared_sign_differs") else "")
+            + f" which is not how the answer writes it — declare it exactly as written "
+            f"({issue.get('value')})"
+        )
+    if issue.get("sign_reversed"):
+        evidence += (
+            "; that is the same size with the opposite sign — the formula runs the other "
+            "way round from the answer, so write its operands in the order the answer states"
         )
     candidates = issue.get("field_ref_candidates") or []
     if candidates:
@@ -177,6 +184,8 @@ class _ReleaseMixin:
         """
         lines = [
             "[GROUNDING GATE] The previous draft was rejected and was not released to the user.",
+            "Reply with the corrected answer only, in the user's language, written as the "
+            "answer itself: do not mention this rejection, the check or the figures block.",
             "Every figure below, exactly as you wrote it, with what you declared and what the evidence says:",
         ]
         figures, others = [], []

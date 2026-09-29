@@ -613,3 +613,49 @@ def test_only_a_literal_square_or_cube_is_evaluated() -> None:
     assert _formula_in_note("9^9^9") is None
     assert _formula_in_note("2^10 + 1") is None
     assert _formula_in_note("0.3^2 + 0.4^2")[0] == pytest.approx(0.25)
+
+
+# ---------------------------------------------------------------------------
+# What the correction tells the model (live DeepSeek run, 2026-09-29)
+# ---------------------------------------------------------------------------
+
+
+def test_a_formula_that_runs_the_other_way_is_named_as_such(two_runs: GroundingLedger) -> None:
+    """"−0.079" beside "1.2115 − 1.1329": the size is right, the direction is not.
+
+    Still refused — the sign is part of the claim — but the second draft of a
+    live run rewrote eight such figures instead of their formulas, because the
+    correction only said "its own note evaluates to 0.079".
+    """
+    result = two_runs.validate_final_answer(
+        _declared("风险平价 Sortino 低 −0.079。", "−0.079 | derived | 1.2115 − 1.1329 | rp, ew")
+    )
+    wrong = two_runs.validate_final_answer(
+        _declared("风险平价 Sortino 低 −0.12。", "−0.12 | derived | 1.2115 − 1.1329 | rp, ew")
+    )
+
+    (issue,) = result.issues
+    assert issue["reason"] == "derivation_result_mismatch" and issue["sign_reversed"] is True
+    assert "opposite sign" in two_runs.correction_prompt(result)
+    assert "sign_reversed" not in wrong.issues[0]
+
+
+def test_a_declaration_of_the_other_sign_and_unit_is_named(two_runs: GroundingLedger) -> None:
+    result = two_runs.validate_final_answer(
+        _declared("风险平价总收益低 −0.30pp。", "0.0030 | derived | 0.132805 − 0.129817 | rp, ew")
+    )
+
+    (issue,) = result.issues
+    assert issue["declared_as"] == "0.0030" and issue["declared_sign_differs"] is True
+    assert "with the opposite sign" in two_runs.correction_prompt(result)
+
+
+def test_the_correction_asks_for_the_answer_alone(two_runs: GroundingLedger) -> None:
+    """A live second draft opened with "The rejection was because…" — in English,
+    to a user who wrote Chinese — and that sentence was released."""
+    result = two_runs.validate_final_answer("风险平价 Sortino 1.190。")
+
+    prompt = two_runs.correction_prompt(result)
+
+    assert "do not mention this rejection" in prompt
+    assert "in the user's language" in prompt

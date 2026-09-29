@@ -594,7 +594,14 @@ class _PolicyMixin:
                             "is not declared in the figures block and is not an observed "
                             "value; declare it as observed / derived / proposed / cited / "
                             "count, or remove it",
-                            **({"declared_as": other_unit.value_text} if other_unit else {}),
+                            **(
+                                {
+                                    "declared_as": other_unit.value_text,
+                                    "declared_sign_differs": (other_unit.value < 0) != (figure.value < 0),
+                                }
+                                if other_unit
+                                else {}
+                            ),
                         )
                     )
                     continue
@@ -1677,6 +1684,10 @@ class _PolicyMixin:
         # Reported in the figure's own units, as ``_result_matches`` compares it.
         scaled = result * 100.0 if figure.percent else result
         shown = f"{scaled:.6g}%" if figure.percent else f"{scaled:.6g}"
+        # "−1.51pp" beside "12.87% − 11.36%": the size is right and the formula
+        # runs the other way. Still refused (the sign is part of the claim),
+        # but said, or the model rewrites the number instead of the formula.
+        reversed_sign = self._result_matches(figure, -result)
         return [
             self._figure_issue(
                 "numeric_claim_conflict",
@@ -1686,6 +1697,7 @@ class _PolicyMixin:
                 "derivation_result_mismatch",
                 f"is declared derived, but its own formula evaluates to {shown}",
                 derived_result=shown,
+                **({"sign_reversed": True} if reversed_sign else {}),
             )
         ]
 
@@ -2030,7 +2042,9 @@ def _declared_in_other_unit(block: FiguresBlock, figure: Figure) -> Declaration 
         if declaration.percent == figure.percent:
             continue
         in_figure_units = declaration.value * (100.0 if figure.percent else 0.01)
-        if abs(in_figure_units - figure.value) <= half_unit * (1 + 1e-9):
+        # By size: a difference declared one way round and written the other
+        # ("0.0151" for "−1.51pp") is still the value the model meant to name.
+        if abs(abs(in_figure_units) - abs(figure.value)) <= half_unit * (1 + 1e-9):
             return declaration
     return None
 

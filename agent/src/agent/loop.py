@@ -914,13 +914,15 @@ def _is_tool_success(result: str) -> bool:
 # Provider tool-call markup that a model can emit as plain text on the
 # forced-text final iteration, where tool definitions are withheld. Releasing
 # it verbatim hands the user mojibake instead of an answer. Both DSML bar
-# spellings are covered: ASCII double bars and fullwidth double bars.
+# spellings are covered: ASCII double bars and fullwidth double bars, opening
+# and closing tags (a draft ending in "</｜｜DSML｜｜invoke>" once reached the
+# grounding gate as three unreadable figures-block lines).
 _FORCED_TEXT_TOOL_CALL_RE = re.compile(
     r"<\s*/?\s*(?:invoke|parameter|tool_calls|dsml)\b",
     re.IGNORECASE,
 )
 _DSML_BAR_TOOL_CALL_RE = re.compile(
-    r"<\s*[|\u2502\uFF5C]{2}\s*(?:dsml|tool_calls|invoke)\b",
+    r"<\s*/?\s*[|\u2502\uFF5C]{2}\s*(?:dsml|tool_calls|invoke)\b",
     re.IGNORECASE,
 )
 

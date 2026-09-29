@@ -235,11 +235,19 @@ def _unanchored_term(tree: ast.Expression, observed: Callable[[float], bool]) ->
         True when some added or subtracted term is unanchored.
     """
 
+    exponents = {
+        id(item.right)
+        for item in ast.walk(tree)
+        if isinstance(item, ast.BinOp) and isinstance(item.op, ast.Pow)
+    }
+
     def anchored(node: ast.AST) -> bool:
         return any(
             observed(float(item.value))
             for item in ast.walk(node)
-            if isinstance(item, ast.Constant) and _is_number(item.value)
+            if isinstance(item, ast.Constant)
+            and _is_number(item.value)
+            and id(item) not in exponents
         )
 
     def visit(node: ast.AST, factor: bool) -> bool:
@@ -284,9 +292,16 @@ def _evaluate_formula(expression: str) -> tuple[float, list[float], ast.Expressi
         .replace("（", "(")
         .replace("）", ")")
         .replace(",", "")
-        .replace("%", "")
+        .replace("²", "**2")
+        .replace("³", "**3")
+        .replace("^", "**")
         .strip()
     )
+    # "12.87% − 11.36%" is 0.1287 − 0.1136: an operand written as a percent is
+    # the fraction the evidence holds, and "0.666 × (1 − 3%)" means 0.97.
+    normalized = _PERCENT_OPERAND_RE.sub(
+        lambda match: format(float(match.group(1)) / 100.0, ".12g"), normalized
+    ).replace("%", "").replace("％", "")
     if not normalized:
         return None
     try:
@@ -305,6 +320,12 @@ def _evaluate_formula(expression: str) -> tuple[float, list[float], ast.Expressi
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
             value = visit(node.operand)
             return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            # A square or a cube (HHI is a sum of squared weights). The
+            # exponent is part of the operator, not an operand.
+            if not _is_small_exponent(node.right):
+                raise ValueError("unsupported exponent")
+            return visit(node.left) ** int(node.right.value)
         if isinstance(node, ast.BinOp) and isinstance(
             node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)
         ):
@@ -330,6 +351,35 @@ def _evaluate_formula(expression: str) -> tuple[float, list[float], ast.Expressi
     return value, inputs, tree
 
 
+#: A number written with a percent sign inside a formula.
+_PERCENT_OPERAND_RE = re.compile(r"(\d+(?:\.\d+)?)\s*[%％]")
+
+
+def _is_small_exponent(node: ast.AST) -> bool:
+    """Whether a power's exponent is a literal 2 or 3."""
+    return isinstance(node, ast.Constant) and node.value in (2, 3) and not isinstance(node.value, bool)
+
+
+#: A bracketed aside holding a word: "（收益差，约−1.17pp）", "(portfolio)".
+_ANNOTATION_RE = re.compile(r"[（(\[][^（）()\[\]]*?(?:[\u3400-\u9fff]|[A-Za-z]{2})[^（）()\[\]]*[）)\]]")
+
+#: A label or unit written against a number: a CJK run, or an ASCII word of
+#: two letters or more ("Sharpe", "RP", "pp"). One letter is kept, so "1e3"
+#: stays a number and "5 x 3" stays unreadable rather than becoming "5 3".
+_LABEL_RE = re.compile(r"[\u3400-\u9fff]+|[A-Za-z]{2,}")
+
+
+def _without_labels(text: str) -> str:
+    """A note with its words removed, so the arithmetic between them can be read.
+
+    "等权Sharpe 0.692 − 风险平价 0.651" is the arithmetic "0.692 − 0.651";
+    an aside in brackets goes whole, because the number inside it
+    ("约−1.17pp") is a restatement of the result, not an operand. Nothing is
+    read from the words themselves.
+    """
+    return _LABEL_RE.sub(" ", _ANNOTATION_RE.sub(" ", text))
+
+
 def _formula_in_note(note: str) -> tuple[float, list[float], ast.Expression] | None:
     """Find the derivation a note states.
 
@@ -351,6 +401,11 @@ def _formula_in_note(note: str) -> tuple[float, list[float], ast.Expression] | N
     for separator in ("，", "；", "：", "; ", ", "):
         parts = [piece for part in parts for piece in part.split(separator)]
     candidates.extend(part for part in parts if part.strip())
+    # Only once the note as written fails: its words removed, whole and in parts.
+    unlabelled = _without_labels(note)
+    for separator in ("≈", "≒", "＝", "=", "→", "->", "，", "；", "：", "; ", ", "):
+        unlabelled = " \n ".join(unlabelled.split(separator))
+    candidates.extend(part for part in unlabelled.split(" \n ") if part.strip())
     for candidate in candidates:
         evaluated = _evaluate_formula(candidate)
         if evaluated is not None:

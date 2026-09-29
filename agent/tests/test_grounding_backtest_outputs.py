@@ -43,6 +43,7 @@ RP = {
     "sortino": 1.1329,
     "trade_count": 10,
     "total_turnover": 1.366493,
+    "max_consecutive_loss": 2,
 }
 EW = {
     "final_value": 1132804.94,
@@ -527,3 +528,88 @@ def test_a_trade_price_read_back_is_not_a_market_print(two_runs: GroundingLedger
 
     assert result.valid, result.issues
     assert not two_runs._price_records()
+
+
+# ---------------------------------------------------------------------------
+# How comparison reports write their arithmetic (same replayed runs)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "note",
+    [
+        "等权 Sortino 1.2115 − 风险平价 1.1329",
+        "1.2115 − 1.1329（Sortino 差，约 +0.079）",
+        "Sortino 差 = 等权 1.2115 − 风险平价 1.1329（组合整体）",
+        "1.2115 − 1.1329 Sortino差",
+    ],
+)
+def test_a_labelled_formula_is_read_as_its_arithmetic(two_runs: GroundingLedger, note: str) -> None:
+    """Words glued to operands, or an aside in brackets, used to make the note
+    "not arithmetic"; the words are removed, never interpreted."""
+    result = two_runs.validate_final_answer(
+        _declared("等权 Sortino 高 0.079。", f"0.079 | derived | {note} | rp, ew")
+    )
+
+    assert result.valid, result.issues
+
+
+def test_a_labelled_formula_with_the_wrong_arithmetic_still_fails(two_runs: GroundingLedger) -> None:
+    result = two_runs.validate_final_answer(
+        _declared("等权 Sortino 高 0.12。", "0.12 | derived | 等权 1.2115 − 风险平价 1.1329 | rp, ew")
+    )
+
+    assert [issue["reason"] for issue in result.issues] == ["derivation_result_mismatch"]
+
+
+def test_percent_operands_are_the_fractions_the_evidence_holds(two_runs: GroundingLedger) -> None:
+    """"13.28% − 12.98%" is 0.1328 − 0.1298, anchored on the two total returns."""
+    result = two_runs.validate_final_answer(
+        _declared("等权总收益高 0.30pp。", "0.30pp | derived | 13.28% − 12.98% | rp, ew")
+    )
+
+    assert result.valid, result.issues
+
+
+def test_a_sum_of_squared_weights_is_arithmetic(two_runs: GroundingLedger) -> None:
+    table = two_runs.run_dir / "rp" / "artifacts" / "target_positions.csv"
+    _read(two_runs, table, "read-weights", limit=2)
+
+    anchored = two_runs.validate_final_answer(
+        _declared(
+            "初始 HHI 0.3381。",
+            "0.3381 | derived | 0.389729² + 0.300167² + 0.310103² | rp/artifacts/target_positions.csv",
+        )
+    )
+    # The exponent is not an operand: squaring an invented weight anchors nothing.
+    # The run observed a 2 (max_consecutive_loss), so an exponent that counted
+    # as an operand would anchor the invented 0.4567.
+    invented = two_runs.validate_final_answer(
+        _declared("HHI 0.4135。", "0.4135 | derived | 0.4567² + 0.3002² + 0.3389² | rp")
+    )
+
+    assert anchored.valid, anchored.issues
+    assert [issue["reason"] for issue in invented.issues] == ["additive_operand_not_observed"]
+
+
+def test_a_fraction_or_a_multiple_is_a_readable_declaration(two_runs: GroundingLedger) -> None:
+    """"1/3" and "5.5x" were unreadable lines, and one unreadable line fails the draft."""
+    result = two_runs.validate_final_answer(
+        _declared(
+            "等权每只 1/3，即 0.333；换手是等权的 1.31 倍。",
+            "1/3 | count | 等权权重 | ew",
+            "1.31x | derived | 1.366 / 1.045 | rp, ew",
+        )
+    )
+
+    assert not [issue for issue in result.issues if issue["code"] == "figures_block_malformed"]
+    assert result.valid, result.issues
+
+
+def test_only_a_literal_square_or_cube_is_evaluated() -> None:
+    """``9^9^9`` would take the process down computing a number of 370 million digits."""
+    from src.agent.grounding.policies import _formula_in_note
+
+    assert _formula_in_note("9^9^9") is None
+    assert _formula_in_note("2^10 + 1") is None
+    assert _formula_in_note("0.3^2 + 0.4^2")[0] == pytest.approx(0.25)

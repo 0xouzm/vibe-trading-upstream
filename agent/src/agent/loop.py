@@ -33,7 +33,15 @@ from src.agent.grounding import GroundingLedger
 from src.agent.grounding.release import MAX_GROUNDING_REVISIONS
 from src.agent.memory import WorkspaceMemory
 from src.agent.progress import HeartbeatTimer, ProgressEvent, _set_emitter
-from src.agent.tool_progress import RECOVERY_MESSAGE, ToolProgress
+from src.agent.context_budget import (
+    MIN_CONVERSATION_TOKENS,
+    CompactionBudget,
+    ContextMeter,
+    is_context_overflow,
+    parse_context_limit,
+    resolve_window,
+)
+from src.agent.tool_progress import ToolProgress
 from src.agent.tools import ToolRegistry
 from src.agent.trace import TraceWriter
 from src.core.state import RunStateStore
@@ -86,6 +94,14 @@ MAX_CONSECUTIVE_EMPTY_RESPONSE_SKIPS = 1
 # model is never told to use a result it can no longer see, and a loop of
 # identical re-runs still ends at the no-progress limit.
 MAX_READONLY_REPLAY_RECOVERIES = 6
+
+
+#: Test hook only: set it (monkeypatch) to run the three compaction layers on
+#: the pre-2026-09-29 estimated-token thresholds. A real attribute on purpose:
+#: while it was resolved lazily by the module ``__getattr__``, monkeypatch read
+#: the lazy 40000 before patching and wrote it back as a real attribute on
+#: undo, silently switching every later test in the process to the old path.
+TOKEN_THRESHOLD: Optional[int] = None
 
 
 def _override(name: str):
@@ -515,11 +531,22 @@ def _replay_context_result(result: str) -> str:
     return json.dumps(replay_payload, ensure_ascii=False)
 
 
-def _microcompact(messages: list) -> list:
-    """Layer 1: silently prune old tool results, keeping the most recent N intact.
+def _microcompact(
+    messages: list,
+    *,
+    target_tokens: Optional[int] = None,
+    measure: Optional[Callable[[list], int]] = None,
+) -> list:
+    """Layer 1: prune old tool results, keeping the most recent N intact.
 
     Args:
         messages: Message list (mutated in place).
+        target_tokens: Stop clearing, oldest first, once ``measure(messages)``
+            is at or below this. ``None`` clears every result but the last
+            ``KEEP_RECENT`` — clearing everything a cross-sectional question
+            still needs is what made it re-fetch its evidence until
+            ``no_progress``, so the loop passes a target.
+        measure: Prompt-size function for ``target_tokens``.
 
     Returns:
         Names of tools whose every result just became unreadable (legacy
@@ -531,6 +558,8 @@ def _microcompact(messages: list) -> list:
         return []
     newly_cleared = []
     for msg in tool_msgs[:-KEEP_RECENT]:
+        if target_tokens is not None and measure is not None and measure(messages) <= target_tokens:
+            break
         content = msg.get("content", "")
         # Skip a result already cleared: the marker is itself >100 chars, so
         # re-clearing it would rewrite the recorded original size with the
@@ -855,6 +884,17 @@ Rules:
 {focus_section}"""
 
 
+def _failure_code(result: str) -> str:
+    """The ``error_code`` (else error text) of a refused call, for the stop message."""
+    try:
+        payload = json.loads(result)
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("error_code") or payload.get("reason") or payload.get("error") or "")[:120]
+
+
 def _is_tool_success(result: str) -> bool:
     """Return True if the tool result does not look like an error response."""
     try:
@@ -1166,6 +1206,10 @@ class AgentLoop:
         self._readonly_replay_protected: set[tuple[str, str]] = set()
         self._readonly_replay_recoveries = 0
         self._tool_progress = ToolProgress()
+        self._context_meter = ContextMeter()
+        self._learned_context_window: int | None = None
+        self._compacted_to_tokens: int | None = None
+        self._tool_schema_tokens = 0
 
     def cancel(self) -> None:
         """Cancel the current loop.
@@ -1287,6 +1331,13 @@ class AgentLoop:
         self._readonly_replay_protected = set()
         self._readonly_replay_recoveries = 0
         self._tool_progress = ToolProgress()
+        self._context_meter = ContextMeter()
+        self._learned_context_window: int | None = None
+        self._compacted_to_tokens: int | None = None
+        # Sent with every request and never compacted, so they count against
+        # the window exactly like the system prompt.
+        definitions = getattr(self.registry, "get_definitions", None)
+        self._tool_schema_tokens = estimate_tokens(definitions()) if callable(definitions) else 0
         run_started_wall = _time.time()
 
         state_store = RunStateStore()
@@ -1397,28 +1448,23 @@ class AgentLoop:
                     notif_text = "\n".join(f"[bg:{n['task_id']}] {n['status']}: {n['result']}" for n in notifs)
                     messages.append({"role": "user", "content": f"<background-results>\n{notif_text}\n</background-results>\n\n<system>Continue processing with the background results above.</system>"})
 
-                # Estimate transcript size once; each compaction layer below
-                # escalates only when its own token threshold is crossed.
-                tokens = estimate_tokens(messages)
-
-                # Layer 1: microcompact — prune old tool results only under
-                # memory pressure, so short, low-pressure runs keep their full
-                # tool history available for the model to reference instead of
-                # having every result past the most recent few cleared.
-                if tokens > int(_token_threshold() * 0.5):
-                    self._microcompact_and_unblock(messages, trace, iteration)
+                if _override("TOKEN_THRESHOLD") is not None:
+                    # Test hook: a monkeypatched module-level TOKEN_THRESHOLD
+                    # keeps the old estimate-based layers so compaction tests
+                    # can force each layer with a tiny number.
                     tokens = estimate_tokens(messages)
-
-                # Layer 2: context collapse (fold long text, zero API cost)
-                if tokens > int(_token_threshold() * 0.7):
-                    _context_collapse(messages)
-                    tokens = estimate_tokens(messages)
-
-                # Layer 3: auto_compact (token threshold exceeded)
-                _tok_threshold = _token_threshold()
-                if tokens > _tok_threshold:
-                    logger.info(f"Auto compact triggered: {tokens} tokens > {_tok_threshold}")
-                    self._auto_compact(messages, run_dir, trace, iteration=current_iter)
+                    if tokens > int(_token_threshold() * 0.5):
+                        self._microcompact_and_unblock(messages, trace, iteration)
+                        tokens = estimate_tokens(messages)
+                    if tokens > int(_token_threshold() * 0.7):
+                        _context_collapse(messages)
+                        tokens = estimate_tokens(messages)
+                    _tok_threshold = _token_threshold()
+                    if tokens > _tok_threshold:
+                        logger.info(f"Auto compact triggered: {tokens} tokens > {_tok_threshold}")
+                        self._auto_compact(messages, run_dir, trace, iteration=current_iter)
+                else:
+                    self._compact_to_budget(messages, run_dir, trace, iteration, current_iter)
 
                 logger.info(f"ReAct iteration {iteration}/{self.max_iterations}")
 
@@ -1585,14 +1631,23 @@ class AgentLoop:
                     # provider's Retry-After header (bounded by the configured
                     # cap) when present. A successful retry does not reset the
                     # streak — only a clean first-attempt success does.
-                    if not exc.retryable:
+                    context_overflow = is_context_overflow(str(exc))
+                    if not exc.retryable and not context_overflow:
                         raise
-                    stream_failure_streak += 1
-                    retry_delay_s = (
-                        min(exc.retry_after_s, _stream_retry_max_delay_s())
-                        if exc.retry_after_s is not None
-                        else _stream_retry_backoff_s(stream_failure_streak)
-                    )
+                    if context_overflow:
+                        # Deterministic, so no backoff: shrink to the limit the
+                        # provider reported and send once more.
+                        self._recover_context_overflow(
+                            exc, messages, run_dir, trace, iteration, current_iter
+                        )
+                        retry_delay_s = 0.0
+                    else:
+                        stream_failure_streak += 1
+                        retry_delay_s = (
+                            min(exc.retry_after_s, _stream_retry_max_delay_s())
+                            if exc.retry_after_s is not None
+                            else _stream_retry_backoff_s(stream_failure_streak)
+                        )
                     logger.warning(
                         "Provider stream failed (iter %s), retrying once in %.2fs: %s",
                         current_iter,
@@ -1603,7 +1658,7 @@ class AgentLoop:
                         "stream_reset",
                         {
                             "iter": current_iter,
-                            "reason": "provider_stream_retry",
+                            "reason": "context_overflow" if context_overflow else "provider_stream_retry",
                             "provider": exc.provider,
                             "model": exc.model,
                             "retry_delay_s": retry_delay_s,
@@ -1644,6 +1699,11 @@ class AgentLoop:
                 self._last_activity_wall = _time.time()
 
                 usage = getattr(response, "usage_metadata", None)
+                # `messages` is still exactly what this request sent.
+                self._context_meter.observe(
+                    usage.get("input_tokens") if isinstance(usage, dict) else None,
+                    messages,
+                )
                 if getattr(response, "response_model", None):
                     last_response_model = response.response_model
                 usage_delta = _record_llm_usage(
@@ -2157,6 +2217,7 @@ class AgentLoop:
                     response.tool_calls,
                     content=response.content,
                     reasoning_content=response.reasoning_content or thinking_text or None,
+                    provider_items=getattr(response, "provider_items", None),
                 )
                 _attach_tool_call_thought_signatures(assistant_message, response.tool_calls)
                 messages.append(assistant_message)
@@ -2170,8 +2231,8 @@ class AgentLoop:
                     not self._cancel_event.is_set()
                     and self._tool_progress.finish_iteration()
                 ):
-                    no_progress_reason = "no_progress: " + RECOVERY_MESSAGE
-                    final_content = RECOVERY_MESSAGE
+                    final_content = self._tool_progress.recovery_message()
+                    no_progress_reason = "no_progress: " + final_content
                     trace.write(
                         {
                             "type": "no_progress",
@@ -2441,10 +2502,36 @@ class AgentLoop:
         for tc in tool_calls:
             # Layer 4: compact tool — mark then defer execution
             if tc.name == "compact":
-                compact_requested = True
-                focus_topic = tc.arguments.get("focus_topic", "")
-                messages.append(context.format_tool_result(tc.id, "compact", '{"status":"ok","message":"Compressing..."}'))
-                trace.write({"type": "compact_requested", "iter": iteration})
+                self._tool_progress.note("compact", "compact")
+                self._emit(
+                    "tool_call",
+                    {"tool": "compact", "arguments": {}, "iter": iteration, "call_id": tc.id},
+                )
+                budget = None if _override("TOKEN_THRESHOLD") is not None else self._context_budget(messages)
+                tokens = self._prompt_tokens(messages) if budget is not None else 0
+                if budget is not None and tokens <= budget.micro_at:
+                    # Summarising a prompt this small only destroys evidence the
+                    # model will then fetch again: decline, and say why.
+                    declined = json.dumps({
+                        "status": "ok",
+                        "skipped": True,
+                        "message": (
+                            f"Compaction not needed: the prompt is {tokens} tokens, "
+                            f"under the {budget.micro_at}-token threshold. Earlier "
+                            "tool results are still in context; keep using them."
+                        ),
+                    })
+                    messages.append(context.format_tool_result(tc.id, "compact", declined))
+                    trace.write({"type": "compact_declined", "iter": iteration, "prompt_tokens": tokens})
+                else:
+                    compact_requested = True
+                    focus_topic = tc.arguments.get("focus_topic", "")
+                    messages.append(context.format_tool_result(tc.id, "compact", '{"status":"ok","message":"Compressing..."}'))
+                    trace.write({"type": "compact_requested", "iter": iteration})
+                self._emit(
+                    "tool_result",
+                    {"tool": "compact", "status": "ok", "elapsed_ms": 0, "call_id": tc.id},
+                )
                 continue
 
             tool_def = self.registry.get(tc.name)
@@ -2533,6 +2620,7 @@ class AgentLoop:
                     "recovery_limit": MAX_READONLY_REPLAY_RECOVERIES,
                 })
                 react_trace.append({"type": "tool_result_replayed", "tool": tc.name})
+                self._tool_progress.note("replayed", tc.name)
                 self._emit(
                     "tool_result",
                     {
@@ -2568,6 +2656,7 @@ class AgentLoop:
                 skip_msg = json.dumps({"skipped": True, "reason": reason})
                 messages.append(context.format_tool_result(tc.id, tc.name, skip_msg))
                 trace.write({"type": "tool_skipped", "iter": iteration, "tool": tc.name})
+                self._tool_progress.note("skipped", tc.name)
                 react_trace.append({"type": "tool_skipped", "tool": tc.name})
                 continue
 
@@ -2591,6 +2680,7 @@ class AgentLoop:
                         "call_id": tc.id,
                     })
                     react_trace.append({"type": "tool_result_cached", "tool": tc.name})
+                    self._tool_progress.note("cached", tc.name)
                     self._emit(
                         "tool_result",
                         {
@@ -2676,6 +2766,7 @@ class AgentLoop:
             react_trace: Compact returned trace.
             iteration: Current iteration.
         """
+        self._tool_progress.note("blocked", tc.name, _failure_code(result))
         args = _normalize_tool_run_dir(tc.arguments, self.memory.run_dir)
         redacted_args = redact_payload(args)
         event_args = {key: str(value)[:200] for key, value in redacted_args.items()}
@@ -3126,7 +3217,126 @@ class AgentLoop:
             "file write is a failure."
         )
 
-    def _microcompact_and_unblock(self, messages: list, trace: TraceWriter, iteration: int) -> list[str]:
+    def _context_budget(self, messages: list) -> CompactionBudget:
+        """Compaction thresholds for the active model's real context window."""
+        cfg = get_env_config()
+        provider = (cfg.llm.langchain_provider or "").strip().lower().replace("_", "-")
+        model = getattr(self.llm, "model_name", "") or cfg.llm.langchain_model_name
+        window, source = resolve_window(
+            provider,
+            str(model or ""),
+            env_window=cfg.agent_tuning.vibe_trading_context_window,
+            learned_window=self._learned_context_window,
+        )
+        return CompactionBudget(
+            window=window,
+            source=source,
+            max_tokens=cfg.agent_tuning.vibe_trading_context_max_tokens,
+            static_tokens=self._context_meter.static(messages, self._tool_schema_tokens),
+        )
+
+    def _prompt_tokens(self, messages: list) -> int:
+        """Real-token size the next request would have."""
+        return self._context_meter.tokens(messages, self._tool_schema_tokens)
+
+    def _compact_to_budget(
+        self,
+        messages: list,
+        run_dir: Path,
+        trace: TraceWriter,
+        iteration: int,
+        current_iter: int,
+        *,
+        force: bool = False,
+    ) -> None:
+        """Run the compaction layers the prompt has actually grown into.
+
+        Args:
+            messages: Message list, mutated in place.
+            run_dir: Active run directory.
+            trace: Run trace.
+            iteration: Loop-local iteration (the microcompact event's key).
+            current_iter: Session-wide iteration number.
+            force: Summarise even under budget (the provider said it overflowed).
+        """
+        budget = self._context_budget(messages)
+        tokens = self._prompt_tokens(messages)
+        if tokens > budget.micro_at:
+            # Oldest results first and only until the prompt fits again:
+            # clearing all but the last few is what sent a 12-company
+            # comparison back to re-fetch its own evidence.
+            self._microcompact_and_unblock(
+                messages,
+                trace,
+                iteration,
+                target_tokens=budget.micro_at,
+                measure=self._prompt_tokens,
+            )
+            tokens = self._prompt_tokens(messages)
+        if tokens > budget.collapse_at:
+            _context_collapse(messages)
+            tokens = self._prompt_tokens(messages)
+        # A summary keeps the static prompt plus a ~20K-token tail, so on a
+        # window that small the prompt stays over the line after compacting;
+        # without this every later iteration paid for another summary call.
+        regrown = (
+            self._compacted_to_tokens is None
+            or tokens > self._compacted_to_tokens + MIN_CONVERSATION_TOKENS
+        )
+        if force or (tokens > budget.compact_at and regrown):
+            logger.info(
+                "Auto compact triggered: %s real tokens > %s (window %s from %s)",
+                tokens, budget.compact_at, budget.window, budget.source,
+            )
+            self._auto_compact(messages, run_dir, trace, iteration=current_iter)
+            self._compacted_to_tokens = self._prompt_tokens(messages)
+
+    def _recover_context_overflow(
+        self,
+        exc: Exception,
+        messages: list,
+        run_dir: Path,
+        trace: TraceWriter,
+        iteration: int,
+        current_iter: int,
+    ) -> None:
+        """Learn the real window from a context-length error and compact to it.
+
+        A model missing from ``context_windows.json`` runs on the default
+        window; if that is larger than the real one the provider says so, and
+        the run shrinks to the limit instead of failing.
+
+        Args:
+            exc: The provider error that reported the overflow.
+            messages: Message list, mutated in place.
+            run_dir: Active run directory.
+            trace: Run trace.
+            iteration: Loop-local iteration.
+            current_iter: Session-wide iteration number.
+        """
+        sent = self._prompt_tokens(messages)
+        stated = parse_context_limit(str(exc))
+        # The provider's own number when it gives one; otherwise the prompt
+        # that did not fit, with a margin for our estimate of it.
+        self._learned_context_window = stated or int(sent * 0.9)
+        trace.write({
+            "type": "context_overflow",
+            "iter": current_iter,
+            "prompt_tokens": sent,
+            "stated_limit": stated,
+            "learned_window": self._learned_context_window,
+        })
+        self._compact_to_budget(messages, run_dir, trace, iteration, current_iter, force=True)
+
+    def _microcompact_and_unblock(
+        self,
+        messages: list,
+        trace: TraceWriter,
+        iteration: int,
+        *,
+        target_tokens: Optional[int] = None,
+        measure: Optional[Callable[[list], int]] = None,
+    ) -> list[str]:
         """Run layer-1 microcompact and re-open lost readonly call identities.
 
         A readable result for another argument variant, or a synthetic skip,
@@ -3140,12 +3350,14 @@ class AgentLoop:
                 whenever the ledger is re-opened, because this layer used to
                 act silently and left no evidence for diagnosis.
             iteration: Current ReAct iteration, recorded on the trace event.
+            target_tokens: Clear oldest-first only until the prompt fits.
+            measure: Prompt-size function for ``target_tokens``.
 
         Returns:
             The tool names re-opened, for callers and tests to assert on.
         """
         readable_before = self._readable_success_keys(messages)
-        _microcompact(messages)
+        _microcompact(messages, target_tokens=target_tokens, measure=measure)
         unreadable_tools = self._unblock_lost_readonly_results(messages, readable_before)
         if unreadable_tools:
             trace.write({
@@ -3389,7 +3601,11 @@ class AgentLoop:
         # Fold every head chunk so no message falls between the summary prompt
         # and the preserved tail. The first fresh chunk gets the full
         # structured handoff; subsequent chunks incrementally update it.
-        chunks = _summary_chunks(head)
+        # Encrypted provider items are opaque to the summariser and only
+        # cost tokens there; the messages they belong to are being folded.
+        chunks = _summary_chunks(
+            [{k: v for k, v in m.items() if k != "provider_items"} for m in head]
+        )
         logger.info("Auto compact: folding %d summary chunks", len(chunks))
         summary = self._previous_summary or ""
         degraded_compact = False
@@ -3524,7 +3740,6 @@ class AgentLoop:
 
 
 _LEGACY_LAZY = {
-    "TOKEN_THRESHOLD": _token_threshold,
     "MICROCOMPACT_THRESHOLD": lambda: int(_token_threshold() * 0.5),
     "COLLAPSE_THRESHOLD": lambda: int(_token_threshold() * 0.7),
     "HEARTBEAT_INTERVAL_S": _heartbeat_interval_s,

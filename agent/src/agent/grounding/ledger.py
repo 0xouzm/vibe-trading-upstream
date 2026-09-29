@@ -253,6 +253,11 @@ class GroundingLedger(
             self._record_tool_failure(tool_name, call_id, result)
             if tool_name == _RESOLVER_TOOL:
                 self._finish_failed_resolution(arguments, call_id)
+            elif tool_name == "get_market_data" and payload is not None and payload.get("_unresolved"):
+                # A fetch where no symbol returned data is a failed call, but
+                # each symbol is still recorded as unavailable, as it was
+                # when this envelope counted as a success.
+                self._ingest_market_data(arguments, payload, call_id)
             self.persist()
             return
 

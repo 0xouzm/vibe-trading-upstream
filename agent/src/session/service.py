@@ -404,11 +404,11 @@ class SessionService:
                 content=self._format_result_message(attempt),
                 linked_attempt_id=attempt.attempt_id,
                 metadata=reply_metadata,
-                tool_trail=(
-                    result.get("tool_trail", [])
-                    if attempt.status == AttemptStatus.COMPLETED
-                    else []
-                ),
+                # Every terminal attempt keeps its steps. A failed run saved an
+                # empty trail, so after a reload the history said "0 steps"
+                # for a run that made eight rounds of tool calls — hiding the
+                # one thing a failure report needs.
+                tool_trail=result.get("tool_trail", []),
             )
             self.store.append_message(reply)
             # The append-only transcript is the user-visible source of truth.

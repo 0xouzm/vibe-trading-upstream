@@ -426,6 +426,7 @@ class ContextBuilder:
         tool_calls: list,
         content: Optional[str] = None,
         reasoning_content: Optional[str] = None,
+        provider_items: Optional[list] = None,
     ) -> Dict[str, Any]:
         """Format an assistant tool_calls message, preserving thinking text.
 
@@ -436,6 +437,9 @@ class ContextBuilder:
             reasoning_content: Provider-specific reasoning field (Kimi K2.5,
                 DeepSeek reasoner, Qwen thinking). Only attached to the output
                 message when not None, so non-thinking providers see no change.
+            provider_items: Opaque items the provider must receive back verbatim
+                with this turn (Codex encrypted reasoning). Attached only when
+                non-empty; only the adapter that produced them reads them.
 
         Returns:
             OpenAI-format assistant message.
@@ -468,4 +472,6 @@ class ContextBuilder:
             }
         if reasoning_content is not None:
             message["reasoning_content"] = reasoning_content
+        if provider_items:
+            message["provider_items"] = list(provider_items)
         return message

@@ -1,5 +1,5 @@
-import { DOCS_STRUCTURE as EN_STRUCTURE } from "/docs/content.en.js?v=20260929d";
-import { DOCS_STRUCTURE as ZH_STRUCTURE } from "/docs/content.zh.js?v=20260929d";
+import { DOCS_STRUCTURE as EN_STRUCTURE } from "/docs/content.en.js?v=20260929e";
+import { DOCS_STRUCTURE as ZH_STRUCTURE } from "/docs/content.zh.js?v=20260929e";
 
 // One content set per language; every version alias renders the latest.
 export const DOCS_DEFAULT_VERSION = "0.1.16";

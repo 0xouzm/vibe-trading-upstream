@@ -1,11 +1,11 @@
-import { initSite, setPageLang, storedLang } from "/site.js?v=20260929d";
+import { initSite, setPageLang, storedLang } from "/site.js?v=20260929e";
 import {
   DOCS_DEFAULT_LANG,
   DOCS_DEFAULT_PAGE,
   DOCS_LANGUAGES,
   DOCS_UI,
   DOCS_VERSIONS
-} from "/docs/content.js?v=20260929d";
+} from "/docs/content.js?v=20260929e";
 
 const SITE = "https://vibetrading.wiki";
 

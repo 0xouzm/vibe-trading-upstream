@@ -23,6 +23,9 @@ Security posture (v0.1.8):
     * KaTeX is intentionally **not** loaded. ``formula_latex`` is shown as
       raw escaped text inside ``<pre>``. A future revision can swap in a
       server-side LaTeX→MathML pass that keeps CSP intact.
+    * Notes, nicknames and theme tags carry their Chinese in ``data-text-zh``
+      from ``wiki/alpha-library/i18n.zh.json`` — only when the stored English
+      still matches the manifest, so a stale translation is never shown.
     * The header, footer and head block come from ``wiki/partials/`` (the
       same markup ``sync_site_chrome.py`` writes into the hand-written
       pages); labels carry ``data-i18n`` keys from ``wiki/locales/zh.json``.
@@ -68,6 +71,11 @@ except ImportError as exc:  # pragma: no cover — Jinja2 is a project dep
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_MANIFEST = _REPO_ROOT / "wiki" / "alpha-library" / "manifest.json"
 _DEFAULT_OUTPUT = _REPO_ROOT / "wiki" / "alpha-library" / "content"
+# Chinese notes, nicknames and theme names. Each note and nickname keeps the
+# English it was translated from, so an edited English text is shown in
+# English until its translation is updated (agent/tests/factors/
+# test_alpha_library_translations.py fails in the meantime).
+_I18N_PATH = _REPO_ROOT / "wiki" / "alpha-library" / "i18n.zh.json"
 
 # Strict CSP for static content pages: same-origin scripts only, no inline.
 _CSP_CONTENT = (
@@ -80,7 +88,7 @@ _CSP_CONTENT = (
 )
 
 # Cache-busting version of the site shell modules; matches the hand-written pages.
-_SHELL_VERSION = "20260929d"
+_SHELL_VERSION = "20260929e"
 
 # Display names for zoos. Source of truth — do not depend on prose elsewhere.
 _ZOO_DISPLAY: dict[str, dict[str, str]] = {
@@ -199,11 +207,11 @@ _ALPHA_PAGE_TEMPLATE = """<!doctype html>
       <span>{{ alpha.id }}</span>
     </p>
     <h1>{{ alpha.id }}</h1>
-    {% if alpha.meta.nickname %}<p class="nickname">{{ alpha.meta.nickname }}</p>{% endif %}
+    {% if alpha.meta.nickname %}<p class="nickname"{% if zh.nickname %} data-text-zh="{{ zh.nickname }}"{% endif %}>{{ alpha.meta.nickname }}</p>{% endif %}
 
     <h2 data-i18n="alpha.page.themes">Themes &amp; universe</h2>
     <p>
-      {% for t in alpha.meta.theme %}<span class="tag">{{ t }}</span>{% endfor %}
+      {% for t in alpha.meta.theme %}<span class="tag" data-text-zh="{{ t | zh_theme }}">{{ t }}</span>{% endfor %}
       {% for u in alpha.meta.universe %}<span class="tag">{{ u }}</span>{% endfor %}
       {% for f in alpha.meta.frequency %}<span class="tag">{{ f }}</span>{% endfor %}
     </p>
@@ -225,7 +233,7 @@ _ALPHA_PAGE_TEMPLATE = """<!doctype html>
 
     {% if alpha.meta.notes %}
     <h2 data-i18n="alpha.page.notes">Notes</h2>
-    <p class="notes">{{ alpha.meta.notes }}</p>
+    <p class="notes"{% if zh.notes %} data-text-zh="{{ zh.notes }}"{% endif %}>{{ alpha.meta.notes }}</p>
     {% endif %}
 
     <h2 data-i18n="alpha.page.run">Run it</h2>
@@ -290,7 +298,7 @@ _ZOO_PAGE_TEMPLATE = """<!doctype html>
       {% for a in zoo.alphas %}
         <tr>
           <td><a href="{{ a.id }}.html">{{ a.id }}</a></td>
-          <td class="theme-cell">{{ a.meta.theme | join(", ") }}</td>
+          <td class="theme-cell" data-text-zh="{{ a.meta.theme | map('zh_theme') | join('、') }}">{{ a.meta.theme | join(", ") }}</td>
           <td class="theme-cell">{{ a.meta.universe | join(", ") }}</td>
           <td>{{ a.meta.decay_horizon }}</td>
           <td>{{ a.meta.min_warmup_bars }}</td>
@@ -311,13 +319,47 @@ _ZOO_PAGE_TEMPLATE = """<!doctype html>
 # ---------------------------------------------------------------------------
 
 
+def _load_i18n() -> dict[str, Any]:
+    """Load the Chinese notes / nicknames / theme names (empty when absent).
+
+    Returns:
+        ``{"notes": {id: {"en", "zh"}}, "nicknames": {...}, "themes": {tag: zh}}``.
+    """
+    if not _I18N_PATH.is_file():
+        return {"notes": {}, "nicknames": {}, "themes": {}}
+    return json.loads(_I18N_PATH.read_text(encoding="utf-8"))
+
+
+_I18N = _load_i18n()
+
+
+def _zh_texts(alpha: dict) -> dict[str, str | None]:
+    """Chinese note and nickname for one alpha, or None where stale / missing.
+
+    Args:
+        alpha: One manifest alpha entry.
+
+    Returns:
+        ``{"notes": ..., "nickname": ...}``.
+    """
+    meta = alpha.get("meta", {})
+    out: dict[str, str | None] = {}
+    for field, bucket in (("notes", "notes"), ("nickname", "nicknames")):
+        entry = _I18N.get(bucket, {}).get(alpha.get("id"))
+        text = meta.get(field)
+        out[field] = entry["zh"] if entry and text and entry.get("en") == text else None
+    return out
+
+
 def _build_env() -> Environment:
     """Create a Jinja2 environment with mandatory autoescape on."""
-    return Environment(
+    env = Environment(
         autoescape=select_autoescape(["html", "xml"]),
         trim_blocks=True,
         lstrip_blocks=True,
     )
+    env.filters["zh_theme"] = lambda tag: _I18N.get("themes", {}).get(tag, tag)
+    return env
 
 
 def _chrome() -> dict[str, Any]:
@@ -351,6 +393,7 @@ def render_alpha_page(env: Environment, alpha: dict, zoo: dict) -> str:
         zoo=zoo,
         zoo_display=zoo_display,
         csp=_CSP_CONTENT,
+        zh=_zh_texts(alpha),
         **_chrome(),
     )
 
@@ -472,6 +515,7 @@ def main(argv: list[str] | None = None) -> int:
     zoo_count = 0
     sample_alpha: dict | None = None
     sample_html: str | None = None
+    untranslated: list[str] = []
 
     for zoo in manifest.get("zoos", []):
         zoo_id = zoo.get("zoo_id")
@@ -492,6 +536,10 @@ def main(argv: list[str] | None = None) -> int:
                 # regex, but never trust a JSON file from disk.
                 continue
             html = render_alpha_page(env, alpha, zoo)
+            zh = _zh_texts(alpha)
+            meta = alpha.get("meta", {})
+            if (meta.get("notes") and not zh["notes"]) or (meta.get("nickname") and not zh["nickname"]):
+                untranslated.append(alpha_id)
             _write(zoo_dir / f"{alpha_id}.html", html)
             alpha_count += 1
             if sample_alpha is None:
@@ -513,6 +561,12 @@ def main(argv: list[str] | None = None) -> int:
             print("html escape FAIL", file=sys.stderr)
             return 1
 
+    if untranslated:
+        print(
+            f"warning: {len(untranslated)} alphas show English notes/nicknames in Chinese "
+            f"(missing or stale in {_I18N_PATH.name}): {', '.join(untranslated[:10])}",
+            file=sys.stderr,
+        )
     print(
         f"built: {alpha_count} alphas across {zoo_count} zoos -> {out_dir}"
     )

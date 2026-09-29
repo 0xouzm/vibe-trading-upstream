@@ -4,8 +4,9 @@
 // Language model: English is the HTML itself. Chinese comes from
 // /locales/zh.json through data-i18n (text), data-i18n-html (markup),
 // data-i18n-attr ("attr=key,attr=key") and data-href-zh (a link that has a
-// Chinese counterpart). One stored choice, default English, never guessed
-// from the browser.
+// Chinese counterpart); generated pages carry their own Chinese inline in
+// data-text-zh (the Alpha Library's per-alpha notes). One stored choice,
+// default English, never guessed from the browser.
 //
 // A page whose URL is language-neutral (<html data-lang-neutral>) renders the
 // stored language. A page whose URL is language-specific (<html
@@ -14,7 +15,7 @@
 // site Chinese; its toggle goes to the counterpart page instead.
 
 const LANG_KEY = "vibetrading-lang";
-const LOCALE_VERSION = "20260929d";
+const LOCALE_VERSION = "20260929e";
 const THEME_KEY = "vibetrading-theme";
 const STARS_CACHE_KEY = "vibetrading-github-stars";
 const STARS_TTL_MS = 12 * 60 * 60 * 1000;
@@ -79,6 +80,11 @@ function translateElement(el, messages) {
       el.setAttribute(attr, messages?.[key] ?? original);
     }
   }
+  const textZh = el.getAttribute("data-text-zh");
+  if (textZh) {
+    const original = remember(el, "i18nEnText", el.textContent);
+    el.textContent = messages ? textZh : original;
+  }
   const hrefZh = el.getAttribute("data-href-zh");
   if (hrefZh) {
     const original = remember(el, "i18nEnHref", el.getAttribute("href") ?? "");
@@ -98,7 +104,7 @@ export async function translate(lang, root = document) {
       messages = null;
     }
   }
-  root.querySelectorAll("[data-i18n], [data-i18n-html], [data-i18n-attr], [data-href-zh]").forEach((el) => {
+  root.querySelectorAll("[data-i18n], [data-i18n-html], [data-i18n-attr], [data-href-zh], [data-text-zh]").forEach((el) => {
     translateElement(el, messages);
   });
   if (root === document) {

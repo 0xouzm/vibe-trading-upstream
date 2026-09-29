@@ -30,6 +30,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from src.agent.context import ContextBuilder
 from src.agent.grounding import GroundingLedger
+from src.agent.grounding.evidence import ARCHIVE_MANIFEST as _ARCHIVE_MANIFEST
 from src.agent.grounding.release import MAX_GROUNDING_REVISIONS
 from src.agent.memory import WorkspaceMemory
 from src.agent.progress import HeartbeatTimer, ProgressEvent, _set_emitter
@@ -1005,9 +1006,9 @@ def _normalize_tool_run_dir(args: dict[str, Any], memory_run_dir: str | None) ->
     return normalized
 
 
-#: Names the backtest an archived run currently describes, and the files that
-#: archive placed there, so the next one can replace exactly its own output.
-_ARCHIVE_MANIFEST = ".archived_backtest.json"
+# ``_ARCHIVE_MANIFEST`` names the backtest an archived run currently describes,
+# and the files that archive placed there, so the next one can replace exactly
+# its own output. The grounding ledger reads it to tell whose copy it is.
 
 
 def _previously_archived(target: Path) -> set[str]:

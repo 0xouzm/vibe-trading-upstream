@@ -10,7 +10,9 @@ from __future__ import annotations
 import ast
 import json
 import math
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from src.agent.grounding.identity import (
@@ -522,6 +524,11 @@ class _PolicyMixin:
             if declaration is None:
                 found = self._check_observed(figure, None, symbol, records)
                 if block.present and found:
+                    # Declared, but as a fraction where the answer writes a
+                    # percent (or the reverse): still undeclared, since the
+                    # two are different assertions — but say so, or the model
+                    # reads "not declared" as a lie and repeats the draft.
+                    other_unit = _declared_in_other_unit(block, figure)
                     issues.append(
                         self._figure_issue(
                             "figure_undeclared",
@@ -532,6 +539,7 @@ class _PolicyMixin:
                             "is not declared in the figures block and is not an observed "
                             "value; declare it as observed / derived / proposed / cited / "
                             "count, or remove it",
+                            **({"declared_as": other_unit.value_text} if other_unit else {}),
                         )
                     )
                     continue
@@ -663,6 +671,10 @@ class _PolicyMixin:
         then its line; the whole-answer fallback is left to the caller.
         """
         if figure.symbol:
+            # "000001.SZ 平安银行": the cell names its instrument beside a name.
+            written = _scan_symbols(figure.symbol)
+            if len(written) == 1:
+                return next(iter(written))
             normalized = _normalize_symbol(figure.symbol)
             if normalized:
                 return normalized
@@ -679,6 +691,8 @@ class _PolicyMixin:
         ref: str,
         symbol: str | None,
         figure: Figure | None,
+        *,
+        pool_ambiguous: bool = False,
     ) -> tuple[list[EvidenceRecord], list[float]] | None:
         """The evidence named by an exact field, call+field, one call, or one tool.
 
@@ -686,44 +700,56 @@ class _PolicyMixin:
         one call. When it repeats across calls, ``call_id::field`` is the
         unambiguous tightest scope. Otherwise a ``ref`` naming a call id or a
         tool name keeps the existing call/tool scope, and the only one that can
-        ground a non-price figure (revenue, IC, volume). Records of another
-        symbol are dropped when the figure's symbol is known; a currency-marked
-        figure keeps only money-denominated records, a percent only the others,
-        less metadata counts.
+        ground a non-price figure (revenue, IC, volume). A backtest's output is
+        also named by its run directory or file (:meth:`_artifact_scope`).
+        Records of another symbol are dropped when the figure's symbol is
+        known; a currency-marked figure keeps only money-denominated records, a
+        percent only the others, less metadata counts.
 
         Args:
             ref: The declaration's ``ref``.
             symbol: The figure's resolved symbol, or None.
             figure: The figure whose shape narrows the kind, or None for the
                 operands of a derivation.
+            pool_ambiguous: Pool a field ref's sources even when they disagree.
+                Only a derivation's anchors ask for it: an operand from either
+                run is still an observation.
 
         Returns:
             ``(records, metric values)``, or None when ``ref`` names no field,
-            call, or tool.
+            call, tool, or backtest output.
         """
         key = (ref or "").strip()
         if not key:
             return None
 
-        # A composite ref names one exact field from one exact call. This is
-        # the unambiguous form when the same analysis field appears in more
-        # than one tool call during a run.
+        # A composite ref names one exact field from one exact call, or from
+        # one backtest's output (``rp::sharpe``). This is the unambiguous form
+        # when the same analysis field appears in more than one tool call.
         if "::" in key:
             call_id, field = (part.strip() for part in key.split("::", 1))
             if not call_id or not field:
                 return [], []
             records, entries = self._field_sources(field, symbol)
-            records = [record for record in records if record.call_id == call_id]
+            by_call = [record for record in records if record.call_id == call_id]
             metrics = [float(entry["value"]) for entry in entries if entry.get("call_id") == call_id]
+            # Not a call: ``rp::sharpe`` names a field of one backtest's output,
+            # ``rp::target_positions.csv`` or ``backtest::rp`` the output itself.
+            records = by_call if by_call or metrics else self._artifact_scope(key) or []
         else:
             records, entries = self._field_sources(key, symbol)
+            artifact_scope = None if records or entries else self._artifact_scope(key)
             if records or entries:
-                if self._ambiguous_field_sources(key, symbol):
+                if not pool_ambiguous and self._ambiguous_field_sources(key, symbol):
                     # Calls disagree on this field, so the ref cannot say
                     # which value it quotes (VaR at 95% vs 99%). Fail closed
                     # rather than pool them; the issue names the calls.
                     return [], []
                 metrics = [float(entry["value"]) for entry in entries]
+            elif artifact_scope is not None:
+                # A backtest's run directory or one of its files: everything
+                # that backtest observed there, and nothing another run did.
+                records, metrics = artifact_scope, []
             else:
                 records = [
                     record
@@ -815,23 +841,131 @@ class _PolicyMixin:
     def _ambiguous_field_sources(self, field: str, symbol: str | None) -> list[str]:
         """The ``call::path`` sources a field-only ref cannot choose between.
 
-        Ambiguous means more than one (call, path) source AND more than one
-        value among them: two runs of one call returning the same number leave
-        nothing to choose. Each source is written as the ref that names it.
+        Ambiguous means more than one source AND more than one value among
+        them: two runs of one call returning the same number leave nothing to
+        choose. A source is a call and its full path, except that one backtest
+        is one source (:meth:`_ref_source`). Each is written as the ref that
+        names it.
 
         Returns:
-            Sorted ``call::path`` refs, or an empty list when the ref is exact.
+            Sorted refs, or an empty list when the ref is exact.
         """
         if not field or "::" in field:
             return []
         records, entries = self._field_sources(field, symbol)
-        sources = {(record.call_id, record.field, float(record.value)) for record in records}
-        sources |= {
-            (str(entry.get("call_id")), entry.get("field"), float(entry["value"])) for entry in entries
+        sources = {
+            (*self._ref_source(record.call_id, record.field, record.scope), float(record.value))
+            for record in records
         }
-        if len({(call, path) for call, path, _ in sources}) < 2 or len({value for *_, value in sources}) < 2:
+        sources |= {
+            (
+                *self._ref_source(str(entry.get("call_id")), str(entry.get("field")), None),
+                float(entry["value"]),
+            )
+            for entry in entries
+        }
+        if len({identity for identity, *_ in sources}) < 2 or len({value for *_, value in sources}) < 2:
             return []
-        return sorted({f"{call}::{path}" for call, path, _ in sources})
+        return sorted({label for _, label, _ in sources})
+
+    def _ref_source(
+        self, call_id: str, field: str, scope: str | None
+    ) -> tuple[tuple[str, str], str]:
+        """Which source one evidence value belongs to, and the ref that names it.
+
+        One backtest is one observation: its run card, metrics file and risk
+        X-ray each hold a ``max_drawdown``, and a ref matching several of them
+        still names that one run. Two backtests are two sources, and so is one
+        directory run twice (the earlier call keeps its own identity). A
+        backtest's value is named through its run directory (``rp::sharpe``),
+        which the model chose; anything else by call id and full path.
+
+        Args:
+            call_id: The call that returned the value.
+            field: Its full evidence path.
+            scope: The backtest run directory of a backtest output record.
+
+        Returns:
+            ``(identity, ref label)``.
+        """
+        if scope is None:
+            owner = self._backtest_scopes.get(call_id)
+            if owner is not None and self._scope_latest.get(owner) == call_id:
+                scope = owner
+        if scope is None:
+            return (call_id, field), f"{call_id}::{field}"
+        return ("scope", scope), f"{scope}::{field}" if scope else f"{call_id}::{field}"
+
+    def _artifact_scope(self, key: str) -> list[EvidenceRecord] | None:
+        """The backtest output a ref names by run directory or file, or None.
+
+        Backtest output is named the way the model named the run: its run
+        directory, which the model chose (``rp``, ``risk_parity``), as a path
+        (``rp/artifacts/metrics.csv``, ``rp/metrics.csv``) or beside a file
+        and a field (``risk_parity target_positions.csv``,
+        ``backtest::rp``). The run directory is what makes the ref exact —
+        two backtests hold two different Sharpes — so a ref naming several
+        runs pools them, and a ref naming only a file pools that file across
+        runs, like a ref naming the tool. A file or field the ref also names
+        narrows the set when the run holds it and is ignored otherwise.
+
+        Args:
+            key: The declaration's ref, or one half of ``scope::field``.
+
+        Returns:
+            The observed backtest records the ref names, or None when it names
+            no backtest run directory and no file one wrote.
+        """
+        owned = [
+            record
+            for record in self._evidence
+            if record.artifact is not None
+            and record.status == "observed"
+            and record.value is not None
+        ]
+        if not owned:
+            return None
+        root = self.run_dir.resolve()
+        chosen: dict[int, EvidenceRecord] = {}
+        by_tool: dict[int, EvidenceRecord] = {}
+        files: set[str] = set()
+        fields: list[str] = []
+        for token in _REF_TOKEN_RE.split(key):
+            token = token.strip("`'\"")
+            if not token:
+                continue
+            hits = _records_at(token, owned, root)
+            if hits:
+                chosen.update((id(record), record) for record in hits)
+            elif token != key.strip() and any(record.tool == token for record in owned):
+                # "backtest 两个运行": the tool name beside words. Beside a run
+                # directory ("backtest::rp") it only says what the run is; a
+                # ref that is the tool name alone keeps the tool scope in
+                # ``_referenced``.
+                by_tool.update((id(record), record) for record in owned if record.tool == token)
+            elif "/" not in token and any(
+                _file_stem(token) == _file_stem(record.artifact) for record in owned
+            ):
+                # A bare file name ("target_positions.csv"). A path that holds
+                # none of this session's records names nothing: the active
+                # run's copy may be another backtest's by now.
+                files.add(_file_stem(token))
+            else:
+                fields.append(token)
+        chosen = chosen or by_tool
+        if not chosen and not files:
+            return None
+        selected = list(chosen.values()) or owned
+        by_file = [record for record in selected if _file_stem(record.artifact) in files]
+        selected = by_file or selected
+        for token in fields:
+            by_field = [
+                record
+                for record in selected
+                if record.field == token or record.field.endswith("." + token)
+            ]
+            selected = by_field or selected
+        return selected or None
 
     def _tail_risk_sources(
         self,
@@ -855,14 +989,14 @@ class _PolicyMixin:
                 sources.append((identity, float(entry["value"])))
         return sources
 
-    @staticmethod
     def _tail_risk_field_refs(
+        self,
         records: Sequence[EvidenceRecord],
         entries: Iterable[Mapping[str, Any]] = (),
     ) -> list[str]:
-        """Exact call_id::field refs available for tail-risk evidence."""
+        """Exact ``call_id::field`` (or ``run_dir::field``) refs for tail-risk evidence."""
         refs = {
-            f"{record.call_id}::{record.field}"
+            self._ref_source(record.call_id, record.field, record.scope)[1]
             for record in records
             if record.call_id
             and record.field
@@ -871,7 +1005,7 @@ class _PolicyMixin:
             and tail_risk_identity(record.field)
         }
         refs |= {
-            f"{entry.get('call_id')}::{entry.get('field')}"
+            self._ref_source(str(entry.get("call_id")), str(entry.get("field")), None)[1]
             for entry in entries
             if entry.get("call_id")
             and entry.get("field")
@@ -892,12 +1026,12 @@ class _PolicyMixin:
             return []
         records, entries = self._field_sources(field, symbol)
         refs = {
-            f"{record.call_id}::{record.field}"
+            self._ref_source(record.call_id, record.field, record.scope)[1]
             for record in records
             if record.tool == scope and record.call_id and record.field
         }
         refs |= {
-            f"{entry.get('call_id')}::{entry.get('field')}"
+            self._ref_source(str(entry.get("call_id")), str(entry.get("field")), None)[1]
             for entry in entries
             if entry.get("tool") == scope and entry.get("call_id") and entry.get("field")
         }
@@ -1393,32 +1527,43 @@ class _PolicyMixin:
         if evaluated is None:
             return "formula_not_evaluable"
         result, operands, tree = evaluated
-        if not symbol and len({record.symbol for record in records if record.symbol}) > 1:
-            # Two instruments' bars and no resolved symbol: any arithmetic would
-            # look anchored, with nothing to anchor it to.
-            return "no_symbol"
-        # A money-marked result is derived from money: an RSI or a volume is not
-        # a price to take a discount of.
-        anchors = self._price_pool(symbol, records) + self._row_pool(symbol, money_only=money)
-        if not money:
-            anchors += self._metric_pool(symbol)
-        scoped = self._referenced(declaration.ref, symbol, None)
+        # Two instruments' bars and no resolved symbol: arithmetic anchored on
+        # the session's pools, or on one instrument's prints the ref names,
+        # would look anchored with nothing to anchor it to. Only evidence that
+        # belongs to no instrument, named by the ref, can anchor it then — a
+        # difference between two backtests' Sharpes is a portfolio figure.
+        unattributed = not symbol and len({record.symbol for record in records if record.symbol}) > 1
+        anchors: list[float] = []
+        if not unattributed:
+            # A money-marked result is derived from money: an RSI or a volume
+            # is not a price to take a discount of.
+            anchors = self._price_pool(symbol, records) + self._row_pool(symbol, money_only=money)
+            if not money:
+                anchors += self._metric_pool(symbol)
+        # Arithmetic across two runs needs both runs' values: a field ref that
+        # names several sources anchors all of them instead of none.
+        scoped = self._referenced(declaration.ref, symbol, None, pool_ambiguous=True)
         if scoped is not None:
             anchors.extend(
                 float(record.value)
                 for record in scoped[0]
-                if not money or _is_price_kind(record)
+                if (not money or _is_price_kind(record)) and not (unattributed and record.symbol)
             )
-            if not money:
+            if not money and not unattributed:
                 anchors.extend(scoped[1])
         if not anchors:
-            return "no_evidence"
+            return "no_symbol" if unattributed else "no_evidence"
+
+        # A formula's constants are parsed unsigned ("−0.2099 − (−0.2158)"
+        # holds 0.2099 and 0.2158), so an operand is matched by magnitude, as
+        # a figure is: without it no drawdown or loss could ever anchor.
+        magnitudes = [abs(anchor) for anchor in anchors]
 
         def observed(operand: float) -> bool:
-            return _close_any(operand, anchors)
+            return _close_any(abs(operand), magnitudes)
 
         if not any(observed(operand) for operand in operands):
-            return "formula_not_anchored"
+            return "no_symbol" if unattributed else "formula_not_anchored"
         if _unanchored_term(tree, observed):
             return "additive_operand_not_observed"
         return result, operands
@@ -1819,6 +1964,82 @@ class _PolicyMixin:
 
 
 #: The role an undeclared figure is validated under (spec §4, undeclared mode).
+def _declared_in_other_unit(block: FiguresBlock, figure: Figure) -> Declaration | None:
+    """A declaration holding ``figure`` as a fraction where it is a percent, or the reverse.
+
+    It does not cover the figure (``block.match`` keeps the two apart); it
+    only lets the correction say what the model did declare.
+    """
+    half_unit = _written_half_unit(figure.digits or figure.text)
+    for declaration in block.declarations:
+        if declaration.percent == figure.percent:
+            continue
+        in_figure_units = declaration.value * (100.0 if figure.percent else 0.01)
+        if abs(in_figure_units - figure.value) <= half_unit * (1 + 1e-9):
+            return declaration
+    return None
+
+
+#: What separates the parts of a free-form ref: ``backtest::rp``,
+#: ``risk_parity target_positions.csv``, ``backtest(metrics.csv)``.
+_REF_TOKEN_RE = re.compile(r"::?|[\s,，;；()（）\[\]]+")
+
+
+def _file_stem(path: str) -> str:
+    """A file's name up to its first dot, casefolded: ``target_positions`` for any spelling."""
+    return str(path).rsplit("/", 1)[-1].split(".", 1)[0].casefold()
+
+
+def _records_at(
+    token: str, owned: Sequence[EvidenceRecord], root: Path
+) -> list[EvidenceRecord]:
+    """The backtest records a path-like ref token names.
+
+    A directory or file relative to the run (or absolute) names what lies at
+    or under it. A file named without its ``artifacts/`` segment
+    (``rp/metrics.csv``) names that file anywhere under its directory, and
+    ``rp/ew`` names both run directories.
+
+    Args:
+        token: One part of a ref.
+        owned: Every observed backtest record.
+        root: The ledger's resolved run directory.
+
+    Returns:
+        The records at that path, or an empty list.
+    """
+    path = Path(token)
+    if not path.is_absolute():
+        path = root / path
+    try:
+        relative = Path(os.path.normpath(path)).relative_to(root).as_posix()
+    except ValueError:
+        return []
+    if relative in ("", "."):
+        return []
+
+    def under(artifact: str, prefix: str) -> bool:
+        return artifact == prefix or artifact.startswith(prefix + "/")
+
+    hits = [record for record in owned if under(record.artifact or "", relative)]
+    if hits or "/" not in relative:
+        return hits
+    parent, _, name = relative.rpartition("/")
+    hits = [
+        record
+        for record in owned
+        if under(record.artifact or "", parent)
+        and _file_stem(record.artifact or "") == _file_stem(name)
+    ]
+    if hits:
+        return hits
+    groups = [
+        [record for record in owned if under(record.artifact or "", part)]
+        for part in relative.split("/")
+    ]
+    return [record for group in groups for record in group] if all(groups) else []
+
+
 _NO_DECLARATION = Declaration(
     index=0, value_text="", value=0.0, percent=False, role="observed", note="", ref=""
 )

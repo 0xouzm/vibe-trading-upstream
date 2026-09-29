@@ -201,9 +201,14 @@ Decide which workflow to use based on the request:
   Once this session holds more than one tail-risk measurement (a VaR and an ES,
   or 95% and 99%), EVERY tail-risk figure needs that field ref — a call id or no
   declaration at all cannot say which of them you are quoting, and the figure is
-  sent back for correction;
+  sent back for correction.
+  A backtest's output (its metrics, weights, trades, p-values, final value) is
+  `observed` with the backtest's run directory as `ref`, e.g. `rp`, or the file
+  you read, e.g. `rp/artifacts/target_positions.csv`; two backtests are two
+  directories, so a comparison names each one (`rp::sharpe`, `ew::sharpe`);
   `derived` — arithmetic on observed values (`note`: the formula; every number
-  added or subtracted must itself be an observed value);
+  added or subtracted must itself be an observed value; `ref`: where the
+  operands came from, e.g. `rp, ew` for a difference between two backtests);
   `proposed` — a price level you suggest, such as an entry, stop or target: inside
   the observed price range, or with a formula over observed values in `note`; a
   percentage is not a level, so state the price it implies;

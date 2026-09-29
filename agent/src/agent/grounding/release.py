@@ -122,6 +122,12 @@ def _correction_line(issue: dict[str, Any]) -> str:
         sources=", ".join(str(source) for source in issue.get("ambiguous_sources") or []),
         result=result if result else "a different value",
     )
+    declared_as = issue.get("declared_as")
+    if declared_as:
+        evidence += (
+            f"; the figures block declares {declared_as}, which is not how the answer "
+            f"writes it — declare it exactly as written ({issue.get('value')})"
+        )
     candidates = issue.get("field_ref_candidates") or []
     if candidates:
         evidence += "; valid field refs: " + ", ".join(str(item) for item in candidates)
@@ -212,6 +218,16 @@ class _ReleaseMixin:
                 "report it as not retrieved instead.",
             ]
         )
+        if self._backtest_scopes:
+            runs = ", ".join(f"`{scope}`" for scope in sorted(set(self._backtest_scopes.values())) if scope)
+            lines.append(
+                "A value a backtest wrote is observed with that backtest's run directory "
+                "as ref"
+                + (f" ({runs})" if runs else "")
+                + ", or the file you read under it; a difference between two backtests "
+                "is derived, with both run directories as ref. A figure the answer writes "
+                "as a percent is declared as a percent."
+            )
         recovery = self.recovery_action(validation)
         if recovery == _RESOLVER_TOOL:
             lines.extend(
@@ -334,7 +350,7 @@ class _ReleaseMixin:
             for validation in self._validations
             for code in (issue.get("code") for issue in validation.get("issues", []))
         }
-        if issue_codes & _REDACTABLE_CODES:
+        if issue_codes & _REDACTABLE_CODES and not self._analysis_completed:
             if is_zh:
                 return (
                     "我的回答被安全门槛拒绝:草稿引用了本会话未通过工具获取的价格数字,无法核验。"
@@ -345,6 +361,23 @@ class _ReleaseMixin:
                 "figures that this session never obtained through a tool, so they could not "
                 "be verified. Re-run the task and let the agent fetch the market data first, "
                 "or ask it to answer without the unverified prices."
+            )
+        if issue_codes & _REDACTABLE_CODES:
+            # A completed analysis whose report failed the check: the draft's
+            # figures, not prices, are what failed, and the run's output is
+            # not lost with it.
+            if is_zh:
+                return (
+                    "我的回答没有通过数字核验：草稿里有数字无法与本会话工具返回的结果对上，"
+                    "按规则没有发布。分析本身已经完成，结果文件保存在本次运行的 artifacts "
+                    "目录中。可以重试，或让我只列出工具直接返回的数字。"
+                )
+            return (
+                "My answer did not pass the figure check: some of its figures could not be "
+                "matched to what this session's tools returned, so it was not released. "
+                "The analysis itself completed; its result files are in this run's "
+                "artifacts directory. Retry, or ask me to list only the figures the tools "
+                "returned."
             )
         if is_zh:
             return (
@@ -491,8 +524,11 @@ class _ReleaseMixin:
             with a note stating how many figures were removed, or None.
         """
         # A market answer with no observed price has nothing to stand on once its
-        # figures are cut; a general answer (no instrument asked about) does.
-        if self._identity_required and not self._price_records():
+        # figures are cut; a general answer (no instrument asked about) does, and
+        # so does a completed analysis: naming 600519.SH in a backtest request
+        # makes it a market answer, but the backtest's own output is what the
+        # surviving figures were checked against.
+        if self._identity_required and not self._price_records() and not self._analysis_completed:
             return None
         text = _strip_release_markers(content)
         # Stripping shifts offsets and the cuts anchor on issue spans, so the

@@ -33,7 +33,12 @@ jobs:
           node --check wiki/main.js
           node --check wiki/theme.js
           node --check wiki/docs/content.js
+          node --check wiki/docs/content.en.js
+          node --check wiki/docs/content.zh.js
           node --check wiki/docs/main.js
+
+      - name: Check English and Chinese docs match
+        run: node wiki/scripts/check_docs_parity.mjs
 
       - name: Check locale JSON
         run: python -m json.tool wiki/locales/en.json >/dev/null

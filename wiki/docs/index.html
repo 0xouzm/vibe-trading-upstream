@@ -17,7 +17,7 @@
   </script>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Vibe-Trading Docs</title>
-  <meta name="description" content="Documentation for Vibe-Trading, the natural-language finance research agent.">
+  <meta name="description" content="Documentation for Vibe-Trading, the natural-language finance research agent. 中文文档见 /docs/zh/。">
   <meta name="robots" content="index, follow, max-image-preview:large">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="Vibe-Trading Docs">
@@ -26,29 +26,33 @@
   <meta property="og:image" content="https://vibetrading.wiki/assets/icon.png">
   <meta property="og:url" content="https://vibetrading.wiki/docs/latest/getting-started/vibe-trading-overview">
   <link rel="canonical" href="https://vibetrading.wiki/docs/latest/getting-started/vibe-trading-overview">
+  <link rel="alternate" hreflang="en" href="https://vibetrading.wiki/docs/latest/getting-started/vibe-trading-overview">
+  <link rel="alternate" hreflang="zh-CN" href="https://vibetrading.wiki/docs/zh/getting-started/vibe-trading-overview">
+  <link rel="alternate" hreflang="x-default" href="https://vibetrading.wiki/docs/latest/getting-started/vibe-trading-overview">
   <link rel="icon" type="image/png" href="/assets/icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,750&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
-  <link rel="stylesheet" href="/docs/styles.css">
-  <script type="module" src="/docs/main.js"></script>
+  <link rel="stylesheet" href="/docs/styles.css?v=20260929">
+  <script type="module" src="/docs/main.js?v=20260929"></script>
 </head>
 <body class="docs-body">
   <header class="site-header docs-header" id="site-header">
     <div class="site-header__inner">
       <a class="brand" href="/home/" aria-label="Vibe-Trading home">
         <img class="brand__mark" src="/assets/icon.png" alt="" width="40" height="40">
-        <span class="brand__text">Vibe-Trading <em>Docs</em></span>
+        <span class="brand__text">Vibe-Trading <em data-ui="brandSuffix">Docs</em></span>
       </a>
       <nav class="site-nav" aria-label="Primary">
-        <a href="/home/">Home</a>
-        <a href="/tutorials/">Tutorials</a>
-        <a href="/alpha-library/">Alpha Library</a>
-        <a href="/research-lab/">Research Lab</a>
-        <a href="https://github.com/HKUDS/Vibe-Trading">Source</a>
+        <a href="/home/" data-ui-nav="home">Home</a>
+        <a href="/tutorials/" data-ui-nav="tutorials">Tutorials</a>
+        <a href="/alpha-library/" data-ui-nav="alpha">Alpha Library</a>
+        <a href="/research-lab/" data-ui-nav="lab">Research Lab</a>
+        <a href="https://github.com/HKUDS/Vibe-Trading" data-ui-nav="source">Source</a>
       </nav>
       <div class="site-actions">
+        <a class="lang-pill" id="lang-toggle" href="/docs/zh/getting-started/vibe-trading-overview" hreflang="zh-CN" lang="zh-CN" data-lang="zh">中文</a>
         <a class="star-pill" href="https://github.com/HKUDS/Vibe-Trading" aria-label="Vibe-Trading on GitHub">
           <span aria-hidden="true">Star</span>
           <strong id="star-count">--</strong>
@@ -64,11 +68,11 @@
     <aside class="docs-sidebar" aria-label="Documentation navigation">
       <div class="docs-sidebar__tools">
         <label class="search-box">
-          <span>Search</span>
+          <span data-ui="search">Search</span>
           <input id="docs-search" type="search" placeholder="Search docs">
         </label>
         <label class="version-box">
-          <span>Version</span>
+          <span data-ui="version">Version</span>
           <select id="version-select"></select>
         </label>
       </div>
@@ -78,7 +82,7 @@
     <article class="docs-article" id="docs-article" tabindex="-1"></article>
 
     <aside class="docs-outline" aria-label="On this page">
-      <p>On this page</p>
+      <p data-ui="onThisPage">On this page</p>
       <nav id="docs-outline"></nav>
     </aside>
   </main>

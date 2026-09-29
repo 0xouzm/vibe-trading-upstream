@@ -1026,22 +1026,25 @@ vibe-trading playbook create premarket-brief</code></pre>
                 <li>Output directory: <code>.</code></li>
                 <li>Custom domain: <code>vibetrading.wiki</code></li>
               </ul>
-              <p>A push to <code>main</code> that touches <code>wiki/</code> deploys it.</p>
+              <p>A push to <code>main</code> that touches <code>wiki/</code> or <code>agent/src/factors/</code> deploys it; the deploy generates the Alpha Library pages first.</p>
             `
           },
           {
             id: "editing",
             title: "Editing the docs",
             body: `
-              <p>English pages live in <code>wiki/docs/content.en.js</code>, Chinese pages in <code>wiki/docs/content.zh.js</code>. Both must have the same pages and sections in the same order; CI runs the check below. English is served at <code>/docs/latest/…</code>, Chinese at <code>/docs/zh/…</code>.</p>
-              <pre><code>node wiki/scripts/check_docs_parity.mjs</code></pre>
+              <p>English pages live in <code>wiki/docs/content.en.js</code>, Chinese pages in <code>wiki/docs/content.zh.js</code>. Both must have the same pages and sections in the same order. English is served at <code>/docs/latest/…</code>, Chinese at <code>/docs/zh/…</code>.</p>
+              <p>Every page of the site shares one header, footer and head block from <code>wiki/partials/</code>. The rest of the site is English HTML with Chinese in <code>wiki/locales/zh.json</code>. English is the default; the header button switches the whole site and remembers the choice. CI runs:</p>
+              <pre><code>node wiki/scripts/check_docs_parity.mjs
+python3 wiki/scripts/sync_site_chrome.py --check
+python3 wiki/scripts/check_i18n.py</code></pre>
             `
           },
           {
             id: "why-static",
             title: "Why static",
             body: `
-              <p>Docs, landing copy, redirects, theme and search all work as static files. No VPS, database or server process is needed; the only server-side code is an anonymous page-view counter.</p>
+              <p>Docs, landing copy, redirects, theme, language and search all work as static files. No VPS, database or server process is needed; the only server-side code is an anonymous page-view counter.</p>
             `
           }
         ]

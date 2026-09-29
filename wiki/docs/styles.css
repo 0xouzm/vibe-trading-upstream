@@ -6,15 +6,6 @@
   background-size: 36px 36px, 36px 36px, auto;
 }
 
-.brand__text em {
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  font-style: normal;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
 .docs-shell {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 210px;
@@ -277,6 +268,10 @@
     max-height: none;
   }
 
+  .doc-section {
+    scroll-margin-top: 120px;
+  }
+
   .doc-footer {
     grid-template-columns: 1fr;
   }
@@ -284,24 +279,6 @@
   .doc-footer a:last-child {
     text-align: left;
   }
-}
-
-.lang-pill {
-  display: flex;
-  align-items: center;
-  min-height: 38px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--ink);
-  padding: 0 12px;
-  font-size: 0.86rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.lang-pill:hover {
-  border-color: var(--accent);
 }
 
 .doc-section table {

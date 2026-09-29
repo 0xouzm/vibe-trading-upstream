@@ -1,5 +1,5 @@
-import { DOCS_STRUCTURE as EN_STRUCTURE } from "/docs/content.en.js?v=20260929";
-import { DOCS_STRUCTURE as ZH_STRUCTURE } from "/docs/content.zh.js?v=20260929";
+import { DOCS_STRUCTURE as EN_STRUCTURE } from "/docs/content.en.js?v=20260929d";
+import { DOCS_STRUCTURE as ZH_STRUCTURE } from "/docs/content.zh.js?v=20260929d";
 
 // One content set per language; every version alias renders the latest.
 export const DOCS_DEFAULT_VERSION = "0.1.16";
@@ -22,30 +22,24 @@ export const DOCS_VERSIONS = [
 export const DOCS_UI = {
   en: {
     siteTitle: "Vibe-Trading Docs",
-    brandSuffix: "Docs",
     search: "Search",
     searchPlaceholder: "Search docs",
     version: "Version",
-    language: "Language",
     onThisPage: "On this page",
     previous: "Previous",
     next: "Next",
     noMatch: "No pages match that search.",
-    navLabel: "Documentation navigation",
-    nav: { home: "Home", tutorials: "Tutorials", alpha: "Alpha Library", lab: "Research Lab", source: "Source" }
+    navLabel: "Documentation navigation"
   },
   zh: {
     siteTitle: "Vibe-Trading 文档",
-    brandSuffix: "文档",
     search: "搜索",
     searchPlaceholder: "搜索文档",
     version: "版本",
-    language: "语言",
     onThisPage: "本页内容",
     previous: "上一页",
     next: "下一页",
     noMatch: "没有匹配的页面。",
-    navLabel: "文档导航",
-    nav: { home: "首页", tutorials: "教程", alpha: "因子库", lab: "研究室", source: "源码" }
+    navLabel: "文档导航"
   }
 };

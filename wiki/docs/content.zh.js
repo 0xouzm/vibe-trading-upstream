@@ -1025,22 +1025,25 @@ vibe-trading playbook create premarket-brief</code></pre>
                 <li>输出目录：<code>.</code></li>
                 <li>自定义域名：<code>vibetrading.wiki</code></li>
               </ul>
-              <p>推送到 <code>main</code> 且改动了 <code>wiki/</code> 时自动部署。</p>
+              <p>推送到 <code>main</code> 且改动了 <code>wiki/</code> 或 <code>agent/src/factors/</code> 时自动部署；部署前会先生成因子库页面。</p>
             `
           },
           {
             id: "editing",
             title: "编辑文档",
             body: `
-              <p>英文页面在 <code>wiki/docs/content.en.js</code>，中文页面在 <code>wiki/docs/content.zh.js</code>。两者的页面和小节必须一一对应、顺序一致，CI 会运行下面的检查。英文地址是 <code>/docs/latest/…</code>，中文地址是 <code>/docs/zh/…</code>。</p>
-              <pre><code>node wiki/scripts/check_docs_parity.mjs</code></pre>
+              <p>英文页面在 <code>wiki/docs/content.en.js</code>，中文页面在 <code>wiki/docs/content.zh.js</code>。两者的页面和小节必须一一对应、顺序一致。英文地址是 <code>/docs/latest/…</code>，中文地址是 <code>/docs/zh/…</code>。</p>
+              <p>全站所有页面共用 <code>wiki/partials/</code> 里的同一套页头、页脚和 head 公共部分。其余页面的英文写在 HTML 里，中文在 <code>wiki/locales/zh.json</code>。默认英文，顶栏按钮切换整站语言并记住选择。CI 会运行：</p>
+              <pre><code>node wiki/scripts/check_docs_parity.mjs
+python3 wiki/scripts/sync_site_chrome.py --check
+python3 wiki/scripts/check_i18n.py</code></pre>
             `
           },
           {
             id: "why-static",
             title: "为什么是静态站",
             body: `
-              <p>文档、首页文案、跳转、主题和搜索都能以静态文件实现，不需要 VPS、数据库或常驻服务；唯一的服务端代码是一个匿名的访问计数器。</p>
+              <p>文档、首页文案、跳转、主题、语言和搜索都能以静态文件实现，不需要 VPS、数据库或常驻服务；唯一的服务端代码是一个匿名的访问计数器。</p>
             `
           }
         ]

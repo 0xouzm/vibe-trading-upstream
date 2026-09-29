@@ -1,17 +1,12 @@
-import { initTheme } from "/theme.js";
+import { initSite, setPageLang, storedLang } from "/site.js?v=20260929d";
 import {
   DOCS_DEFAULT_LANG,
   DOCS_DEFAULT_PAGE,
   DOCS_LANGUAGES,
   DOCS_UI,
   DOCS_VERSIONS
-} from "/docs/content.js?v=20260929";
+} from "/docs/content.js?v=20260929d";
 
-const REPO = "HKUDS/Vibe-Trading";
-const API = `https://api.github.com/repos/${REPO}`;
-const STARS_CACHE_KEY = "vibetrading-github-stars";
-const STARS_TTL_MS = 12 * 60 * 60 * 1000;
-const LANG_KEY = "vibetrading-docs-lang";
 const SITE = "https://vibetrading.wiki";
 
 function stripTags(html) {
@@ -36,41 +31,6 @@ const pagesByLang = Object.fromEntries(
   ])
 );
 
-function formatStarCount(n) {
-  if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return "--";
-  if (n < 1000) return String(Math.round(n));
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
-  return `${(n / 1_000_000).toFixed(1)}m`;
-}
-
-function initStars() {
-  const el = document.getElementById("star-count");
-  if (!el) return;
-
-  let cached = null;
-  try {
-    cached = JSON.parse(localStorage.getItem(STARS_CACHE_KEY) || "null");
-  } catch {
-    cached = null;
-  }
-  if (cached && typeof cached.count === "number") el.textContent = formatStarCount(cached.count);
-  if (cached && Date.now() - cached.at < STARS_TTL_MS) return;
-
-  fetch(API, { headers: { Accept: "application/vnd.github+json" } })
-    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-    .then((data) => {
-      if (typeof data.stargazers_count !== "number") return;
-      try {
-        localStorage.setItem(STARS_CACHE_KEY, JSON.stringify({ count: data.stargazers_count, at: Date.now() }));
-      } catch {
-        /* ignore */
-      }
-      el.textContent = formatStarCount(data.stargazers_count);
-    })
-    .catch(() => {
-      if (!cached) el.textContent = "--";
-    });
-}
 
 function slugify(text) {
   return String(text)
@@ -84,12 +44,15 @@ function langForSegment(segment) {
   return match ? match[0] : DOCS_DEFAULT_LANG;
 }
 
+// The URL decides the language: /docs/zh/… is Chinese, /docs/latest/… (or an
+// old version number) English. Only a URL that names no language — /docs/
+// itself — falls back to the reader's stored choice, English by default.
 function routeParts() {
   const normalized = location.pathname.replace(/\/+$/, "");
   const match = normalized.match(/^\/docs\/([^/]+)\/(.+)$/);
   if (!match) {
     const bare = normalized.match(/^\/docs\/([^/]+)$/);
-    const lang = bare ? langForSegment(bare[1]) : DOCS_DEFAULT_LANG;
+    const lang = bare && bare[1] !== "index.html" ? langForSegment(bare[1]) : storedLang();
     return { lang, pageId: DOCS_DEFAULT_PAGE, canonical: false };
   }
   const lang = langForSegment(match[1]);
@@ -105,27 +68,6 @@ function resolvePage(pageId, lang) {
   return pages.find((page) => page.id === pageId) || pages.find((page) => page.id === DOCS_DEFAULT_PAGE);
 }
 
-function storedLang() {
-  try {
-    const value = localStorage.getItem(LANG_KEY);
-    return value && value in DOCS_LANGUAGES ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function storeLang(lang) {
-  try {
-    localStorage.setItem(LANG_KEY, lang);
-  } catch {
-    /* ignore */
-  }
-}
-
-function browserLang() {
-  const first = (navigator.languages && navigator.languages[0]) || navigator.language || "";
-  return first.toLowerCase().startsWith("zh") ? "zh" : DOCS_DEFAULT_LANG;
-}
 
 function setAlternate(hreflang, href) {
   let link = document.querySelector(`link[rel='alternate'][hreflang='${hreflang}']`);
@@ -156,15 +98,10 @@ function setMeta(page, lang) {
   setAlternate("x-default", `${SITE}${canonicalPath(page.id, DOCS_DEFAULT_LANG)}`);
 }
 
-function applyChrome(lang, page) {
+function applyChrome(lang) {
   const ui = DOCS_UI[lang];
-  document.documentElement.lang = DOCS_LANGUAGES[lang].htmlLang;
   document.querySelectorAll("[data-ui]").forEach((el) => {
     const value = ui[el.getAttribute("data-ui")];
-    if (typeof value === "string") el.textContent = value;
-  });
-  document.querySelectorAll("[data-ui-nav]").forEach((el) => {
-    const value = ui.nav[el.getAttribute("data-ui-nav")];
     if (typeof value === "string") el.textContent = value;
   });
   document.getElementById("docs-search")?.setAttribute("placeholder", ui.searchPlaceholder);
@@ -176,16 +113,6 @@ function applyChrome(lang, page) {
     select.innerHTML = DOCS_VERSIONS.map((item) =>
       `<option value="${item.name}">${item.label[lang] || item.name}</option>`
     ).join("");
-  }
-
-  const toggle = document.getElementById("lang-toggle");
-  if (toggle) {
-    const other = Object.keys(DOCS_LANGUAGES).find((code) => code !== lang) || DOCS_DEFAULT_LANG;
-    toggle.textContent = DOCS_LANGUAGES[other].label;
-    toggle.setAttribute("href", canonicalPath(page.id, other));
-    toggle.setAttribute("hreflang", DOCS_LANGUAGES[other].htmlLang);
-    toggle.setAttribute("lang", DOCS_LANGUAGES[other].htmlLang);
-    toggle.dataset.lang = other;
   }
 }
 
@@ -277,30 +204,15 @@ function renderCurrent() {
     history.replaceState({}, "", canonicalPath(page.id, lang) + location.hash);
   }
 
+  current = { lang, pageId: page.id };
+  setPageLang(lang);
   setMeta(page, lang);
-  applyChrome(lang, page);
+  applyChrome(lang);
   renderNav(page.id, lang, document.getElementById("docs-search")?.value || "");
   renderArticle(page, lang);
   renderOutline(page);
   bindDocLinks(lang);
   document.getElementById("docs-article")?.focus({ preventScroll: true });
-}
-
-function initLanguage() {
-  const { lang, pageId } = routeParts();
-  const preferred = storedLang() || browserLang();
-  if (lang === DOCS_DEFAULT_LANG && preferred !== DOCS_DEFAULT_LANG) {
-    history.replaceState({}, "", canonicalPath(pageId, preferred) + location.hash);
-  }
-
-  document.getElementById("lang-toggle")?.addEventListener("click", (event) => {
-    const target = event.currentTarget.dataset.lang;
-    if (!target || !(target in DOCS_LANGUAGES)) return;
-    storeLang(target);
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
-    event.preventDefault();
-    navigate(event.currentTarget.getAttribute("href"));
-  });
 }
 
 function initSearch() {
@@ -313,21 +225,12 @@ function initSearch() {
   });
 }
 
-function initHeaderScroll() {
-  const header = document.getElementById("site-header");
-  if (!header) return;
-  const sync = () => header.classList.toggle("is-scrolled", window.scrollY > 10);
-  sync();
-  window.addEventListener("scroll", sync, { passive: true });
-}
+let current = { lang: DOCS_DEFAULT_LANG, pageId: DOCS_DEFAULT_PAGE };
 
 window.addEventListener("popstate", renderCurrent);
 
-initTheme();
-initStars();
-initLanguage();
+initSite({ onToggle: (lang) => navigate(canonicalPath(current.pageId, lang)) });
 initSearch();
-initHeaderScroll();
 renderCurrent();
 // The sections are rendered after load, so the browser could not scroll to
 // a #section in the URL on its own.

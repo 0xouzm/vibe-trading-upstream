@@ -802,6 +802,11 @@ The turnover-aware optimizer validates per-name and group caps for single-asset
 allocations too. It preserves feasible supplied allocations (including cash),
 and raises an error when the singleton allocation exceeds a cap.
 
+When the opt-in market-data cache is enabled, local-source cache entries are
+scoped to the configured file, query, and column mapping. Changing a symbol's
+source declaration does not reuse bars from its previous source. The settled-data
+cache policy for an unchanged declaration remains the same.
+
 </details>
 
 <details>

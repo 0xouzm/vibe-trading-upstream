@@ -1888,7 +1888,7 @@ def fetch_data_map(config: dict) -> DataFetchResult:
                         for code in mapped:
                             caliber_stamps[code] = (
                                 fb_served_by,
-                                price_caliber(fb_served_by, market, code),
+                                frame_caliber(mapped[code], fb_served_by, market, code),
                             )
                         if not used_sources:
                             source = fb_served_by

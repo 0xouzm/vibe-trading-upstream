@@ -34,7 +34,8 @@ __alpha_meta__ = {
     'decay_horizon': 60,
     'min_warmup_bars': 252,
     'notes': (
-        'Carhart (1997) UMD momentum factor. 12-month return minus 1-month return, '
+        'Carhart (1997) UMD momentum factor. Return from 12 months ago to 1 month '
+        'ago, so the most recent month is skipped and today\'s price never enters; '
         'cross-sectional z-score per date for long-short ranking. Top z-scores = '
         'winners. Constructed directly from prices, so this matches the original '
         'definition modulo the z-score wrapper. Canonical 252d window; declared '

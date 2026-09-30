@@ -416,6 +416,10 @@ The Web UI adds a read-only **Portfolio** page that aggregates holdings across t
 
 Broker-reported source currencies are preserved during valuation: HKD account totals and positions, including Futu `HK.*` holdings, are converted with the snapshot USD/HKD rate before USD and CNY values are displayed. Older snapshots remain stored, but value history compares only snapshots produced by the current valuation methodology to avoid false gains or losses after a valuation fix.
 
+For `portfolio_risk_xray`, weekly (`1W`) and monthly (`1M`) inputs annualize
+volatility with 52 and 12 bars per year respectively; daily bars retain the
+252-bar convention. Monthly `1M` is distinct from minute `1m`.
+
 ### Portfolio connector compatibility
 
 | Badge | Meaning |

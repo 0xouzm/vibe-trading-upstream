@@ -16,7 +16,7 @@ from src.tools import southbound_tool as sb
 
 
 def _em_rows(channel_net: dict[str, float]) -> dict:
-    """Build one datacenter payload for a channel's NET_DEAL_AMT map."""
+    """Build one datacenter payload for a channel's million-HKD values."""
     return {
         "result": {
             "data": [
@@ -35,8 +35,8 @@ def _em_rows(channel_net: dict[str, float]) -> dict:
 def _fake_get_json(url: str, *, params: dict):
     assert url == sb._DATACENTER_URL
     if '"002"' in params["filter"]:
-        return _em_rows({"2026-09-16": 26.6898, "2026-09-17": 25.0239})
-    return _em_rows({"2026-09-16": 8.6076, "2026-09-17": 9.9861})
+        return _em_rows({"2026-09-16": 2668.98, "2026-09-17": 2502.39})
+    return _em_rows({"2026-09-16": 860.76, "2026-09-17": 998.61})
 
 
 class TestEastmoneyEnvelope:
@@ -81,7 +81,7 @@ class TestEastmoneyEnvelope:
     def test_one_channel_missing_leaves_none_and_partial_total(self):
         def fake(url: str, *, params: dict):
             if '"002"' in params["filter"]:
-                return _em_rows({"2026-09-17": 25.0239})
+                return _em_rows({"2026-09-17": 2502.39})
             return {"result": {"data": []}}
 
         with patch.object(sb.eastmoney_client, "get_json", side_effect=fake):
@@ -158,6 +158,24 @@ class TestHkexFallback:
         payload = json.loads(text)
         assert payload["source"] == "hkex"
         assert "returned no rows" in payload["warnings"][0]
+
+    def test_eastmoney_report_rejection_falls_back_with_reason(self):
+        rejected = {
+            "success": False,
+            "message": "RPT_MUTUAL_DEAL_HISTORY report rejected",
+            "result": None,
+        }
+        with (
+            patch.object(sb.eastmoney_client, "get_json", return_value=rejected),
+            patch.object(
+                sb.requests, "get", return_value=self._mock_response(200, self._HKEX_JS)
+            ),
+        ):
+            text = sb.SouthboundFlowTool().execute(lookback_days=5)
+
+        payload = json.loads(text)
+        assert payload["source"] == "hkex"
+        assert "report rejected" in payload["warnings"][0]
 
     def test_hkex_walks_back_past_404(self):
         responses = [

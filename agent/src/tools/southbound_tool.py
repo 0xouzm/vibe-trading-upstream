@@ -13,8 +13,9 @@ Sources, in order:
 * **Eastmoney datacenter** ``RPT_MUTUAL_DEAL_HISTORY`` (``MUTUAL_TYPE``
   ``002`` = 港股通沪, ``004`` = 港股通深) through the shared throttled
   client: daily net buy (``NET_DEAL_AMT``), buy/sell turnover and the
-  cumulative net series, unit 100M HKD (亿). Verified against HKEX
-  official daily statistics to the cent on 2026-09-15/16/17.
+  cumulative net series. ``NET_DEAL_AMT`` is in million HKD and is scaled to
+  the envelope's 100M HKD (亿) unit. Verified against HKEX official daily
+  statistics to the cent on 2026-09-15/16/17.
 * **HKEX official** Stock Connect Daily Statistics report (keyless JS
   feed): latest available trading day only, net = Buy Turnover − Sell
   Turnover per channel, converted from million HKD to the envelope unit.
@@ -45,8 +46,9 @@ from src.agent.tools import BaseTool
 logger = logging.getLogger(__name__)
 
 # Eastmoney datacenter report carrying the Stock-Connect daily history.
-# MUTUAL_TYPE: "002" = 港股通（沪）, "004" = 港股通（深）. Amounts are in
-# 100M HKD (亿); NET_DEAL_AMT cross-checks against HKEX Buy − Sell exactly.
+# MUTUAL_TYPE: "002" = 港股通（沪）, "004" = 港股通（深）. NET_DEAL_AMT is in
+# million HKD; the tool scales it to 100M HKD (亿) to match the envelope and
+# the HKEX parser.
 _DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 _REPORT_NAME = "RPT_MUTUAL_DEAL_HISTORY"
 _CHANNEL_TYPES = {"shanghai_connect": "002", "shenzhen_connect": "004"}
@@ -121,7 +123,12 @@ def _fetch_eastmoney_channel(mutual_type: str, days: int) -> list[dict[str, Any]
             "pageSize": str(days),
         },
     )
-    result = payload.get("result") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        raise ValueError("Eastmoney datacenter returned a non-object payload")
+    if payload.get("success") is False:
+        message = str(payload.get("message") or "request rejected")
+        raise ValueError(f"Eastmoney datacenter rejected the report: {message}")
+    result = payload.get("result")
     rows = result.get("data") if isinstance(result, dict) else None
     return rows if isinstance(rows, list) else []
 
@@ -145,7 +152,7 @@ def _merge_eastmoney(days: int) -> list[dict[str, Any]]:
                 continue
             net = _coerce_float(row.get("NET_DEAL_AMT"))
             per_channel.setdefault(date, {})[key] = (
-                round(net, 4) if net is not None else None
+                round(net / 100.0, 4) if net is not None else None
             )
     history: list[dict[str, Any]] = []
     for date in sorted(per_channel):

@@ -1482,13 +1482,14 @@ class AgentLoop:
                 self._last_activity_wall = _time.time()
 
                 usage = getattr(response, "usage_metadata", None)
+                current_response_model = getattr(response, "response_model", None)
                 # `messages` is still exactly what this request sent.
                 self._context_meter.observe(
                     usage.get("input_tokens") if isinstance(usage, dict) else None,
                     messages,
                 )
-                if getattr(response, "response_model", None):
-                    last_response_model = response.response_model
+                if current_response_model:
+                    last_response_model = current_response_model
                 usage_delta = _record_llm_usage(
                     run_dir,
                     llm_usage_summary,
@@ -2937,9 +2938,53 @@ class AgentLoop:
         if not p.is_absolute() and self.memory.run_dir:
             p = Path(self.memory.run_dir) / p
         try:
-            self._written_files.add(str(p.resolve()).casefold())
+            resolved = p.resolve()
+            self._written_files.add(str(resolved).casefold())
         except (OSError, ValueError):
+            resolved = p
             self._written_files.add(str(p).casefold())
+
+        if not self.memory.run_dir:
+            return
+        run_root = Path(self.memory.run_dir).resolve()
+        try:
+            relative = resolved.relative_to(run_root).as_posix()
+        except ValueError:
+            return
+        if relative not in {"config.json", "code/signal_engine.py"}:
+            return
+
+        metadata_path = run_root / "strategy_provenance.json"
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            files = {}
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "Could not read strategy model provenance; update skipped: %s",
+                exc,
+            )
+            return
+        else:
+            if not isinstance(metadata, dict):
+                logger.warning("Invalid strategy model provenance; update skipped.")
+                return
+            files = metadata.get("files", {})
+            if not isinstance(files, dict):
+                logger.warning("Invalid strategy model provenance files; update skipped.")
+                return
+        files[relative] = {
+            "provider": self._llm_runtime.provider or None,
+            "model_id": self._active_model_id or None,
+            "model_source": self._active_model_source,
+        }
+        try:
+            metadata_path.write_text(
+                json.dumps({"files": files}, ensure_ascii=False, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            logger.warning("Could not write strategy model provenance: %s", exc)
 
     def _pending_write_directive(
         self, user_message: str, run_started_wall: float

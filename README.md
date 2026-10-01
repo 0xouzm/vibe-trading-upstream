@@ -1289,6 +1289,14 @@ select execution bars in `config.json`:
 }
 ```
 
+Backtest run cards record the provider and model that wrote `config.json` and
+`code/signal_engine.py`. Set `model_training_cutoff` in `config.json` to an
+ISO date to record the model's cutoff; a window ending earlier is marked as
+potentially exposed, and an unset cutoff is treated as unknown and exposed.
+For strict factor benchmarks, pass `--training-cutoff YYYY-MM-DD` to
+`vibe-trading alpha bench --strict` to place the out-of-sample segment strictly
+after the cutoff.
+
 `MS` executes the aligned target on the first observed trading bar of each
 month. Weekly/quarterly pandas offset aliases (for example `W-FRI` and `QS`) and
 explicit ISO date lists are also accepted. An alias must not be finer than the

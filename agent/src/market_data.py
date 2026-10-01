@@ -491,5 +491,27 @@ def fetch_market_data(
 
 
 def fetch_market_data_json(**kwargs: Any) -> str:
-    """Fetch market data and return strict JSON."""
-    return json.dumps(fetch_market_data(**kwargs), ensure_ascii=False, indent=2, allow_nan=False)
+    """Fetch market data and return strict JSON.
+
+    When no requested symbol returned data the envelope says so with
+    ``status: error``: a bare ``{"_unresolved": [...]}`` classified as a
+    successful call, so the agent loop neither refused an identical retry nor
+    told the model to change the request. ``_unresolved`` and ``_provenance``
+    stay, so grounding still records each symbol as unavailable. The dict API
+    (``fetch_market_data``) is unchanged for in-process callers.
+    """
+    payload = fetch_market_data(**kwargs)
+    unresolved = payload.get("_unresolved") or []
+    if unresolved and not any(not str(key).startswith("_") for key in payload):
+        payload = {
+            "status": "error",
+            "error_code": "no_market_data",
+            "error": (
+                f"No data returned for any requested symbol: {', '.join(map(str, unresolved))} "
+                f"({kwargs.get('start_date')}..{kwargs.get('end_date')}, "
+                f"source={kwargs.get('source', 'auto')}). Check the symbol suffix and the date "
+                "range or try another source; the identical request returns the same result."
+            ),
+            **payload,
+        }
+    return json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False)

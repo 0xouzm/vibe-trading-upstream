@@ -424,7 +424,19 @@ class AgentTuningConfig(_EnvBase):
     ``src/tools/web_search_tool.py``, ``api_server.py``.
     """
 
+    # Deprecated: counted chars/4 of messages without tool schemas, so no value
+    # tuned against it means anything under real-token accounting. Read only to
+    # warn (src/agent/context_budget.py); compaction ignores it.
     token_threshold: int = Field(alias="TOKEN_THRESHOLD", default=40000)
+    vibe_trading_context_window: int | None = Field(
+        alias="VIBE_TRADING_CONTEXT_WINDOW", default=None, gt=0,
+    )
+    # Cost ceiling on the prompt the loop lets a run grow to before compacting,
+    # whatever the model's window. The largest healthy research run measured
+    # on 2026-09-29 sent 154K real input tokens.
+    vibe_trading_context_max_tokens: int = Field(
+        alias="VIBE_TRADING_CONTEXT_MAX_TOKENS", default=200_000, gt=0,
+    )
     vt_heartbeat_interval_s: float = Field(alias="VT_HEARTBEAT_INTERVAL_S", default=3.0)
     vt_reasoning_delta_min_interval_s: float = Field(
         alias="VT_REASONING_DELTA_MIN_INTERVAL_S", default=1.0,

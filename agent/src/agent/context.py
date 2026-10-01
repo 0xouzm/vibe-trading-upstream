@@ -195,14 +195,20 @@ Decide which workflow to use based on the request:
   PE ratio (`ref`: the tool name such as `get_fundamentals`, or its call id). For
   a metric whose identity matters (VaR vs ES, 95% vs 99%), use the result field
   as `ref`: `data.tail_risk.var_95` or just `var_95` from `portfolio_risk_xray`,
-  `historical_var` from `quantlib_call`. When more than one call returned that
-  field (historical_var at 95% and at 99%), name the call: `q1::historical_var`.
+  `historical_var` from `quantlib_call`. When more than one call returned the
+  same field, name the exact call as `call_id::field` (for example
+  `q1::historical_var`); a tool name is not a call id.
   Once this session holds more than one tail-risk measurement (a VaR and an ES,
   or 95% and 99%), EVERY tail-risk figure needs that field ref — a call id or no
   declaration at all cannot say which of them you are quoting, and the figure is
-  sent back for correction;
+  sent back for correction.
+  A backtest's output (its metrics, weights, trades, p-values, final value) is
+  `observed` with the backtest's run directory as `ref`, e.g. `rp`, or the file
+  you read, e.g. `rp/artifacts/target_positions.csv`; two backtests are two
+  directories, so a comparison names each one (`rp::sharpe`, `ew::sharpe`);
   `derived` — arithmetic on observed values (`note`: the formula; every number
-  added or subtracted must itself be an observed value);
+  added or subtracted must itself be an observed value; `ref`: where the
+  operands came from, e.g. `rp, ew` for a difference between two backtests);
   `proposed` — a price level you suggest, such as an entry, stop or target: inside
   the observed price range, or with a formula over observed values in `note`; a
   percentage is not a level, so state the price it implies;
@@ -425,6 +431,7 @@ class ContextBuilder:
         tool_calls: list,
         content: Optional[str] = None,
         reasoning_content: Optional[str] = None,
+        provider_items: Optional[list] = None,
     ) -> Dict[str, Any]:
         """Format an assistant tool_calls message, preserving thinking text.
 
@@ -435,6 +442,9 @@ class ContextBuilder:
             reasoning_content: Provider-specific reasoning field (Kimi K2.5,
                 DeepSeek reasoner, Qwen thinking). Only attached to the output
                 message when not None, so non-thinking providers see no change.
+            provider_items: Opaque items the provider must receive back verbatim
+                with this turn (Codex encrypted reasoning). Attached only when
+                non-empty; only the adapter that produced them reads them.
 
         Returns:
             OpenAI-format assistant message.
@@ -467,4 +477,6 @@ class ContextBuilder:
             }
         if reasoning_content is not None:
             message["reasoning_content"] = reasoning_content
+        if provider_items:
+            message["provider_items"] = list(provider_items)
         return message

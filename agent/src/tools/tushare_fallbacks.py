@@ -178,17 +178,19 @@ def fetch_dragon_tiger(trade_date: str, code: str | None) -> dict[str, Any]:
     return data
 
 
-#: HKEX stopped publishing northbound daily net buy on this date; tushare's
-#: ``hgt``/``sgt``/``north_money`` carry turnover from then on (issue #1481).
-_NORTHBOUND_SEMANTICS_BOUNDARY = "2024-08-30"
+#: Tushare's northbound fields changed to turnover at the 2024-08-19
+#: disclosure cutover (issue #1481). Keep the boundary explicit so a
+#: post-cutover turnover value cannot be returned under a net-flow key.
+_NORTHBOUND_SEMANTICS_BOUNDARY = "2024-08-19"
 
 _NORTHBOUND_NOTE = (
     "HKEX stopped publishing northbound daily net buy on "
     f"{_NORTHBOUND_SEMANTICS_BOUNDARY}. From that date onward tushare's "
     "hgt/sgt/north_money carry northbound TURNOVER (verified equal to the "
     "HKEX official Stock Connect Daily Statistics Total Turnover to the "
-    "cent); rows before the boundary are NET BUY. Both eras are in million "
-    "CNY and are passed through unchanged."
+    "cent); rows before the boundary are NET BUY. Post-cutover rows are "
+    "returned under turnover_* fields and their net-flow fields are null. "
+    "Both eras are in million CNY."
 )
 
 
@@ -197,7 +199,7 @@ def fetch_northbound_flow(*, lookback_days: int) -> dict[str, Any]:
 
     Values are passed through in tushare's native unit (million CNY). The
     legacy ×100 rescale to 10k CNY assumed every row was a net buy in
-    million CNY, but the field semantics changed at the 2024-08-30 HKEX
+    million CNY, but the field semantics changed at the 2024-08-19 HKEX
     disclosure reform: post-boundary rows are turnover (cross-verified
     against HKEX official daily statistics, see issue #1481), so a single
     constant factor cannot serve both eras. The envelope therefore keeps
@@ -207,14 +209,36 @@ def fetch_northbound_flow(*, lookback_days: int) -> dict[str, Any]:
     rows = _records(_pro_api().moneyflow_hsgt(start_date=start_date, end_date=end_date))
     history: list[dict[str, Any]] = []
     for row in rows:
-        history.append(
-            {
-                "trade_date": _dashed_date(row.get("trade_date")),
-                "shanghai_connect": _to_float(row.get("hgt")),
-                "shenzhen_connect": _to_float(row.get("sgt")),
-                "total": _to_float(row.get("north_money")),
-            }
-        )
+        trade_date = _dashed_date(row.get("trade_date"))
+        if trade_date is None:
+            continue
+        shanghai = _to_float(row.get("hgt"))
+        shenzhen = _to_float(row.get("sgt"))
+        total = _to_float(row.get("north_money"))
+        if trade_date >= _NORTHBOUND_SEMANTICS_BOUNDARY:
+            history.append(
+                {
+                    "trade_date": trade_date,
+                    "shanghai_connect": None,
+                    "shenzhen_connect": None,
+                    "total": None,
+                    "turnover_shanghai": shanghai,
+                    "turnover_shenzhen": shenzhen,
+                    "turnover_total": total,
+                }
+            )
+        else:
+            history.append(
+                {
+                    "trade_date": trade_date,
+                    "shanghai_connect": shanghai,
+                    "shenzhen_connect": shenzhen,
+                    "total": total,
+                    "turnover_shanghai": None,
+                    "turnover_shenzhen": None,
+                    "turnover_total": None,
+                }
+            )
     history.sort(key=lambda item: item.get("trade_date") or "")
     history = history[-lookback_days:]
     latest = history[-1] if history else {}
@@ -226,6 +250,9 @@ def fetch_northbound_flow(*, lookback_days: int) -> dict[str, Any]:
             "shanghai_connect": latest.get("shanghai_connect"),
             "shenzhen_connect": latest.get("shenzhen_connect"),
             "total": latest.get("total"),
+            "turnover_shanghai": latest.get("turnover_shanghai"),
+            "turnover_shenzhen": latest.get("turnover_shenzhen"),
+            "turnover_total": latest.get("turnover_total"),
         },
         "history": history,
     }

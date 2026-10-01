@@ -208,9 +208,9 @@ class NorthboundFlowTool(BaseTool):
         "whole mainland China A-share market: the aggregate net inflow from Hong "
         "Kong, split into Shanghai-Connect (沪股通) and Shenzhen-Connect (深股通) "
         "channels, as the latest realtime figure plus a recent daily history "
-        "(units: 10k CNY from Eastmoney; the tushare fallback reports CNY "
-        "million and documents the 2024-08-30 net-buy→turnover disclosure "
-        "boundary in data.note). This is a market-level total, NOT per-stock flow (for a "
+        "(units: 10k CNY from Eastmoney; the tushare fallback reports pre-cutover "
+        "net buy and post-cutover turnover in CNY million, with turnover_* "
+        "fields and null net-flow fields after 2024-08-19). This is a market-level total, NOT per-stock flow (for a "
         "given symbol's order-bucket inflow use get_fund_flow). Read-only; China "
         "A-share market only. Example: get_northbound_flow(lookback_days=10)."
     )

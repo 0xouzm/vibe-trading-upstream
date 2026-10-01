@@ -77,3 +77,40 @@ def test_migrated_check_fires_identically_through_the_gate(tmp_path: Path) -> No
 def test_migrated_check_is_silent_with_nothing_locked(tmp_path: Path) -> None:
     ledger = GroundingLedger(run_dir=tmp_path, user_message="随便聊聊")
     assert GROUNDING_CHECKS.run("listed-identity-relabelled-private", ledger, "这是一家私人公司。") == []
+
+
+def test_names_for_codes_maps_back_in_registration_order() -> None:
+    predicate = lambda ledger, content: []  # noqa: E731
+    registry = GroundingRegistry()
+    registry.register(GroundingCheck(name="b-check", code="shared_code", description="d", predicate=predicate))
+    registry.register(GroundingCheck(name="a-check", code="other_code", description="d", predicate=predicate))
+    registry.register(GroundingCheck(name="c-check", code="shared_code", description="d", predicate=predicate))
+    assert registry.names_for_codes({"shared_code"}) == ["b-check", "c-check"]
+    assert registry.names_for_codes({"shared_code", "other_code"}) == ["b-check", "a-check", "c-check"]
+    assert registry.names_for_codes({"never_emitted"}) == []
+
+
+def _recorded_validations(tmp_path: Path) -> list[dict[str, object]]:
+    artifact = json.loads(
+        (tmp_path / "artifacts" / "grounding_evidence.json").read_text(encoding="utf-8")
+    )
+    return artifact["validations"]
+
+
+def test_fired_checks_name_the_declared_check_that_fired(tmp_path: Path) -> None:
+    ledger = _ledger_with_locked_listed_identity(tmp_path)
+    ledger.validate_final_answer("GLD 仍是一家私人公司，建议观望。")
+    assert _recorded_validations(tmp_path)[-1]["fired_checks"] == ["listed-identity-relabelled-private"]
+
+
+def test_fired_checks_stay_empty_when_only_inline_rules_fire(tmp_path: Path) -> None:
+    ledger = _ledger_with_locked_listed_identity(tmp_path)
+    result = ledger.validate_final_answer("GLD 现价 999.99 美元，建议买入。")
+    assert result.issues
+    assert _recorded_validations(tmp_path)[-1]["fired_checks"] == []
+
+
+def test_fired_checks_empty_for_a_clean_answer(tmp_path: Path) -> None:
+    ledger = _ledger_with_locked_listed_identity(tmp_path)
+    ledger.validate_final_answer("GLD 是上市 ETF，维持观察。")
+    assert _recorded_validations(tmp_path)[-1]["fired_checks"] == []

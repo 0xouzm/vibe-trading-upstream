@@ -67,6 +67,14 @@ class GroundingRegistry:
         """Every check with its issues, in registration order."""
         return [(check, check.predicate(ledger, content)) for check in self._checks.values()]
 
+    def names_for_codes(self, codes: set[str]) -> list[str]:
+        """Names of registered checks emitting any of ``codes``, in registration order.
+
+        Codes from rules that still run inline resolve to no name; they get one
+        when the check is migrated.
+        """
+        return [check.name for check in self._checks.values() if check.code in codes]
+
     def describe(self) -> list[dict[str, str]]:
         """The check catalog for run cards and docs, in registration order."""
         return [{"name": c.name, "code": c.code, "description": c.description} for c in self._checks.values()]

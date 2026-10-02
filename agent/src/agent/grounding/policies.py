@@ -20,6 +20,8 @@ from src.agent.grounding.identity import (
     _normalize_symbol,
     _scan_symbols,
 )
+from src.agent.grounding import identity_checks  # noqa: F401  (registers declared checks)
+from src.agent.grounding.registry import GROUNDING_CHECKS
 from src.agent.grounding.evidence import (
     EvidenceRecord,
     _is_metadata_count_leaf,
@@ -40,15 +42,6 @@ from src.agent.grounding.figures import (
 )
 
 import re
-
-#: An answer that relabels a locked listed identity as private contradicts the
-#: resolver, which is an identity finding rather than a figure finding.
-_PRIVATE_ASSERTION_RE = re.compile(
-    r"(?:\b(?:is|remains|still)\s+(?:an?\s+)?(?:private company|privately held)\b|"
-    r"\bnot publicly traded\b|\bunlisted company\b|"
-    r"(?:是|仍是|属于)(?:一家)?(?:私人|私营|非上市)公司|未上市|没有上市)",
-    re.IGNORECASE,
-)
 
 # Loader ids are ASCII but the answer follows the user's language, so a source
 # is surfaced by any alias ("数据来源：腾讯财经" for ``tencent``).
@@ -444,29 +437,7 @@ class _PolicyMixin:
                     ),
                 }
             )
-        listed = [
-            record
-            for record in self._identities.values()
-            if record.status == "locked"
-            and record.instrument_type in {"listed_security", "fund"}
-        ]
-        if listed and _PRIVATE_ASSERTION_RE.search(content):
-            symbols = sorted(record.symbol for record in listed if record.symbol)
-            issues.append(
-                {
-                    "code": "listed_identity_relabelled_private",
-                    "symbols": symbols,
-                    "value": None,
-                    "role": None,
-                    "span": None,
-                    "symbol": None,
-                    "reason": "listed_relabelled_private",
-                    "message": (
-                        f"Locked listed identity {', '.join(symbols)} was relabelled as "
-                        "private/unlisted without a conflicting resolver result."
-                    ),
-                }
-            )
+        issues.extend(GROUNDING_CHECKS.run("listed-identity-relabelled-private", self, content))
         return issues
 
     def _validate_figures(

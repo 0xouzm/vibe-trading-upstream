@@ -402,6 +402,39 @@ def test_feishu_pristine_form_roundtrip_validates_for_typed_fields(
     assert "probe-token-do-not-leak" not in response.text
 
 
+def test_email_pristine_form_roundtrip_normalizes_nullable_text_fields(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The generic form must not turn nullable Email fields into invalid blanks."""
+    client, path = _client(
+        tmp_path, monkeypatch, channels={"email": _email_section()}
+    )
+    entry = client.get("/channels/config").json()["channels"]["email"]
+
+    patch: dict[str, Any] = {}
+    for field in entry["fields"]:
+        if field["secret"]:
+            continue
+        value = entry["values"].get(field["key"])
+        if field["type"] == "list":
+            patch[field["key"]] = value if isinstance(value, list) else []
+        elif field["type"] == "bool":
+            patch[field["key"]] = bool(value)
+        else:
+            patch[field["key"]] = "" if value is None else str(value)
+
+    patch["max_attachments_per_email"] = "4"
+
+    response = client.put("/channels/config/email", json={"config": patch})
+
+    assert response.status_code == 200, response.text
+    on_disk = json.loads(path.read_text(encoding="utf-8"))["channels"]["email"]
+    assert on_disk["max_attachments_per_email"] == "4"
+    assert on_disk["post_action"] is None
+    assert on_disk["post_action_move_mailbox"] is None
+    assert EMAIL_IMAP_PASSWORD not in response.text
+    assert EMAIL_SMTP_PASSWORD not in response.text
+
 def test_display_config_path_relativizes_home() -> None:
     home = Path.home()
 

@@ -943,6 +943,8 @@ class AgentLoop:
                 ),
             )
         self._llm_runtime = runtime_snapshot
+        self._active_model_id = runtime_snapshot.configured_model
+        self._active_model_source = "configured"
         self.memory = memory or WorkspaceMemory()
         self._event_callback = event_callback
         self.max_iterations = max_iterations
@@ -2007,6 +2009,12 @@ class AgentLoop:
                 messages.append(assistant_message)
 
                 # Execute tools with read/write batching
+                self._active_model_id = (
+                    current_response_model or self._llm_runtime.configured_model
+                )
+                self._active_model_source = (
+                    "provider_response" if current_response_model else "configured"
+                )
                 compact_requested, focus_topic = self._process_tool_calls(
                     response.tool_calls, context, messages, trace, react_trace, current_iter,
                 )

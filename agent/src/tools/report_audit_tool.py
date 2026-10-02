@@ -34,11 +34,13 @@ from src.agent.tools import BaseTool
 
 _KV_LABEL_RE = re.compile(
     r"(?P<label>[一-龥A-Za-z][^|\n：:*]{1,30})[：:]\s*[~约]?\$?"
-    r"(?P<num>[\d,，.]+)\s*"
+    r"(?P<open>[（(])?(?P<num>[\d,，.]+)(?(open)[）)])\s*"
     r"(?P<unit>亿[元美港]?元?|万亿|[xX倍]|%|[BMT])?"
 )
 
-_NUMUNIT_RE = re.compile(r"[~约]?\$?([\d,，.]+)\s*(亿[元美港]?元?|万亿|[xX倍]|%|[BMT])?")
+_NUMUNIT_RE = re.compile(
+    r"[~约]?\$?([（(])?([\d,，.]+)(?(1)[）)])\s*(亿[元美港]?元?|万亿|[xX倍]|%|[BMT])?"
+)
 _TABLE_SEP_RE = re.compile(r"^\|[\-\s|:]+\|$")
 
 _SKIP_LABELS = {
@@ -119,8 +121,12 @@ def _parse_md_tables(lines: list[str]) -> list[tuple[str, str, float, str, int, 
                         )
                         m = _NUMUNIT_RE.search(cell)
                         if m:
-                            val = _clean_num(m.group(1))
-                            unit = (m.group(2) or "").strip()
+                            val = _clean_num(m.group(2))
+                            # Tables follow accounting convention: a
+                            # parenthesized number is a negative.
+                            if val is not None and m.group(1):
+                                val = -val
+                            unit = (m.group(3) or "").strip()
                             if val and val != 0 and val < 1e15:
                                 results.append((row_label, col_header, val, unit, i + 1, dline))
                     i += 1
@@ -190,9 +196,16 @@ def extract_data_points(md_text: str) -> list[dict[str, Any]]:
         if "|" in stripped:
             continue  # handled as a table above
         for m in _KV_LABEL_RE.finditer(stripped):
+            if m.group("open") and not m.group("unit"):
+                # A parenthesized bare number in prose is a year ("(2024)"),
+                # not a negative. Only a trailing unit makes it accounting.
+                continue
+            val = _clean_num(m.group("num"))
+            if val is not None and m.group("open"):
+                val = -val
             _add(
                 m.group("label"),
-                _clean_num(m.group("num")),
+                val,
                 (m.group("unit") or "").strip(),
                 lineno,
                 stripped,

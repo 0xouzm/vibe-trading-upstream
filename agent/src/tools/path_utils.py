@@ -17,19 +17,26 @@ All helpers raise ``ValueError`` on rejection — callers already expect this.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from src.config.accessor import get_env_config
 
 _ALLOWED_FILE_ROOTS_ENV = "VIBE_TRADING_ALLOWED_FILE_ROOTS"
 _ALLOWED_RUN_ROOTS_ENV = "VIBE_TRADING_ALLOWED_RUN_ROOTS"
+_ALLOWED_WRITE_ROOTS_ENV = "VIBE_TRADING_ALLOWED_WRITE_ROOTS"
 
 # MCP clients spawn the server themselves, so a shell export never reaches it.
 _ENV_SCOPE_HINT = (
     "Under an MCP client, set it in that client's server env block — "
     "exporting it in a shell does not reach the spawned server."
 )
+
+# The env var that widens each resolve_safe_path purpose; rejections name it
+# so the escape hatch is discoverable from the error itself.
+_PURPOSE_ENV_HINTS = {
+    "write": _ALLOWED_WRITE_ROOTS_ENV,
+    "file": _ALLOWED_FILE_ROOTS_ENV,
+}
 
 
 def _describe_roots(roots: list[Path]) -> str:
@@ -144,9 +151,6 @@ def allowed_file_roots() -> list[Path]:
     return roots
 
 
-_ALLOWED_WRITE_ROOTS_ENV = "VIBE_TRADING_ALLOWED_WRITE_ROOTS"
-
-
 def allowed_write_roots() -> list[Path]:
     """Return all roots allowed for file writes and edits."""
     raw = get_env_config().api.vibe_trading_allowed_write_roots
@@ -205,6 +209,9 @@ def resolve_safe_path(
     """
     _rejects_unc(file_path)
 
+    hint_env = _PURPOSE_ENV_HINTS.get(purpose)
+    hint = f"\nSet {hint_env} to add a directory. {_ENV_SCOPE_HINT}" if hint_env else ""
+
     # Try resolving against run_dir if provided
     if run_dir:
         try:
@@ -226,7 +233,8 @@ def resolve_safe_path(
                 if candidate.is_relative_to(root):
                     return candidate
             raise ValueError(
-                f"Path {file_path!r} escapes run_dir {run_dir!r} and is not in allowed {purpose} roots."
+                f"Path {file_path!r} escapes run_dir {run_dir!r} and is not in allowed {purpose} roots.\n"
+                f"{_describe_roots(allowed_roots)}{hint}"
             ) from exc
 
     # If no run_dir, path must resolve inside one of the allowed roots
@@ -236,7 +244,8 @@ def resolve_safe_path(
             return candidate
 
     raise ValueError(
-        f"run_dir is required to write/edit {file_path!r}, or the path must resolve inside allowed {purpose} roots."
+        f"run_dir is required to write/edit {file_path!r}, or the path must resolve inside allowed {purpose} roots.\n"
+        f"{_describe_roots(allowed_roots)}{hint}"
     )
 
 

@@ -60,10 +60,14 @@ MAX_EVIDENCE = 3
 EVIDENCE_TEXT_LIMIT = 200
 
 _URL_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+.\-]*://\S+")
-_PATH_RE = re.compile(r"(?:[A-Za-z]:\\[^\s]+)|(?:\\\\[^\s]+)|(?:/[\w.@+.-]+)+/?")
+# Filesystem paths may contain spaces: partial replacement can expose names.
+# Omit those warnings entirely; slashes inside market symbols remain sanitizable.
+_FILESYSTEM_PATH_RE = re.compile(r"(?<![A-Za-z0-9])(?:/|[A-Za-z]:[\\/]|\\\\)")
+_PATH_RE = re.compile(r"/[^\s]+")
 _CREDENTIAL_RE = re.compile(
-    r"\b[\w-]*(?:token|secret|password|passwd|api[-_]?key|private[-_]?key)[\w-]*\s*[=:]\s*\S+"
-    r"|\bbearer\s+\S+"
+    r"[\"']?\b[\w-]*(?:token|secret|password|passwd|api[-_]?key|private[-_]?key)[\w-]*[\"']?"
+    r"\s*[=:]\s*(?:\"(?:\\.|[^\"])*(?:\"|$)|'(?:\\.|[^'])*(?:'|$)|\S+)"
+    r"|\b(?:bearer|basic)\s+\S+"
     r"|\b(?:gh[pousr]_|github_pat_|sk-|xox[baprs]-)[\w-]{8,}",
     re.IGNORECASE,
 )
@@ -76,13 +80,17 @@ def sanitize_evidence(text: str) -> str | None:
         text: A log message emitted by a loader.
 
     Returns:
-        The message with URLs, filesystem paths (single-segment included) and
-        credential-shaped values replaced by placeholders and whitespace
-        collapsed, or ``None`` when the result still carries a URL or path
-        separator — an unclassifiable message is dropped rather than reported,
-        because this artifact is public.
+        The message with URLs and credential-shaped values redacted and
+        whitespace collapsed, or ``None`` for filesystem paths or when the
+        result still carries an unclassified URL or path separator. An
+        unclassifiable message is dropped because this artifact is public.
     """
-    cleaned = " ".join(_CREDENTIAL_RE.sub("<redacted>", _URL_RE.sub("<url>", text or "")).split())
+    cleaned = _CREDENTIAL_RE.sub("<redacted>", _URL_RE.sub("<url>", text or ""))
+    if _FILESYSTEM_PATH_RE.search(cleaned):
+        return None
+    if "://" in cleaned:
+        return None
+    cleaned = " ".join(cleaned.split())
     cleaned = _PATH_RE.sub("<path>", cleaned)[:EVIDENCE_TEXT_LIMIT].strip()
     if not cleaned or any(marker in cleaned for marker in ("://", "/", "\\")):
         return None

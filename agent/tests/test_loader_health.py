@@ -249,8 +249,12 @@ def test_loader_evidence_is_sanitized(monkeypatch):
     _stub_loader(monkeypatch, "stooq", fetch=fetch)
     result = health.probe("stooq", TODAY)
     report = json.dumps(result)
-    assert result["evidence"] == ["GET <url> failed for <path> with <redacted> from <path>"]
-    assert "example.com" not in report and "abc123" not in report and "/home/" not in report
+    assert "evidence" not in result
+    assert (
+        "example.com" not in report
+        and "abc123" not in report
+        and "/home/" not in report
+    )
 
 
 def test_a_loader_that_logs_then_raises_still_reports_its_reason(monkeypatch):
@@ -266,13 +270,15 @@ def test_a_loader_that_logs_then_raises_still_reports_its_reason(monkeypatch):
     assert result["evidence"] == ["tencent returned an unparsable body"]
 
 
-def test_sanitizer_keeps_single_segment_paths_instead_of_dropping_the_message():
-    """ccxt, mootdx and tushare warn with a lone slash; dropping the line loses the cause."""
+def test_sanitizer_keeps_market_slashes_but_omits_filesystem_paths():
+    """Market symbols remain useful; filesystem paths are omitted, never partially redacted."""
     assert (
-        health.sanitize_evidence("CCXT failed for BTC-USDT: binance does not have market symbol BTC/USDT")
+        health.sanitize_evidence(
+            "CCXT failed for BTC-USDT: binance does not have market symbol BTC/USDT"
+        )
         == "CCXT failed for BTC-USDT: binance does not have market symbol BTC<path>"
     )
-    assert health.sanitize_evidence("cache file /tmp missing, refetching") == "cache file <path> missing, refetching"
+    assert health.sanitize_evidence("cache file /tmp missing, refetching") is None
     assert health.sanitize_evidence("retry 2/3 failed") == "retry 2<path> failed"
 
 
@@ -364,3 +370,71 @@ def test_evidence_survives_the_parent_report(monkeypatch):
         "attempts": 2,
         "evidence": ["stooq is serving an anti-bot challenge page instead of CSV data"],
     }
+
+
+@pytest.mark.parametrize(
+    "warning",
+    [
+        '{"api_key": "synthetic-canary-credential"}',
+        "{'token': 'synthetic-canary-credential'}",
+        'password="synthetic canary credential" rejected',
+        "password='synthetic canary credential' rejected",
+        "Authorization: Basic synthetic-canary-credential",
+        'password="synthetic canary credential',
+        "password='synthetic canary credential",
+        '{"api_key": "synthetic canary credential',
+        "password=synthetic,canary-credential",
+        "password=synthetic;canary-credential",
+        "password=synthetic}canary-credential",
+    ],
+)
+def test_sanitizer_handles_structured_and_quoted_credentials(warning):
+    sanitized = health.sanitize_evidence(warning)
+    assert sanitized is not None
+    assert "synthetic" not in sanitized
+    assert "credential" not in sanitized
+    assert "<redacted>" in sanitized
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/Users/Example User/private-key.pem",
+        "/tmp/[private].pem",
+        '"/Users/Example User/config.json"',
+        r"C:\Users\Example User\config.json",
+        r"\\fileserver\private share\config.json",
+        "(/Users/Example User/private-key.pem)",
+        "path:/Users/Example User/private-key.pem",
+        "path[/Users/Example User/private-key.pem]",
+        "C:/Users/Example User/private-key.pem",
+    ],
+)
+def test_filesystem_warnings_are_omitted_in_full(path):
+    assert health.sanitize_evidence(f"cache file {path} missing") is None
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        '{"api_key": "synthetic-canary-credential"}',
+        'password="synthetic canary credential',
+        "password=synthetic,canary-credential",
+    ],
+)
+def test_real_tencent_warning_path_redacts_a_structured_exception(monkeypatch, message):
+    from backtest.loaders.tencent_loader import DataLoader
+
+    def fetch_one(self, *args, **kwargs):
+        raise ValueError(message)
+
+    monkeypatch.setattr(DataLoader, "_fetch_one", fetch_one)
+    monkeypatch.setattr(DataLoader, "is_available", lambda self: True)
+    from backtest.loaders.registry import LOADER_REGISTRY
+
+    monkeypatch.setitem(LOADER_REGISTRY, "tencent", DataLoader)
+    result = health.probe("tencent", TODAY)
+    assert result["status"] == "invalid"
+    assert result["attempts"] == 2
+    assert "synthetic" not in json.dumps(result)
+    assert "<redacted>" in result["evidence"][0]

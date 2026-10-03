@@ -223,14 +223,30 @@ def _file_sha256(path: Path) -> str | None:
         return None
 
 
-def _archive_source(root: Path) -> str | None:
-    """The run directory name the active run's archived backtest came from."""
+def _archive_matches(root: Path, declared_dir: Path, call_id: str) -> bool:
+    """Check the engine directory and call that produced an archived result.
+
+    Args:
+        root: Active run holding the archive manifest.
+        declared_dir: Source run directory declared by the backtest call.
+        call_id: Exact successful engine tool call.
+
+    Returns:
+        Whether the archive was created for this directory and call.
+    """
     try:
         payload = json.loads((root / ARCHIVE_MANIFEST).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    source = payload.get("source_run") if isinstance(payload, dict) else None
-    return str(source) if source else None
+        return False
+    if not isinstance(payload, dict) or payload.get("source_call_id") != call_id:
+        return False
+    source = payload.get("source_run_dir")
+    if not isinstance(source, str) or not source:
+        return False
+    try:
+        return Path(source).resolve() == declared_dir.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
 
 
 def _run_card_manifest(directory: Path) -> dict[str, str]:
@@ -703,47 +719,33 @@ class _EvidenceMixin:
         root = self.run_dir.resolve()
         candidates: list[Path] = []
         own_dir: Path | None = None
-        declared_name: str | None = None
         raw_dir = arguments.get("run_dir") or payload.get("run_dir")
+        declared = root
         if raw_dir:
             declared = Path(str(raw_dir))
-            declared_name = declared.name
-            candidate = declared if declared.is_absolute() else self.run_dir / declared
+            declared = declared if declared.is_absolute() else self.run_dir / declared
             try:
-                resolved = candidate.resolve()
+                resolved = declared.resolve()
                 if resolved == root or resolved.is_relative_to(root):
                     candidates.append(resolved)
                     own_dir = resolved
-            except OSError:
+            except (OSError, RuntimeError, ValueError):
                 pass
-        # The loop archives a detached backtest's artifacts into the active run
-        # dir right after it succeeds, so that copy is the second candidate — but
-        # only once the archive names the directory this call declared. A
-        # detached backtest's own dir sits outside the active run, so there the
-        # declared *name* is the only thing tying the archived copy to this call.
-        candidates.append(root)
+        else:
+            own_dir = root
+            candidates.append(root)
+        # The loop copies detached output before ingesting this result. The
+        # archive must name the full directory AND this call, since basenames
+        # collide and one directory can be backtested repeatedly in a turn.
         archived = (
-            declared_name is not None
-            and own_dir != root
-            and _archive_source(root) == declared_name
+            own_dir != root
+            and not self._is_model_written(root / ARCHIVE_MANIFEST)
+            and _archive_matches(root, declared, call_id)
         )
-        if declared_name is not None and own_dir != root and not archived:
-            candidates = [
-                item
-                for item in candidates
-                if own_dir is not None and item.is_relative_to(own_dir)
-            ]
-        artifacts = payload.get("artifacts")
-        if isinstance(artifacts, dict):
-            for path_value in artifacts.values():
-                if not isinstance(path_value, str):
-                    continue
-                try:
-                    resolved = Path(path_value).resolve()
-                    if resolved.is_relative_to(root):
-                        candidates.append(resolved)
-                except OSError:
-                    continue
+        if archived:
+            candidates.append(root)
+        # Only canonical engine metric locations count. A result's explicit
+        # artifact path cannot reintroduce an unrelated run or arbitrary CSV.
         files: list[Path] = []
         seen_dirs: set[Path] = set()
         for candidate in candidates:
@@ -756,7 +758,7 @@ class _EvidenceMixin:
             for dir_path in (candidate, candidate / "artifacts"):
                 for name in ("metrics.csv", "metrics.json"):
                     target = dir_path / name
-                    if target.is_file():
+                    if target.is_file() and target.resolve().is_relative_to(candidate.resolve()):
                         files.append(target)
         recorded = 0
         seen_files: set[Path] = set()

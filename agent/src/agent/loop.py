@@ -3338,7 +3338,7 @@ class AgentLoop:
                 self._successful_call_keys[tc.id] = recorded_key
             if tc.name == "backtest":
                 try:
-                    _archive_backtest_result(result, self.memory.run_dir)
+                    _archive_backtest_result(result, self.memory.run_dir, source_call_id=tc.id)
                 except OSError as exc:
                     logger.warning("Could not archive backtest output into active run: %s", exc)
             if tc.name in {"write_file", "edit_file"}:

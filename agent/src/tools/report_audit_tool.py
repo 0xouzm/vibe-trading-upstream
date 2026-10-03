@@ -39,7 +39,7 @@ _NUMUNIT_RE = re.compile(
     r"(?P<open>[（(])\s*\$?\s*(?P<account_num>[+\-−]?[\d,，.]+)\s*"
     rf"(?P<inside_unit>{_UNIT_PATTERN})?\s*(?P<close>[）)])\s*"
     rf"(?P<outside_unit>{_UNIT_PATTERN})?"
-    r"|(?P<num>[+\-−]?[\d,，.]+)\s*"
+    r"|(?P<currency_sign>[+\-−])?\s*\$?\s*(?P<num>[+\-−]?[\d,，.]+)\s*"
     rf"(?P<unit>{_UNIT_PATTERN})?)"
 )
 _TABLE_SEP_RE = re.compile(r"^\|[\-\s|:]+\|$")
@@ -100,6 +100,12 @@ def _report_value(text: str, *, prose: bool = False) -> tuple[float, str, int] |
             value = -abs(value)
     else:
         value = _clean_num(match.group("num"))
+        sign = match.group("currency_sign")
+        if sign:
+            if match.group("num").startswith(("+", "-", "−")):
+                return None
+            if value is not None and sign in {"-", "−"}:
+                value = -value
         unit = match.group("unit") or ""
     if value is None or not math.isfinite(value):
         return None

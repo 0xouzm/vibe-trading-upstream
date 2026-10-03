@@ -122,11 +122,14 @@ class TurnoverAwareOptimizer(BaseOptimizer):
             if group in self.max_per_group:
                 group_cap = self.max_per_group[group]
                 cap = min(cap, group_cap) if cap is not None else group_cap
-            if cap is not None and (pos[code].abs() > cap + 1e-7).any():
-                raise ValueError(
-                    "single-asset allocation exceeds exposure caps "
-                    f"for {code}: maximum permitted weight is {cap:.6g}"
-                )
+            if cap is not None:
+                if not np.isfinite(pos[code]).all():
+                    raise ValueError("capped single-asset allocations must be finite")
+                if (pos[code].abs() > cap + 1e-7).any():
+                    raise ValueError(
+                        "single-asset allocation exceeds exposure caps "
+                        f"for {code}: maximum permitted weight is {cap:.6g}"
+                    )
         return super().optimize(ret, pos, dates)
 
     def _build_context(

@@ -7,6 +7,15 @@ import pytest
 from backtest.optimizers.turnover_aware import TurnoverAwareOptimizer
 
 
+@pytest.mark.parametrize("weight", [np.nan, np.inf, -np.inf])
+def test_explicit_singleton_cap_rejects_nonfinite_weights(weight: float) -> None:
+    dates = pd.date_range("2025-01-01", periods=1)
+    pos = pd.DataFrame({"AAA": [weight]}, index=dates)
+    optimizer = TurnoverAwareOptimizer(max_per_name=0.4)
+    with pytest.raises(ValueError):
+        optimizer.optimize(pos * 0, pos, dates)
+
+
 @pytest.mark.parametrize("direction", [1.0, -1.0])
 @pytest.mark.parametrize(
     "caps",

@@ -103,7 +103,7 @@ def _rehome_artifact_paths(
     """Copy a kept task's run-relative artifacts into *target_run_dir*.
 
     Workers persist artifacts as POSIX paths relative to the run directory
-    (``artifacts/<agent>/<file>``; see ``worker._collect_artifacts``). A
+    (``artifacts/<agent>/<task>/<file>``; see ``worker._collect_artifacts``). A
     resumed run must not reference the old run's directory — the old run
     stays as a record and may be deleted later.
 

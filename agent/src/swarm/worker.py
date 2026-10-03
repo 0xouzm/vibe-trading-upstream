@@ -435,10 +435,10 @@ def agent_artifact_dir(run_dir: Path, agent_id: str, task_id: str) -> Path:
             f"Invalid swarm agent/task id {agent_id!r}/{task_id!r}: artifact "
             "path escapes the run artifacts directory"
         ) from exc
-    if len(relative.parts) != 2:
+    if relative.parts != (agent_id, task_id):
         raise ValueError(
             f"Invalid swarm agent/task id {agent_id!r}/{task_id!r}: artifact "
-            "path must be two levels below the run artifacts directory"
+            "path must preserve its agent and task below the run artifacts directory"
         )
     return artifact_dir
 
@@ -549,7 +549,7 @@ def _run_worker_impl(
       2. Build system prompt with role + upstream summaries + filtered skills
       3. Resolve task.prompt_template with user_vars
       4. Run ReAct loop (for iteration in range(max_iterations))
-      5. Write summary to artifacts/{agent_id}/summary.md
+      5. Write summary to artifacts/{agent_id}/{task_id}/summary.md
       6. Return WorkerResult
 
     Args:
@@ -1332,7 +1332,7 @@ def _finalize_run(artifact_dir: Path, summary: str, messages: list[dict]) -> Non
     unchanged.
 
     Args:
-        artifact_dir: Path to artifacts/{agent_id}/ directory.
+        artifact_dir: Path to artifacts/{agent_id}/{task_id}/ directory.
         summary: Final summary text for this worker run.
         messages: Message history, including tool call arguments.
     """
@@ -1356,7 +1356,7 @@ def _write_summary(artifact_dir: Path, summary: str) -> None:
     """Write worker summary to artifacts directory.
 
     Args:
-        artifact_dir: Path to artifacts/{agent_id}/ directory.
+        artifact_dir: Path to artifacts/{agent_id}/{task_id}/ directory.
         summary: Summary text to write.
     """
     try:

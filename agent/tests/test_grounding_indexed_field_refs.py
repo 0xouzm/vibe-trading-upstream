@@ -96,6 +96,18 @@ def test_other_elements_value_is_not_authorized_by_an_indexed_ref(
     assert {issue["reason"] for issue in result.issues} == {"not_in_referenced_call"}
 
 
+@pytest.mark.parametrize("dotted", [False, True])
+def test_explicit_leaf_ref_never_hints_a_sibling(tmp_path: Path, dotted: bool) -> None:
+    result = _validate(
+        tmp_path,
+        "The first item contributed -0.87%.",
+        f"-0.87% | observed | first item | {_ref(0, dotted)}",
+    )
+    assert not result.valid
+    candidates = result.issues[0].get("field_ref_candidates") or []
+    assert not any("positions[1]" in ref for ref in candidates)
+
+
 def test_elements_are_not_ambiguous_with_each_other(tmp_path: Path) -> None:
     result = _validate(
         tmp_path,
@@ -123,7 +135,6 @@ def test_dotted_index_does_not_touch_unindexed_or_scalar_refs(tmp_path: Path) ->
     [
         f"{CALL}::data.positions.contribution_pct",
         f"{TOOL}::positions.contribution_pct",
-        f"{CALL}::data.positions.2.contribution_pct",
     ],
 )
 def test_failed_ref_lists_exact_indexed_candidates(tmp_path: Path, ref: str) -> None:
@@ -137,6 +148,15 @@ def test_failed_ref_lists_exact_indexed_candidates(tmp_path: Path, ref: str) -> 
     assert candidates[0] == _ref(0)  # the one matching the figure first
     assert set(candidates) == {_ref(0), _ref(1)}
     assert all(item.startswith(f"{CALL}::data.positions[") for item in candidates)
+
+
+def test_out_of_range_explicit_index_never_selects_or_hints_another_item(tmp_path: Path) -> None:
+    result = _validate(
+        tmp_path, "The missing item contributed 1.23%.",
+        f"1.23% | observed | missing item | {CALL}::data.positions.2.contribution_pct",
+    )
+    assert not result.valid
+    assert not result.issues[0].get("field_ref_candidates")
 
 
 def test_candidates_are_shown_to_the_model_in_the_correction(tmp_path: Path) -> None:

@@ -9,6 +9,18 @@ import pytest
 from src.tools.report_audit_tool import ReportAuditTool, extract_data_points
 
 
+@pytest.mark.parametrize("value", ["-$25M", "−$25M", "- $25M", "$-25M", "($-25M)"])
+@pytest.mark.parametrize("table", [False, True])
+def test_negative_currency_keeps_sign_on_either_side_of_symbol(value: str, table: bool) -> None:
+    report = (
+        f"| Metric | Value |\n|---|---|\n| Net income | {value} |"
+        if table else f"Net income: {value}"
+    )
+    points = extract_data_points(report)
+    assert len(points) == 1
+    assert points[0]["reported_value"] == -25
+
+
 @pytest.mark.parametrize("value", ["-25M", "−25M", "+25M", "25M", "-1,234.5M"])
 @pytest.mark.parametrize("table", [False, True])
 def test_extract_preserves_financial_value_sign(value: str, table: bool) -> None:

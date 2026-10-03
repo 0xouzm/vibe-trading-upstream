@@ -196,7 +196,15 @@ recovered by 2023.06 to a new high of 2.10.
 
 ## Backtest Report Template
 
-After a backtest is completed, read `metrics.csv` and `equity.csv` to generate:
+After a backtest is completed, read the engine-written `metrics.csv` and
+`equity.csv` from that run. Declare reported measurements with the run directory
+or exact engine field as their grounding reference. A metrics file you write
+yourself is not evidence, and a previous run's archive cannot substantiate the
+current call. For list results, use the exact element reference (for example,
+`call_id::data.positions[0].contribution_pct`); correction hints only identify
+candidates to check and cite explicitly.
+
+Use the verified output to generate:
 
 ```markdown
 # Backtest Report: [Strategy Name]

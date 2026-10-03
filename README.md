@@ -666,6 +666,11 @@ Detailed inventories are folded below to keep the main README scannable. Open th
 
 The read-only `report_audit` tool preserves signed financial values in Markdown
 tables and `label: value` lines, so losses are checked as losses rather than profits.
+Backtest reports ground their figures in the engine's own output for that call.
+For list results, equivalent references such as `data.positions[0].contribution_pct`
+and `data.positions.0.contribution_pct` select the same element; an explicit index
+cannot borrow another element's value. Correction hints suggest exact references
+without treating the suggestion itself as evidence.
 
 </details>
 
@@ -1386,6 +1391,12 @@ vibe-trading --swarm-run macro_rates_fx_desk '{"focus": "Fed pivot impact on EM 
 # Resume a failed or cancelled run while keeping its completed tasks
 vibe-trading --swarm-retry <run_id> --swarm-resume
 ```
+
+Each Swarm task keeps its reports, summary and message log under
+`artifacts/<agent_id>/<task_id>/`, so tasks assigned to the same agent retain
+their own output during sequential or parallel execution. Retrying a task clears
+only that task's output; completed task artifacts remain available to downstream
+workers. Resume also preserves artifacts recorded by older runs.
 
 ### Cross-Session Memory
 

@@ -1108,7 +1108,7 @@ class _PolicyMixin:
         return ranked[:_MAX_CALL_REF_CANDIDATES]
 
     def _indexed_field_ref_candidates(
-        self, ref: str, figure: Figure
+        self, ref: str, figure: Figure, symbol: str | None = None
     ) -> list[str]:
         """Exact ``call_id::path[i]`` refs for a ``call::field`` ref that selected no value.
 
@@ -1155,13 +1155,16 @@ class _PolicyMixin:
                     and scope in (call_id, tool)
                 ):
                     continue
-                if record is not None and not self._kind_fits(record, figure):
-                    continue
+                if record is not None:
+                    if symbol and record.symbol and record.symbol != symbol:
+                        continue
+                    if not self._kind_fits(record, figure):
+                        continue
                 item = f"{call_id}::{path}"
                 if below.search(_index_normalized(path)):
                     containers.add(item)
                     found[item] = float(value)
-                elif _INDEX_RE.search(path):
+                elif _INDEX_RE.search(path) and not _INDEX_RE.search(wanted):
                     stripped = _INDEX_RE.sub("", path)
                     if stripped == bare or stripped.endswith("." + bare):
                         found[item] = float(value)
@@ -1600,7 +1603,7 @@ class _PolicyMixin:
                     field_ref_candidates=list(
                         dict.fromkeys(
                             [
-                                *self._indexed_field_ref_candidates(declaration.ref, figure),
+                                *self._indexed_field_ref_candidates(declaration.ref, figure, symbol),
                                 *self._other_call_field_ref_candidates(declaration.ref, symbol, figure),
                             ]
                         )

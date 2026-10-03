@@ -32,6 +32,7 @@ import pytest
 
 from src.agent.grounding import GroundingLedger
 from src.agent.grounding.evidence import ARCHIVE_MANIFEST
+from src.agent.tool_results import _archive_backtest_result
 
 RP = {
     "final_value": 1129817.32,
@@ -398,6 +399,73 @@ def test_stale_active_metrics_are_not_attributed_to_a_detached_backtest(tmp_path
     assert EW["sharpe"] not in recorded
 
 
+@pytest.mark.parametrize("detached", [False, True])
+def test_artifact_path_cannot_bypass_current_backtest_source(tmp_path: Path, detached: bool) -> None:
+    active = tmp_path / "active"
+    _write_backtest(active, EW)
+    declared = tmp_path / "detached" if detached else active / "current"
+    _write_backtest(declared, RP)
+    ledger = GroundingLedger(run_dir=active, user_message="Compare backtests")
+    ledger.ingest_tool_result(
+        tool_name="backtest",
+        arguments={"run_dir": str(declared)},
+        result=json.dumps({
+            "status": "ok", "run_dir": str(declared),
+            "artifacts": {"metrics": str(active / "artifacts" / "metrics.csv")},
+        }),
+        call_id="bt-current", success=True,
+    )
+    recorded = [item["value"] for item in ledger._analysis_metrics]
+    assert EW["sharpe"] not in recorded
+    if not detached:
+        assert RP["sharpe"] in recorded
+
+
+@pytest.mark.parametrize("mismatch", ["directory", "call"])
+def test_archive_identity_includes_full_directory_and_call(tmp_path: Path, mismatch: str) -> None:
+    active = tmp_path / "active"
+    _write_backtest(active, EW)
+    declared = tmp_path / "new" / "same-name"
+    old = tmp_path / "old" / "same-name"
+    _write_backtest(declared, RP)
+    (active / ARCHIVE_MANIFEST).write_text(json.dumps({
+        "source_run": declared.name,
+        "source_run_dir": str(old if mismatch == "directory" else declared),
+        "source_call_id": "old-call" if mismatch == "call" else "new-call",
+    }), encoding="utf-8")
+    ledger = GroundingLedger(run_dir=active, user_message="Compare backtests")
+    _backtest(ledger, declared, "new-call")
+    assert not ledger._analysis_metrics
+
+
+def test_real_engine_archive_is_accepted_only_for_its_own_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VIBE_TRADING_ALLOWED_RUN_ROOTS", str(tmp_path))
+    source, active = tmp_path / "engine", tmp_path / "active"
+    _write_backtest(source, RP)
+    result = json.dumps({"status": "ok", "run_dir": str(source)})
+    assert _archive_backtest_result(result, str(active), source_call_id="bt-engine")
+    ledger = GroundingLedger(run_dir=active, user_message="Compare backtests")
+    _backtest(ledger, source, "bt-stale")
+    assert not ledger._analysis_metrics
+    _backtest(ledger, source, "bt-engine")
+    checked = ledger.validate_final_answer(_declared(
+        "Sharpe 0.694。", "0.694 | observed | Sharpe | bt-engine::sharpe"
+    ))
+    assert checked.valid, checked.issues
+
+
+def test_metrics_symlink_cannot_supply_another_runs_evidence(tmp_path: Path) -> None:
+    active, sibling = tmp_path / "active", tmp_path / "sibling"
+    _write_backtest(sibling, RP)
+    (active / "artifacts").mkdir(parents=True)
+    (active / "artifacts" / "metrics.csv").symlink_to(sibling / "artifacts" / "metrics.csv")
+    ledger = GroundingLedger(run_dir=active, user_message="Compare backtests")
+    _backtest(ledger, active, "bt-active")
+    assert not ledger._analysis_metrics
+
+
 def test_a_detached_backtest_cannot_inherit_the_active_runs_copy(tmp_path: Path) -> None:
     """A run dir outside the active run has no claim on what that dir holds.
 
@@ -438,7 +506,7 @@ def test_a_detached_backtests_archived_copy_counts_once_vouched_for(tmp_path: Pa
         target.write_bytes((detached / "artifacts" / name).read_bytes())
     (active / "run_card.json").write_bytes((detached / "run_card.json").read_bytes())
     (active / ARCHIVE_MANIFEST).write_text(
-        json.dumps({"source_run": detached.name}), encoding="utf-8"
+        json.dumps({"source_run": detached.name, "source_run_dir": str(detached.resolve()), "source_call_id": "bt-detached"}), encoding="utf-8"
     )
     ledger = GroundingLedger(run_dir=active, user_message="回测")
 
@@ -459,29 +527,29 @@ def test_the_active_runs_copy_belongs_to_the_backtest_the_archive_names(tmp_path
     _write_backtest(tmp_path / "rp", RP)
     _write_backtest(tmp_path / "ew", EW)
 
-    def archive(source: str) -> None:
+    def archive(source: str, call_id: str) -> None:
         for name in ("metrics.csv", "risk_xray.json", "validation.json"):
             target = tmp_path / "artifacts" / name
             target.parent.mkdir(exist_ok=True)
             target.write_bytes((tmp_path / source / "artifacts" / name).read_bytes())
         (tmp_path / "run_card.json").write_bytes((tmp_path / source / "run_card.json").read_bytes())
-        (tmp_path / ARCHIVE_MANIFEST).write_text(json.dumps({"source_run": source}), encoding="utf-8")
+        (tmp_path / ARCHIVE_MANIFEST).write_text(json.dumps({"source_run": source, "source_run_dir": str((tmp_path / source).resolve()), "source_call_id": call_id}), encoding="utf-8")
 
     def copy_says(value: str) -> bool:
         return ledger.validate_final_answer(
             _declared(f"Sortino {value}。", f"{value} | observed | Sortino | artifacts/metrics.csv")
         ).valid
 
-    archive("ew")  # an earlier archive: not rp's output, and not credited to rp
+    archive("ew", "earlier-call")  # an earlier archive: not rp's output, and not credited to rp
     _backtest(ledger, tmp_path / "rp", "bt-rp")
     assert not copy_says("1.133")
     assert not copy_says("1.212")
 
-    archive("rp")
+    archive("rp", "bt-rp-2")
     _backtest(ledger, tmp_path / "rp", "bt-rp-2")
     assert copy_says("1.133")
 
-    archive("ew")
+    archive("ew", "bt-ew")
     _backtest(ledger, tmp_path / "ew", "bt-ew")
     assert copy_says("1.212")
     assert not copy_says("1.133")

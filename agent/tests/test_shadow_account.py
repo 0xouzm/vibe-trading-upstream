@@ -1094,14 +1094,13 @@ def test_pdf_degrades_to_html_only_when_both_engines_fail(
 
 
 @pytest.mark.unit
-def test_reportlab_fallback_reuses_helvetica_when_no_cjk_font(
+def test_reportlab_fallback_embeds_bundled_font_when_no_system_font(
     profitable_journal: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """On a fontless host every render must keep using Helvetica.
+    """A fontless host embeds the bundled font on every render.
 
-    The first probe registers nothing, so a cached "probed" flag that reports
-    the CJK family name would hand platypus an unregistered font on the next
-    render (CI hit exactly this on the second reportlab test in a process).
+    Both reports must use the registered embedded family; a successful parse
+    alone cannot prove that an unembedded CID font renders in a PDF reader.
     """
     from src.shadow_account import pdf_fallback, reporter
 
@@ -1113,7 +1112,7 @@ def test_reportlab_fallback_reuses_helvetica_when_no_cjk_font(
 
     first = reporter.render_shadow_report(profile, result, output_dir=tmp_path / "a")
     assert first["engine"] == "reportlab"
-    assert pdf_fallback._ensure_font() == "Helvetica"
+    assert pdf_fallback._ensure_font() == "VibeShadowCJK"
 
     second = reporter.render_shadow_report(profile, result, output_dir=tmp_path / "b")
     assert second["engine"] == "reportlab"

@@ -1104,6 +1104,15 @@ Copy `agent/.env.example` to `agent/.env` and uncomment the provider block you w
 
 **Free data (no key needed):** A-shares via AKShare, HK/US/Canada/UK equities via Yahoo/yfinance, crypto via OKX, 100+ crypto exchanges via CCXT. The system automatically selects the best available source for each market.
 
+**PDF reports:** Ask the agent to save a report as PDF. `write_file` renders a
+`.pdf` target from Markdown/text with an embedded font; it does not need system
+Pango/Cairo or a font download. The Web chat provides an authenticated download
+link, and IM channels that support files receive the PDF as an attachment.
+External folders must be listed in `VIBE_TRADING_ALLOWED_WRITE_ROOTS`. Successful
+writes return the resolved path and byte count; a rejected path does not forbid
+other allowed folders. Generated downloads are staged under
+`~/.vibe-trading/generated_reports/` (or `VIBE_TRADING_HOME/generated_reports/`).
+
 ### 🎯 Recommended Models
 
 Vibe-Trading is a tool-heavy agent — skills, backtests, memory, and swarms all flow through tool calls. Model choice directly decides whether the agent *uses* its tools or fabricates answers from training data.

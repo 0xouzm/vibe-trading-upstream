@@ -46,7 +46,7 @@ def test_crypto_target_keeps_only_the_assets_the_user_named() -> None:
     )
 
     assert variables["target"] == "ETH, SOL"
-    assert variables["timeframe"] == "medium-term 1-3 months"
+    assert variables["timeframe"] == "3 months"
 
 
 def test_crypto_target_maps_chinese_names_to_symbols() -> None:

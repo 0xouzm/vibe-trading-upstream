@@ -161,8 +161,11 @@ def _rows_to_frame(rows: List[dict]) -> Optional[pd.DataFrame]:
         (adjusted when available), or ``None`` when no usable bar is present.
     """
     dated = [
-        row for row in rows if isinstance(row, dict) and row.get("date") is not None
+        row for row in rows if isinstance(row, dict) and isinstance(row.get("date"), str)
+        and pd.notna(pd.to_datetime(row["date"], utc=True, errors="coerce"))
     ]
+    if len(dated) != len(rows):
+        logger.warning("Tiingo: dropped %d bars with missing/invalid dates", len(rows) - len(dated))
     has_adjusted_data = any(_adjusted_basis(row) is not None for row in dated)
     parsed: List[dict] = []
     dropped = 0
@@ -222,6 +225,7 @@ def _rows_to_frame(rows: List[dict]) -> Optional[pd.DataFrame]:
     frame = frame.drop(columns=["trade_date"])
     frame.index = index.normalize()
     frame.index.name = "trade_date"
+    frame = frame.loc[frame.index.notna()]
 
     frame = frame.apply(pd.to_numeric, errors="coerce")
     # Coerce every OHLCV column to float64 so the schema is uniform: integer
@@ -231,6 +235,9 @@ def _rows_to_frame(rows: List[dict]) -> Optional[pd.DataFrame]:
     frame["volume"] = frame["volume"].fillna(0.0)
     frame = frame.loc[:, _OHLCV_COLUMNS].sort_index()
     frame = frame.dropna(subset=["open", "high", "low", "close"])
+    prices = frame[["open", "high", "low", "close"]]
+    frame = frame.loc[((prices > 0) & (prices < float("inf"))).all(axis=1)]
+    frame.attrs["adjustment"] = "split_dividend" if has_adjusted_data else "raw"
     return frame if not frame.empty else None
 
 

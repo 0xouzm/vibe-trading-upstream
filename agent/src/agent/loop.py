@@ -593,7 +593,7 @@ def _result_data_gone(content: Any) -> bool:
     return _is_cleared(content) or content == _STUB_RESULT_CONTENT
 
 
-def _context_collapse(messages: list) -> None:
+def _context_collapse(messages: list, *, preserve_tool_call_ids: Optional[set[str]] = None) -> None:
     """Layer 2: fold long text blocks in older messages without LLM call.
 
     Preserves head + tail of large text, collapses the middle.
@@ -605,6 +605,8 @@ def _context_collapse(messages: list) -> None:
     if len(messages) <= COLLAPSE_PRESERVE_RECENT + 1:
         return
     for msg in messages[1:-COLLAPSE_PRESERVE_RECENT]:
+        if msg.get("role") == "tool" and msg.get("tool_call_id") in (preserve_tool_call_ids or ()):
+            continue
         content = msg.get("content")
         if not isinstance(content, str) or len(content) <= COLLAPSE_TEXT_MIN:
             continue
@@ -1256,7 +1258,7 @@ class AgentLoop:
                         )
                         tokens = estimate_tokens(messages)
                     if tokens > int(_token_threshold() * 0.7):
-                        _context_collapse(messages)
+                        _context_collapse(messages, preserve_tool_call_ids=self._readonly_replay_visibility_pending)
                         tokens = estimate_tokens(messages)
                     _tok_threshold = _token_threshold()
                     if tokens > _tok_threshold:
@@ -3128,7 +3130,7 @@ class AgentLoop:
             )
             tokens = self._prompt_tokens(messages)
         if tokens > budget.collapse_at:
-            _context_collapse(messages)
+            _context_collapse(messages, preserve_tool_call_ids=self._readonly_replay_visibility_pending)
             tokens = self._prompt_tokens(messages)
         # A summary keeps the static prompt plus a ~20K-token tail, so on a
         # window that small the prompt stays over the line after compacting;
@@ -3405,6 +3407,18 @@ class AgentLoop:
             iteration=iteration,
         )
         preview = trace_result[:200]
+        artifact = None
+        if status == "ok" and tc.name in {"write_file", "render_shadow_report"}:
+            try:
+                payload = json.loads(trace_result)
+                from src.tools.report_artifacts import report_path
+                report_id = payload.get("report_id", "")
+                path = report_path(report_id) if isinstance(report_id, str) else None
+                if path is not None:
+                    artifact = {"report_id": report_id, "filename": path.name,
+                                "download_url": f"/api/reports/{report_id}"}
+            except (ValueError, TypeError, AttributeError, OSError):
+                pass
         react_trace.append({"type": "tool_call", "tool": tc.name, "result_preview": preview})
         self._emit(
             "tool_result",
@@ -3414,6 +3428,7 @@ class AgentLoop:
                 "elapsed_ms": elapsed_ms,
                 "preview": preview,
                 "call_id": tc.id,
+                **({"artifact": artifact} if artifact else {}),
             },
         )
 
@@ -3470,6 +3485,16 @@ class AgentLoop:
             else:
                 logger.warning("Auto compact: nothing to compress (body too small)")
                 return
+
+        # Replayed results are owed one successful writing request. Keep the
+        # entire assistant-call/result pair out of summaries until then.
+        pending = self._readonly_replay_visibility_pending
+        leased = [msg for msg in head if (
+            msg.get("role") == "tool" and msg.get("tool_call_id") in pending
+        ) or any(call.get("id") in pending for call in msg.get("tool_calls") or [])]
+        if leased:
+            head = [msg for msg in head if all(msg is not kept for kept in leased)]
+            tail = leased + tail
 
         # Build focus section
         focus_section = _FOCUS_SECTION.format(topic=focus_topic) if focus_topic else ""

@@ -1336,3 +1336,19 @@ def test_put_websocket_clears_non_secret_token_issue_path(
     on_disk = json.loads(path.read_text(encoding="utf-8"))["channels"]["websocket"]
     assert on_disk["token_issue_path"] == ""
     assert on_disk["token"] == "s3cret-value"
+def test_email_test_normalizes_blank_nullable_fields_without_persisting(tmp_path, monkeypatch):
+    client, path = _client(tmp_path, monkeypatch, channels={"email": _email_section()})
+    before = path.read_bytes()
+    seen = []
+    async def successful_probe(config):
+        seen.append(config.post_action)
+        return {"ok": True, "code": "ok", "detail": "connected", "sdk_available": True}
+    monkeypatch.setattr(email_probe, "test_connection", successful_probe)
+    response = client.post("/channels/email/test", json={"config": {"post_action": "", "max_attachments_per_email": 7}})
+    assert response.status_code == 200 and response.json()["ok"] is True
+    assert seen == [None]
+    assert path.read_bytes() == before
+    response = client.post("/channels/email/test", json={"config": {"post_action": "invalid"}})
+    assert response.status_code == 200 and response.json()["ok"] is False
+    assert response.json()["code"] == "invalid_credentials" and seen == [None]
+    assert response.json()["detail"].startswith("validation_error:")

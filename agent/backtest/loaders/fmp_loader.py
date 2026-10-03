@@ -252,17 +252,15 @@ def _parse_historical(payload: Any) -> Optional[pd.DataFrame]:
     if not historical:
         return None
 
-    has_adjusted_data = any(
-        isinstance(bar, dict)
-        and bar.get("date") is not None
-        and _adjusted_bar(bar) is not None
-        for bar in historical
-    )
+    dated = [bar for bar in historical if isinstance(bar, dict)
+             and isinstance(bar.get("date"), str)
+             and pd.notna(pd.to_datetime(bar["date"], errors="coerce"))]
+    if len(dated) != len(historical):
+        logger.warning("FMP: dropped %d bars with missing/invalid dates", len(historical) - len(dated))
+    has_adjusted_data = any(_adjusted_bar(bar) is not None for bar in dated)
     rows = []
     dropped = 0
-    for bar in historical:
-        if not isinstance(bar, dict) or bar.get("date") is None:
-            continue
+    for bar in dated:
         basis = _adjusted_bar(bar)
         if basis is not None:
             o, h, lo, c = basis
@@ -309,7 +307,8 @@ def _parse_historical(payload: Any) -> Optional[pd.DataFrame]:
         return None
 
     df = pd.DataFrame(rows)
-    df["trade_date"] = pd.to_datetime(df["trade_date"])
+    df["trade_date"] = pd.to_datetime(df["trade_date"], errors="coerce")
+    df = df.dropna(subset=["trade_date"])
     for field in _OHLCV_FIELDS:
         # Cast to float (not just to_numeric) so integer volume from the API
         # does not leave the column int64 and break the float-OHLCV contract.
@@ -317,6 +316,9 @@ def _parse_historical(payload: Any) -> Optional[pd.DataFrame]:
 
     df = df.set_index("trade_date").sort_index()
     df = df[list(_OHLCV_FIELDS)].dropna(subset=["open", "high", "low", "close"])
+    prices = df[["open", "high", "low", "close"]]
+    df = df.loc[((prices > 0) & (prices < float("inf"))).all(axis=1)]
     if df.empty:
         return None
+    df.attrs["adjustment"] = "split_dividend" if has_adjusted_data else "raw"
     return df

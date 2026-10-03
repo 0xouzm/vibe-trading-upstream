@@ -16,7 +16,7 @@ _MARKET_PATTERNS: list[tuple[str, list[str]]] = [
     ("A-shares", [r"A股", r"a股", "沪深", "上证", "深证", "创业板", "科创板", "中证", r"\bCSI\b"]),
     ("crypto", ["加密", r"\bcrypto\b", r"\bBTC\b", r"\bETH\b", "币", "USDT", "数字货币"]),
     ("Hong Kong", ["港股", "恒生", r"H股", "港交所", r"\.HK\b"]),
-    ("US", ["美股", "纳斯达克", "标普", "道琼斯", r"S&P", r"\.US\b"]),
+    ("US", ["美股", "纳斯达克", "标普", "道琼斯", r"S&P", r"\.US\b", r"\bUS\s+(?:equities|stocks?|market)\b", r"\bU\.S\.\s+(?:equities|stocks?|market)\b"]),
 ]
 
 # Risk tolerance for global_allocation_committee (English).
@@ -278,6 +278,37 @@ def _extract_commodity(prompt: str) -> str:
     return "gold"
 
 
+def _explicit_horizon(prompt: str) -> str | None:
+    """Return the exact stated duration rather than a broader default bucket."""
+    numbers = {word: i for i, word in enumerate(
+        ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve")
+    )}
+    numbers.update({word: i for i, word in enumerate("零一二三四五六七八九")})
+    numbers["两"] = 2
+    match = re.search(
+        r"(?<!\d)(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|[一二两三四五六七八九十]+)"
+        r"\s*(?:个)?\s*(days?|weeks?|months?|years?|天|日|周|星期|月|年)",
+        prompt, re.IGNORECASE,
+    )
+    if match:
+        token, unit = match.groups()
+        token = token.lower()
+        if token.isascii() and token.isdecimal():
+            count = int(token)
+        elif "十" in token:
+            tens, ones = token.split("十", 1)
+            count = numbers.get(tens, 1) * 10 + numbers.get(ones, 0)
+        else:
+            count = numbers.get(token, 0)
+        unit = unit.lower()
+        english = {"天": "day", "日": "day", "周": "week", "星期": "week", "月": "month", "年": "year"}.get(unit, unit.rstrip("s"))
+        if count > 0:
+            return f"{count} {english}{'' if count == 1 else 's'}"
+    if re.search(r"半年|half\s*(?:a\s*)?year", prompt, re.IGNORECASE):
+        return "6 months"
+    return None
+
+
 def _extract_horizon(prompt: str) -> str:
     """Extract an investment horizon phrase such as "6 months" or "1 year".
 
@@ -287,19 +318,7 @@ def _extract_horizon(prompt: str) -> str:
     Returns:
         Horizon phrase for commodity_research_team, default 3 months.
     """
-    months = re.search(r"(\d{1,3})\s*(?:个)?\s*(?:months?|月)", prompt, re.IGNORECASE)
-    if months:
-        count = int(months.group(1))
-        return f"{count} month" if count == 1 else f"{count} months"
-    years = re.search(r"(\d{1,3})\s*(?:个)?\s*(?:years?|年)", prompt, re.IGNORECASE)
-    if years:
-        count = int(years.group(1))
-        return f"{count} year" if count == 1 else f"{count} years"
-    if re.search(r"半年|half\s*(?:a\s*)?year", prompt, re.IGNORECASE):
-        return "6 months"
-    if re.search(r"一年|one\s+year", prompt, re.IGNORECASE):
-        return "1 year"
-    return "3 months"
+    return _explicit_horizon(prompt) or "3 months"
 
 
 def _extract_factor_type(prompt: str) -> str:
@@ -364,7 +383,7 @@ def _extract_crypto_target(prompt: str) -> str:
         symbol = match.group(1).upper() if match.group(1) else _CRYPTO_NAME_TO_SYMBOL.get(match.group(2).lower(), "")
         if symbol and symbol not in found:
             found.append(symbol)
-    return ", ".join(found) if found else "BTC, ETH, SOL"
+    return ", ".join(found) if found else prompt.strip() or "BTC, ETH, SOL"
 
 
 def _extract_timeframe(prompt: str) -> str:
@@ -376,13 +395,14 @@ def _extract_timeframe(prompt: str) -> str:
     Returns:
         Timeframe label, default medium-term 1-3 months.
     """
+    explicit = _explicit_horizon(prompt)
+    if explicit:
+        return explicit
     for timeframe, patterns in _TIMEFRAME_PATTERNS:
         for pat in patterns:
             if re.search(pat, prompt, re.IGNORECASE):
                 return timeframe
-    count_text, unit = _extract_horizon(prompt).split()
-    months = int(count_text) * (12 if unit.startswith("year") else 1)
-    return "medium-term 1-3 months" if months <= 3 else "long-term 3-12 months"
+    return "medium-term 1-3 months"
 
 
 def _extract_fund_type(prompt: str) -> str:
@@ -491,5 +511,7 @@ def merge_variables(variables: dict[str, str], overrides: Any) -> tuple[dict[str
         return variables, "variables must be an object of string values"
     merged = dict(variables)
     for key, value in overrides.items():
-        merged[str(key)] = str(value)
+        if not isinstance(key, str) or not isinstance(value, str):
+            return variables, "variables must be an object of string values"
+        merged[key] = value
     return merged, None

@@ -28,6 +28,7 @@ The verdict is a :class:`BreachEvent` whose ``kind`` is one of
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -312,7 +313,7 @@ def _positions_market_value(positions: object) -> float | None:
         if value is None:
             return None
         total += value
-    return total
+    return total if math.isfinite(total) else None
 
 
 def _post_trade_gross_exposure(
@@ -340,7 +341,8 @@ def _post_trade_gross_exposure(
         by_symbol[row_symbol] = by_symbol.get(row_symbol, 0.0) + signed_value
 
     by_symbol[symbol] = by_symbol.get(symbol, 0.0) + signed_order_notional
-    return sum(abs(value) for value in by_symbol.values())
+    gross = sum(abs(value) for value in by_symbol.values())
+    return gross if math.isfinite(gross) else None
 
 
 def _coerce_position_rows(positions: object) -> list[dict] | None:
@@ -400,9 +402,10 @@ def _position_market_value(row: dict) -> float | None:
         if key in row:
             price = _as_float(row[key])
             break
-    if qty is None or price is None:
+    if qty is None or price is None or price <= 0:
         return None
-    return abs(qty) * price
+    value = abs(qty) * price
+    return value if math.isfinite(value) else None
 
 
 def _position_symbol(row: dict) -> str | None:
@@ -458,12 +461,14 @@ def _account_balance_market_value(balance: object) -> float | None:
 
 
 def _as_float(value: object) -> float | None:
-    """Coerce ``value`` to a finite positive-or-zero float, else ``None``."""
+    """Coerce ``value`` to a finite float, else ``None`` (quantity may be signed)."""
+    if isinstance(value, bool):
+        return None
     try:
         out = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
-    if out != out:  # NaN
+    if not math.isfinite(out):
         return None
     return out
 

@@ -37,7 +37,8 @@ def _ensure_font() -> str:
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
-    for path in system_cjk_candidates():
+    bundled = Path(__file__).parent / "assets" / "VibeCJK-Regular.ttf"
+    for path in [bundled, *system_cjk_candidates()]:
         try:
             pdfmetrics.registerFont(TTFont(_FONT_FAMILY, str(path), subfontIndex=0))
         except Exception:
@@ -46,10 +47,9 @@ def _ensure_font() -> str:
         _font_family = _FONT_FAMILY
         return _font_family
 
-    logger.warning("No TrueType CJK font found; PDF fallback uses Helvetica.")
-    _font_ready = True
-    _font_family = "Helvetica"
-    return _font_family
+    # An unembedded CID face can parse correctly yet render as a blank page
+    # in viewers without an Asian language pack. Never return such a PDF.
+    raise RuntimeError("No embeddable CJK font found; reinstall the package's bundled font asset")
 
 
 def _file_uri_to_path(uri: str) -> Path | None:
@@ -102,7 +102,7 @@ def render_pdf_reportlab(
             name, fontName=family, fontSize=size, leading=leading, **kw
         )
 
-    h1 = style("h1", 22, 27, spaceAfter=4 * mm)
+    h1 = style("h1", 22, 27, spaceAfter=4 * mm, keepWithNext=True)
     h2 = style(
         "h2",
         13,
@@ -110,6 +110,7 @@ def render_pdf_reportlab(
         spaceBefore=6 * mm,
         spaceAfter=2.5 * mm,
         textColor=colors.HexColor("#1a1a2e"),
+        keepWithNext=True,
     )
     body = style("body", 9.5, 14)
     muted = style("muted", 8.5, 12, textColor=colors.HexColor("#777777"))

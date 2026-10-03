@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import time
 from typing import Any
@@ -149,6 +148,7 @@ _PRESET_KEYWORDS: list[tuple[str, list[str], float]] = [
             r"\bBTC\b",
             r"\bETH\b",
             r"\bSOL\b",
+            r"\b(?:XRP|BNB|ADA|DOGE|AVAX|DOT|LINK|TON|LTC|MATIC)\b",
             "crypto",
             "bitcoin",
             "加密",
@@ -198,6 +198,10 @@ _PRESET_KEYWORDS: list[tuple[str, list[str], float]] = [
             "商品",
             "原油",
             "黄金",
+            "铜",
+            "铁矿石",
+            "白银",
+            "天然气",
         ],
         0.9,
     ),

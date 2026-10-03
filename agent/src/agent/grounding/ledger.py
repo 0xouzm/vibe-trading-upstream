@@ -21,6 +21,7 @@ from src.agent.grounding.identity import (
 from src.agent.grounding.evidence import EvidenceRecord, _EvidenceMixin, _json_object
 from src.agent.grounding.figures import parse_figures_block, scan_figures, strip_figures_block
 from src.agent.grounding.policies import ValidationResult, _PolicyMixin
+from src.agent.grounding.registry import GROUNDING_CHECKS
 from src.agent.grounding.release import (
     MAX_GROUNDING_RECOVERY_ROUNDS,
     MAX_PRICE_EVIDENCE_ATTEMPTS,
@@ -100,6 +101,14 @@ class GroundingLedger(
         self._symbol_resolution_attempts = 0
         self._price_evidence_attempts = 0
         self._ingested_csvs: set[str] = set()
+        # Per-bar tables completed backtests wrote: resolved path -> (sha256,
+        # backtest scope), so a later read of one can be recognised as engine
+        # output. Files the model wrote itself never qualify.
+        self._engine_tables: dict[str, tuple[str, str]] = {}
+        self._model_written: set[str] = set()
+        # Backtest call -> its run directory, and each directory's latest call.
+        self._backtest_scopes: dict[str, str] = {}
+        self._scope_latest: dict[str, str] = {}
         self._identity_required = bool(_ACTIONABLE_MARKET_RE.search(user_message))
         self._buffer_output = self._identity_required
         # Every instrument this run is entitled to write about: the ones the
@@ -253,16 +262,24 @@ class GroundingLedger(
             self._record_tool_failure(tool_name, call_id, result)
             if tool_name == _RESOLVER_TOOL:
                 self._finish_failed_resolution(arguments, call_id)
+            elif tool_name == "get_market_data" and payload is not None and payload.get("_unresolved"):
+                # A fetch where no symbol returned data is a failed call, but
+                # each symbol is still recorded as unavailable, as it was
+                # when this envelope counted as a success.
+                self._ingest_market_data(arguments, payload, call_id)
             self.persist()
             return
 
         self._track_session_symbols(arguments, result)
+        self._note_model_write(tool_name, arguments, payload)
         if tool_name in _ANALYSIS_TOOLS:
             self._ingest_analysis_result(tool_name, arguments, payload, call_id)
         if tool_name == _RESOLVER_TOOL:
             self._ingest_resolution(arguments, payload, call_id)
         elif tool_name == "get_market_data":
             self._ingest_market_data(arguments, payload, call_id)
+        elif tool_name == "read_file" and payload is not None:
+            self._ingest_engine_table(payload, call_id)
         elif payload is not None:
             self._ingest_generic_numeric(tool_name, arguments, payload, call_id)
         self.persist()
@@ -274,8 +291,9 @@ class GroundingLedger(
             content: Candidate assistant answer.
 
         Returns:
-            A deterministic validation result. A record containing only the
-            answer hash and structured issues is appended to the artifact.
+            A deterministic validation result. A record containing the answer
+            hash, structured issues, and the names of the declared checks that
+            fired is appended to the artifact.
         """
         return self._validate(content, record=True)
 
@@ -332,6 +350,11 @@ class GroundingLedger(
                 "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
                 "valid": result.valid,
                 "issues": issues,
+                # Names let a run card say which declared checks fired without
+                # re-running the gate; inline rules carry codes only until migrated.
+                "fired_checks": GROUNDING_CHECKS.names_for_codes(
+                    {str(issue.get("code") or "") for issue in issues}
+                ),
                 "figures_block": block.raw,
             }
         )

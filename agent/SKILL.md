@@ -1,6 +1,6 @@
 ---
 name: vibe-trading
-version: 0.1.15
+version: 0.1.16
 description: Professional finance research toolkit — backtesting (10 engines + benchmark comparison panel), factor analysis, Alpha Zoo (462 pre-built alphas across qlib158/alpha101/gtja191/academic/fundamental), options pricing, 90 finance skills, 30 multi-agent swarm teams, Trade Journal analyzer, and Shadow Account (extract → backtest → render) across 28 market-data sources (tushare, yfinance, okx, binance, akshare, baostock, tencent, mootdx, ccxt, futu, mt5, tickerall, local, eastmoney, sina, stooq, yahoo, pykrx, india_broker, qveris, longbridge, nobitex, wallex, plus optional-key finnhub/alphavantage/tiingo/fmp/gildata).
 dependencies:
   python: ">=3.11"
@@ -133,7 +133,7 @@ Comprehensive knowledge base covering:
 
 Use `load_skill(name)` to access full methodology docs with code templates.
 
-## Available MCP Tools (74)
+## Available MCP Tools (75)
 
 | Tool | Description | API Key |
 |------|-------------|---------|
@@ -154,6 +154,7 @@ Use `load_skill(name)` to access full methodology docs with code templates.
 | `get_fund_flow` | Capital fund-flow (main/retail net inflow) | None* |
 | `get_dragon_tiger` | Dragon-tiger list (龙虎榜) top buyer/seller seats | None* |
 | `get_northbound_flow` | Northbound (Stock Connect) net flow | None* |
+| `get_southbound_flow` | Southbound (Stock Connect) net buy into HK (Eastmoney/HKEX) | None |
 | `get_margin_trading` | Margin trading & short-selling balances | None* |
 | `get_block_trades` | Block-trade (大宗交易) records | None* |
 | `get_shareholder_count` | Shareholder-count history per symbol | None* |
